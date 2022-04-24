@@ -66,6 +66,10 @@ impl Algebra {
     fn sum(&self) -> u8 {
         self.one + self.zero + self.neg_one
     }
+
+    pub fn blade(&self, set: u32) -> Blade {
+        Blade(BladeSet(set), *self)
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -109,32 +113,43 @@ impl Grade {
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Blade(BladeSet, Algebra);
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct BladeSet(u32);
+impl Blade {
+    pub fn dot(self, rhs: Self) -> (Multiplier, Blade) {
+        let (multiplier, blade) = self * rhs;
 
-impl BladeSet {
-    pub fn contains(&self, index: u8) -> bool {
-        assert!(index > 0, "index cannot be zero (e1 is stored at index 0)");
-        let flag = 1 << (index - 1);
-        self.0 & flag == flag
+        if multiplier == Multiplier::Zero {
+            return (multiplier, blade);
+        }
+
+        let a = self.0.len();
+        let b = rhs.0.len();
+        let max = a.max(b);
+        let min = a.min(b);
+        let grade = max - min;
+
+        if blade.0.len() == grade {
+            (multiplier, blade)
+        } else {
+            (Multiplier::Zero, blade)
+        }
     }
 
-    pub fn insert(&mut self, index: u8) {
-        assert!(index > 0, "index cannot be zero (e1 is stored at index 0)");
-        self.0 |= 1 << (index - 1);
-    }
+    pub fn wedge(self, rhs: Self) -> (Multiplier, Blade) {
+        let (multiplier, blade) = self * rhs;
 
-    pub fn flip(&mut self, index: u8) {
-        let flag = 1 << (index - 1);
-        self.0 ^= flag;
-    }
+        if multiplier == Multiplier::Zero {
+            return (multiplier, blade);
+        }
 
-    pub fn is_empty(&self) -> bool {
-        self.0 == 0
-    }
+        let a = self.0.len();
+        let b = rhs.0.len();
+        let grade = a + b;
 
-    pub fn len(&self) -> u8 {
-        self.0.count_ones() as u8
+        if blade.0.len() == grade {
+            (multiplier, blade)
+        } else {
+            (Multiplier::Zero, blade)
+        }
     }
 }
 
@@ -172,6 +187,35 @@ impl std::ops::Mul for Blade {
         debug_assert!(rhs.0.is_empty());
 
         (multiplier, self)
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct BladeSet(u32);
+
+impl BladeSet {
+    pub fn contains(&self, index: u8) -> bool {
+        assert!(index > 0, "index cannot be zero (e1 is stored at index 0)");
+        let flag = 1 << (index - 1);
+        self.0 & flag == flag
+    }
+
+    pub fn insert(&mut self, index: u8) {
+        assert!(index > 0, "index cannot be zero (e1 is stored at index 0)");
+        self.0 |= 1 << (index - 1);
+    }
+
+    pub fn flip(&mut self, index: u8) {
+        let flag = 1 << (index - 1);
+        self.0 ^= flag;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn len(&self) -> u8 {
+        self.0.count_ones() as u8
     }
 }
 
@@ -267,17 +311,17 @@ mod tests {
 
     #[test]
     fn one_d() {
-        let bases = Algebra::new(1, 0, 0);
-        assert_eq!(Multiplier::One, bases.square(1));
-        assert!(std::panic::catch_unwind(|| bases.square(2)).is_err());
+        let alg = Algebra::new(1, 0, 0);
+        assert_eq!(Multiplier::One, alg.square(1));
+        assert!(std::panic::catch_unwind(|| alg.square(2)).is_err());
     }
 
     #[test]
     fn pga() {
-        let bases = Algebra::new(3, 1, 0);
-        assert_eq!(Multiplier::One, bases.square(3));
-        assert_eq!(Multiplier::Zero, bases.square(4));
-        assert!(std::panic::catch_unwind(|| bases.square(5)).is_err());
+        let alg = Algebra::new(3, 1, 0);
+        assert_eq!(Multiplier::One, alg.square(3));
+        assert_eq!(Multiplier::Zero, alg.square(4));
+        assert!(std::panic::catch_unwind(|| alg.square(5)).is_err());
     }
 
     #[test]
@@ -311,34 +355,58 @@ mod tests {
 
     #[test]
     fn bases_pseudovector() {
-        let g3 = Algebra::new(3, 0, 0);
+        let alg = Algebra::new(3, 0, 0);
 
-        assert_eq!(BladeSet(0b_0111), g3.psuedovector());
+        assert_eq!(BladeSet(0b_0111), alg.psuedovector());
     }
 
     #[test]
     fn grade_blades() {
-        let bases = Algebra::new(3, 1, 0);
+        let alg = Algebra::new(3, 1, 0);
 
-        assert_eq!(1, bases.grade(0).blades().count());
-        assert_eq!(4, bases.grade(1).blades().count());
-        assert_eq!(6, bases.grade(2).blades().count());
-        assert_eq!(4, bases.grade(3).blades().count());
-        assert_eq!(1, bases.grade(4).blades().count());
+        assert_eq!(1, alg.grade(0).blades().count());
+        assert_eq!(4, alg.grade(1).blades().count());
+        assert_eq!(6, alg.grade(2).blades().count());
+        assert_eq!(4, alg.grade(3).blades().count());
+        assert_eq!(1, alg.grade(4).blades().count());
     }
 
     #[test]
     fn blade_multiplication() {
         let alg = Algebra::new(3, 1, 1);
-        let e12 = Blade(BladeSet(0b_0011), alg);
-        let e23 = Blade(BladeSet(0b_0110), alg);
-        let e24 = Blade(BladeSet(0b_1010), alg);
-        let e5 = Blade(BladeSet(0b_1_0000), alg);
+        let e12 = alg.blade(0b_0011);
+        let e23 = alg.blade(0b_0110);
+        let e24 = alg.blade(0b_1010);
+        let e5 = alg.blade(0b_1_0000);
 
-        assert_eq!((Multiplier::NegOne, Blade(BladeSet(0), alg)), e12 * e12);
-        assert_eq!((Multiplier::One, Blade(BladeSet(0b_0101), alg)), e12 * e23);
-        assert_eq!((Multiplier::One, Blade(BladeSet(0b_1001), alg)), e12 * e24);
+        assert_eq!((Multiplier::NegOne, alg.blade(0)), e12 * e12);
+        assert_eq!((Multiplier::One, alg.blade(0b_0101)), e12 * e23);
+        assert_eq!((Multiplier::One, alg.blade(0b_1001)), e12 * e24);
         assert_eq!(Multiplier::Zero, (e24 * e24).0);
-        assert_eq!((Multiplier::NegOne, Blade(BladeSet(0), alg)), e5 * e5);
+        assert_eq!((Multiplier::NegOne, alg.blade(0)), e5 * e5);
+    }
+
+    #[test]
+    fn blade_dot() {
+        let alg = Algebra::new(3, 1, 0);
+        let e12 = alg.blade(0b_0011);
+        let e23 = alg.blade(0b_0110);
+        let e34 = alg.blade(0b_1100);
+
+        assert_eq!((Multiplier::NegOne, alg.blade(0)), e12.dot(e12));
+        assert_eq!((Multiplier::Zero, alg.blade(0b_0101)), e12.dot(e23));
+        assert_eq!((Multiplier::Zero, alg.blade(0b_1111)), e12.dot(e34));
+    }
+
+    #[test]
+    fn blade_wedge() {
+        let alg = Algebra::new(3, 1, 0);
+        let e12 = alg.blade(0b_0011);
+        let e23 = alg.blade(0b_0110);
+        let e34 = alg.blade(0b_1100);
+
+        assert_eq!((Multiplier::Zero, alg.blade(0)), e12.wedge(e12));
+        assert_eq!((Multiplier::Zero, alg.blade(0b_0101)), e12.wedge(e23));
+        assert_eq!((Multiplier::One, alg.blade(0b_1111)), e12.wedge(e34));
     }
 }
