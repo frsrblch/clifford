@@ -62,6 +62,12 @@ fn zero() -> TokenStream {
                 Zero
             }
         }
+
+        impl const From<Zero> for f64 {
+            fn from(_: Zero) -> f64 {
+                0.0
+            }
+        }
     }
 }
 
@@ -135,7 +141,7 @@ impl Blade {
             };
 
             quote! {
-                impl std::ops::Mul<#rhs_ty> for #ty {
+                impl const std::ops::Mul<#rhs_ty> for #ty {
                     type Output = #output_ty;
                     fn mul(self, #rhs_ident: #rhs_ty) -> Self::Output {
                         #expr
@@ -145,31 +151,43 @@ impl Blade {
         });
 
         quote! {
-            #[derive(Debug, Default, Copy, Clone, PartialEq, PartialOrd)]
+            #[derive(Default, Copy, Clone, PartialEq, PartialOrd)]
             pub struct #ty(f64);
 
-            impl std::ops::Neg for #ty {
+            impl const From<Zero> for #ty {
+                fn from(_: Zero) -> #ty {
+                    #ty(0.)
+                }
+            }
+
+            impl std::fmt::Debug for #ty {
+                fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    write!(f, "{:?}", self.0)
+                }
+            }
+
+            impl const std::ops::Neg for #ty {
                 type Output = #ty;
                 fn neg(self) -> #ty {
                     Self(-self.0)
                 }
             }
 
-            impl std::ops::Mul<f64> for #ty {
+            impl const std::ops::Mul<f64> for #ty {
                 type Output = #ty;
                 fn mul(self, rhs: f64) -> #ty {
                     #ty(self.0 * rhs)
                 }
             }
 
-            impl std::ops::Mul<#ty> for f64 {
+            impl const std::ops::Mul<#ty> for f64 {
                 type Output = #ty;
                 fn mul(self, rhs: #ty) -> #ty {
                     #ty(self * rhs.0)
                 }
             }
 
-            impl std::ops::Mul<Zero> for #ty {
+            impl const std::ops::Mul<Zero> for #ty {
                 type Output = Zero;
                 fn mul(self, rhs: Zero) -> Zero {
                     rhs
@@ -178,28 +196,28 @@ impl Blade {
 
             #(#mul_blades)*
 
-            impl std::ops::Add<Zero> for #ty {
+            impl const std::ops::Add<Zero> for #ty {
                 type Output = #ty;
                 fn add(self, _rhs: Zero) -> #ty {
                     self
                 }
             }
 
-            impl std::ops::Sub<Zero> for #ty {
+            impl const std::ops::Sub<Zero> for #ty {
                 type Output = #ty;
                 fn sub(self, _rhs: Zero) -> #ty {
                     self
                 }
             }
 
-            impl std::ops::Add for #ty {
+            impl const std::ops::Add for #ty {
                 type Output = #ty;
                 fn add(self, rhs: #ty) -> #ty {
                     #ty(self.0 + rhs.0)
                 }
             }
 
-            impl std::ops::Sub for #ty {
+            impl const std::ops::Sub for #ty {
                 type Output = #ty;
                 fn sub(self, rhs: #ty) -> #ty {
                     #ty(self.0 - rhs.0)
@@ -262,6 +280,12 @@ impl Grade {
             quote! { #f: #ty(#f), }
         });
 
+        let zero_fields = self.blades().map(|b| {
+            let f = b.field();
+            let ty = b.type_ident();
+            quote! { #f: #ty::from(Zero), }
+        });
+
         let neg_fields = self.blades().map(|b| {
             let f = b.field();
             quote! { #f: -self.#f, }
@@ -270,6 +294,21 @@ impl Grade {
         let add_self_fields = self.blades().map(|b| {
             let f = b.field();
             quote! { #f: self.#f + rhs.#f, }
+        });
+
+        let sub_self_fields = self.blades().map(|b| {
+            let f = b.field();
+            quote! { #f: self.#f - rhs.#f, }
+        });
+
+        let mul_f64_fields = self.blades().map(|b| {
+            let f = b.field();
+            quote! { #f: self.#f * rhs, }
+        });
+
+        let f64_mul_fields = self.blades().map(|b| {
+            let f = b.field();
+            quote! { #f: self * rhs.#f, }
         });
 
         let type_ops = self.algebra().types().into_iter().flat_map(|t| {
@@ -290,7 +329,7 @@ impl Grade {
             }
 
             impl #ty {
-                pub fn new(
+                pub const fn new(
                     #(#new_fn_fields,)*
                 ) -> Self {
                     Self {
@@ -299,7 +338,15 @@ impl Grade {
                 }
             }
 
-            impl std::ops::Neg for #ty {
+            impl const From<Zero> for #ty {
+                fn from(_: Zero) -> #ty {
+                    Self {
+                        #(#zero_fields)*
+                    }
+                }
+            }
+
+            impl const std::ops::Neg for #ty {
                 type Output = #ty;
                 fn neg(self) -> Self {
                     Self {
@@ -308,7 +355,7 @@ impl Grade {
                 }
             }
 
-            impl std::ops::Add for #ty {
+            impl const std::ops::Add for #ty {
                 type Output = Self;
                 fn add(self, rhs: Self) -> Self {
                     Self {
@@ -317,17 +364,44 @@ impl Grade {
                 }
             }
 
-            impl std::ops::Add<Zero> for #ty {
+            impl const std::ops::Add<Zero> for #ty {
                 type Output = Self;
                 fn add(self, _rhs: Zero) -> Self {
                     self
                 }
             }
 
-            impl std::ops::Sub<Zero> for #ty {
+            impl const std::ops::Sub for #ty {
+                type Output = Self;
+                fn sub(self, rhs: Self) -> Self {
+                    Self {
+                        #(#sub_self_fields)*
+                    }
+                }
+            }
+
+            impl const std::ops::Sub<Zero> for #ty {
                 type Output = Self;
                 fn sub(self, _rhs: Zero) -> Self {
                     self
+                }
+            }
+
+            impl const std::ops::Mul<f64> for #ty {
+                type Output = Self;
+                fn mul(self, rhs: f64) -> Self {
+                    Self {
+                        #(#mul_f64_fields)*
+                    }
+                }
+            }
+
+            impl const std::ops::Mul<#ty> for f64 {
+                type Output = #ty;
+                fn mul(self, rhs: #ty) -> Self::Output {
+                    #ty {
+                        #(#f64_mul_fields)*
+                    }
                 }
             }
 
@@ -366,6 +440,27 @@ impl SubAlgebra {
             quote! { pub #f: #ty, }
         });
 
+        let new_fn_fields = self.blades().map(|b| {
+            let f = b.field();
+            quote! { #f: f64 }
+        });
+
+        let new_fn_struct_fields = self.blades().map(|b| {
+            let f = b.field();
+            let ty = b.type_ident();
+            if b == self.algebra().scalar() {
+                quote! { #f, }
+            } else {
+                quote! { #f: #ty(#f), }
+            }
+        });
+
+        let zero_fields = self.blades().map(|b| {
+            let f = b.field();
+            let ty = b.type_ident();
+            quote! { #f: #ty::from(Zero), }
+        });
+
         let neg_fields = self.blades().map(|b| {
             let f = b.field();
             quote! { #f: -self.#f, }
@@ -379,6 +474,16 @@ impl SubAlgebra {
         let sub_self_fields = self.blades().map(|b| {
             let f = b.field();
             quote! { #f: self.#f - rhs.#f, }
+        });
+
+        let mul_f64_fields = self.blades().map(|b| {
+            let f = b.field();
+            quote! { #f: self.#f * rhs, }
+        });
+
+        let f64_mul_fields = self.blades().map(|b| {
+            let f = b.field();
+            quote! { #f: self * rhs.#f, }
         });
 
         let type_ops = self.algebra().types().into_iter().flat_map(|t| {
@@ -398,7 +503,25 @@ impl SubAlgebra {
                 #( #blades )*
             }
 
-            impl std::ops::Neg for #ty {
+            impl #ty {
+                pub const fn new(
+                    #(#new_fn_fields,)*
+                ) -> Self {
+                    Self {
+                        #(#new_fn_struct_fields)*
+                    }
+                }
+            }
+
+            impl const From<Zero> for #ty {
+                fn from(_: Zero) -> #ty {
+                    Self {
+                        #(#zero_fields)*
+                    }
+                }
+            }
+
+            impl const std::ops::Neg for #ty {
                 type Output = #ty;
                 fn neg(self) -> #ty {
                     Self {
@@ -407,21 +530,14 @@ impl SubAlgebra {
                 }
             }
 
-            impl std::ops::Add<Zero> for #ty {
+            impl const std::ops::Add<Zero> for #ty {
                 type Output = #ty;
                 fn add(self, _rhs: Zero) -> Self::Output {
                     self
                 }
             }
 
-            impl std::ops::Sub<Zero> for #ty {
-                type Output = #ty;
-                fn sub(self, _rhs: Zero) -> Self::Output {
-                    self
-                }
-            }
-
-            impl std::ops::Add for #ty {
+            impl const std::ops::Add for #ty {
                 type Output = #ty;
                 fn add(self, rhs: Self) -> Self {
                     Self {
@@ -430,11 +546,36 @@ impl SubAlgebra {
                 }
             }
 
-            impl std::ops::Sub for #ty {
+            impl const std::ops::Sub<Zero> for #ty {
+                type Output = #ty;
+                fn sub(self, _rhs: Zero) -> Self::Output {
+                    self
+                }
+            }
+
+            impl const std::ops::Sub for #ty {
                 type Output = #ty;
                 fn sub(self, rhs: Self) -> Self {
                     Self {
                         #( #sub_self_fields )*
+                    }
+                }
+            }
+
+            impl const std::ops::Mul<f64> for #ty {
+                type Output = Self;
+                fn mul(self, rhs: f64) -> Self {
+                    Self {
+                        #(#mul_f64_fields)*
+                    }
+                }
+            }
+
+            impl const std::ops::Mul<#ty> for f64 {
+                type Output = #ty;
+                fn mul(self, rhs: #ty) -> Self::Output {
+                    #ty {
+                        #(#f64_mul_fields)*
                     }
                 }
             }
@@ -642,9 +783,9 @@ where
             if ty_some {
                 if products.is_empty() {
                     if ty_some {
-                        quote! { #f: Default::default(), }
+                        quote! { #f: Zero.into(), }
                     } else {
-                        quote! { Default::default(), }
+                        quote! { Zero.into(), }
                     }
                 } else {
                     if ty_some {
@@ -683,7 +824,7 @@ where
             _ => quote! { rhs },
         };
         quote! {
-            impl #trait_ty<#rhs_ty> for #ty {
+            impl const #trait_ty<#rhs_ty> for #ty {
                 type Output = #output_ty;
                 fn #trait_fn(self, #rhs_ident: #rhs_ty) -> Self::Output {
                     #expr

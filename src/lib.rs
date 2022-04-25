@@ -1,6 +1,76 @@
-use std::collections::HashSet;
+#![feature(
+    const_trait_impl,
+    const_fn_floating_point_arithmetic,
+    const_default_impls,
+    const_convert
+)]
+
+// TODO create proc_macro crate
+// TODO grade sub, heterogeneous add/sub,reverses, complements, antiproducts
 
 mod define;
+//
+// /// Point at the origin
+// const N_BAR: Vector = Vector::new(0., 0., 0., 1., -1.);
+//
+// /// Point through infinity
+// const N: Vector = Vector::new(0., 0., 0., 1., 1.);
+//
+// /// GA for Physicists, Chapter 10
+// fn point(x: f64, y: f64, z: f64) -> Vector {
+//     let x2 = x * x + y * y + z * z;
+//     let x = Vector::new(x, y, z, 0., 0.);
+//     x2 * N + 2.0 * x - N_BAR
+// }
+//
+// /// Check whether point passes through infinity
+// fn is_flat<T, W>(value: T) -> bool
+// where
+//     Vector: Wedge<T, Output = W>,
+//     W: PartialEq + From<Zero>,
+// {
+//     N.wedge(value) == W::from(Zero)
+// }
+//
+// #[test]
+// fn null_squares() {
+//     assert_eq!(N_BAR * N_BAR, Even::default());
+//
+//     assert_eq!(N * N, Even::default());
+//
+//     assert_eq!(N_BAR.dot(N), 2.);
+//
+//     assert_eq!(
+//         N_BAR.wedge(N),
+//         Bivector::new(0., 0., 0., 0., 0., 0., 0., 0., 0., 2.0)
+//     );
+// }
+//
+// #[test]
+// fn point_pair() {
+//     let pt = point(0., 0., 0.);
+//     let b = point(1., 0., 0.);
+//     let c = point(0., 1., 0.);
+//     let d = point(0., 0., 1.);
+//
+//     assert_eq!(pt.dot(b), -2.);
+//     assert!(!is_flat(pt));
+//
+//     let pair = pt.wedge(b);
+//     assert!(!is_flat(pair));
+//
+//     let line = pair.wedge(N_BAR);
+//     assert!(is_flat(line));
+//
+//     let plane = line.wedge(c);
+//     assert!(is_flat(plane));
+//
+//     let circle = pair.wedge(c);
+//     assert!(!is_flat(circle));
+//
+//     let sphere = circle.wedge(d);
+//     assert!(!is_flat(sphere));
+// }
 
 // #[test]
 // fn vec_mul() {
@@ -29,7 +99,7 @@ impl Algebra {
         Self { one, zero, neg_one }
     }
 
-    pub fn get(&self, index: u8) -> Basis {
+    pub fn basis(&self, index: u8) -> Basis {
         Basis(index, *self)
     }
 
@@ -54,7 +124,7 @@ impl Algebra {
     }
 
     pub fn bases(&self) -> impl Iterator<Item = Basis> + '_ {
-        (1..=self.sum()).into_iter().map(|i| self.get(i))
+        (1..=self.sum()).into_iter().map(|i| self.basis(i))
     }
 
     pub fn grades_without_scalar(&self) -> impl Iterator<Item = Grade> + '_ {
@@ -302,7 +372,7 @@ impl Type {
     fn from_iter<T: IntoIterator<Item = Blade>>(iter: T, alg: Algebra) -> Self {
         let mut all_even = true;
         let mut all_odd = true;
-        let mut grades = HashSet::new();
+        let mut grades = std::collections::HashSet::new();
 
         for blade in iter {
             let grade = blade.0.len();
@@ -344,7 +414,7 @@ mod tests {
     #[cfg(not(debug_assertions))]
     fn write_to_output_file() {
         let path = std::path::Path::new("output.txt");
-        let _ = std::fs::write(path, Algebra::new(3, 1, 0).define().to_string());
+        let _ = std::fs::write(path, Algebra::new(4, 0, 1).define().to_string());
     }
 
     #[test]
