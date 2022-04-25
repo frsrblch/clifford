@@ -2,8 +2,6 @@ use super::*;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{quote, ToTokens};
 
-// TODO mul blades
-
 impl Algebra {
     pub fn define(&self) -> TokenStream {
         let traits = traits();
@@ -14,7 +12,7 @@ impl Algebra {
             .filter(|b| !b.0.is_empty())
             .map(|b| b.define());
 
-        let grades = self.grades().map(|g| g.define());
+        let grades = self.grades_without_scalar().map(|g| g.define());
 
         let even = SubAlgebra::Even(*self).define();
         let odd = SubAlgebra::Odd(*self).define();
@@ -97,112 +95,65 @@ impl ToTokens for Multiplier {
     }
 }
 
-impl Grade {
-    pub fn define(&self) -> TokenStream {
-        let ty = self.type_ident();
-
-        let struct_fields = self.blades().map(|b| {
-            let f = b.field();
-            let ty = b.type_ident();
-            quote! { pub #f: #ty, }
-        });
-
-        let new_fn_fields = self.blades().map(|b| {
-            let f = b.field();
-            quote! { #f: f64 }
-        });
-
-        let new_fn_struct_fields = self.blades().map(|b| {
-            let f = b.field();
-            let ty = b.type_ident();
-            quote! { #f: #ty(#f), }
-        });
-
-        let add_self_fields = self.blades().map(|b| {
-            let f = b.field();
-            quote! { #f: self.#f + rhs.#f, }
-        });
-
-        quote! {
-            #[derive(Debug, Default, Copy, Clone, PartialEq)]
-            pub struct #ty {
-                #(#struct_fields)*
-            }
-
-            impl #ty {
-                pub fn new(
-                    #(#new_fn_fields,)*
-                ) -> Self {
-                    Self {
-                        #(#new_fn_struct_fields)*
-                    }
-                }
-            }
-
-            impl std::ops::Add for #ty {
-                type Output = Self;
-                fn add(self, rhs: Self) -> Self {
-                    Self {
-                        #(#add_self_fields)*
-                    }
-                }
-            }
-
-            impl std::ops::Mul<Zero> for #ty {
-                type Output = Zero;
-                fn mul(self, rhs: Zero) -> Zero {
-                    rhs
-                }
-            }
-
-            impl std::ops::Add<Zero> for #ty {
-                type Output = Self;
-                fn add(self, _rhs: Zero) -> Self {
-                    self
-                }
-            }
-
-            impl std::ops::Sub<Zero> for #ty {
-                type Output = Self;
-                fn sub(self, _rhs: Zero) -> Self {
-                    self
-                }
-            }
-        }
-    }
-
-    pub fn type_ident(&self) -> Ident {
-        let str = match self.0 {
-            0 => "f64",
-            1 => "Vector",
-            2 => "Bivector",
-            3 => "Trivector",
-            4 => "Quadvector",
-            5 => "Pentavector",
-            6 => "Hexavector",
-            7 => "Heptavector",
-            8 => "Octovector",
-            9 => "Nonavector",
-            _ => unimplemented!("not implemented for grade: {}", self.0),
-        };
-        Ident::new(str, Span::mixed_site())
-    }
-}
-
 impl Blade {
     pub fn define(&self) -> proc_macro2::TokenStream {
         let ty = self.type_ident();
 
-        let square = (*self * *self).0;
-        let square_expr = match square {
-            Multiplier::One => quote! { self.0 * rhs.0 },
-            Multiplier::Zero => quote! { Zero },
-            Multiplier::NegOne => quote! { -(self.0 * rhs.0) },
-        };
+        let mul_blades = self.1.blades().filter(|b| b.0 .0 != 0).map(|rhs| {
+            let rhs_ty = rhs.type_ident();
+            let (multiplier, output) = *self * rhs;
 
-        quote::quote! {
+            let output_ty = match multiplier {
+                Multiplier::Zero => quote! { Zero },
+                _ => {
+                    let output_ty = output.type_ident();
+                    quote! { #output_ty }
+                }
+            };
+
+            let expr = match (multiplier, output) {
+                (Multiplier::Zero, _) => quote! { Zero },
+                (Multiplier::One, b) => {
+                    if b == self.1.scalar() {
+                        quote! { self.0 * rhs.0 }
+                    } else {
+                        quote! { #output_ty(self.0 * rhs.0) }
+                    }
+                }
+                (Multiplier::NegOne, b) => {
+                    if b == self.1.scalar() {
+                        quote! { -(self.0 * rhs.0) }
+                    } else {
+                        quote! { #output_ty(-(self.0 * rhs.0)) }
+                    }
+                }
+            };
+
+            let rhs_ident = match multiplier {
+                Multiplier::Zero => quote! { _ },
+                _ => quote! { rhs },
+            };
+
+            quote! {
+                impl std::ops::Mul<#rhs_ty> for #ty {
+                    type Output = #output_ty;
+                    fn mul(self, #rhs_ident: #rhs_ty) -> Self::Output {
+                        #expr
+                    }
+                }
+            }
+        });
+
+        quote! {
             #[derive(Debug, Default, Copy, Clone, PartialEq, PartialOrd)]
             pub struct #ty(f64);
+
+            impl std::ops::Neg for #ty {
+                type Output = #ty;
+                fn neg(self) -> #ty {
+                    Self(-self.0)
+                }
+            }
 
             impl std::ops::Mul<f64> for #ty {
                 type Output = #ty;
@@ -218,19 +169,14 @@ impl Blade {
                 }
             }
 
-            impl std::ops::Mul for #ty {
-                type Output = #square;
-                fn mul(self, rhs: Self) -> #square {
-                    #square_expr
-                }
-            }
-
             impl std::ops::Mul<Zero> for #ty {
                 type Output = Zero;
                 fn mul(self, rhs: Zero) -> Zero {
                     rhs
                 }
             }
+
+            #(#mul_blades)*
 
             impl std::ops::Add<Zero> for #ty {
                 type Output = #ty;
@@ -295,13 +241,115 @@ impl Blade {
     }
 }
 
-impl Multiplier {
-    fn sign(&self) -> TokenStream {
-        match self {
-            Multiplier::NegOne => quote! { - },
-            Multiplier::One => quote! { + },
-            _ => quote! {},
+impl Grade {
+    pub fn define(&self) -> TokenStream {
+        let ty = self.type_ident();
+
+        let struct_fields = self.blades().map(|b| {
+            let f = b.field();
+            let ty = b.type_ident();
+            quote! { pub #f: #ty, }
+        });
+
+        let new_fn_fields = self.blades().map(|b| {
+            let f = b.field();
+            quote! { #f: f64 }
+        });
+
+        let new_fn_struct_fields = self.blades().map(|b| {
+            let f = b.field();
+            let ty = b.type_ident();
+            quote! { #f: #ty(#f), }
+        });
+
+        let neg_fields = self.blades().map(|b| {
+            let f = b.field();
+            quote! { #f: -self.#f, }
+        });
+
+        let add_self_fields = self.blades().map(|b| {
+            let f = b.field();
+            quote! { #f: self.#f + rhs.#f, }
+        });
+
+        let type_ops = self.algebra().types().into_iter().flat_map(|t| {
+            ProductOp::iter().map(move |op| {
+                MulProduct {
+                    lhs: *self,
+                    rhs: t,
+                    op,
+                }
+                .implement()
+            })
+        });
+
+        quote! {
+            #[derive(Debug, Default, Copy, Clone, PartialEq)]
+            pub struct #ty {
+                #(#struct_fields)*
+            }
+
+            impl #ty {
+                pub fn new(
+                    #(#new_fn_fields,)*
+                ) -> Self {
+                    Self {
+                        #(#new_fn_struct_fields)*
+                    }
+                }
+            }
+
+            impl std::ops::Neg for #ty {
+                type Output = #ty;
+                fn neg(self) -> Self {
+                    Self {
+                        #(#neg_fields)*
+                    }
+                }
+            }
+
+            impl std::ops::Add for #ty {
+                type Output = Self;
+                fn add(self, rhs: Self) -> Self {
+                    Self {
+                        #(#add_self_fields)*
+                    }
+                }
+            }
+
+            impl std::ops::Add<Zero> for #ty {
+                type Output = Self;
+                fn add(self, _rhs: Zero) -> Self {
+                    self
+                }
+            }
+
+            impl std::ops::Sub<Zero> for #ty {
+                type Output = Self;
+                fn sub(self, _rhs: Zero) -> Self {
+                    self
+                }
+            }
+
+            #(#type_ops)*
         }
+    }
+
+    pub fn type_ident(&self) -> Ident {
+        let str = match self.0 {
+            0 => "f64",
+            1 => "Vector",
+            2 => "Bivector",
+            3 => "Trivector",
+            4 => "Quadvector",
+            5 => "Pentavector",
+            6 => "Hexavector",
+            7 => "Heptavector",
+            8 => "Octovector",
+            9 => "Nonavector",
+            _ => unimplemented!("not implemented for grade: {}", self.0),
+        };
+        Ident::new(str, Span::mixed_site())
     }
 }
 
@@ -318,6 +366,11 @@ impl SubAlgebra {
             quote! { pub #f: #ty, }
         });
 
+        let neg_fields = self.blades().map(|b| {
+            let f = b.field();
+            quote! { #f: -self.#f, }
+        });
+
         let add_self_fields = self.blades().map(|b| {
             let f = b.field();
             quote! { #f: self.#f + rhs.#f, }
@@ -328,47 +381,30 @@ impl SubAlgebra {
             quote! { #f: self.#f - rhs.#f, }
         });
 
-        let mul_self = MulProduct {
-            lhs: *self,
-            rhs: *self,
-            f: |l: Blade, r: Blade| l * r,
-        };
-
-        let mul_self_output_ty = mul_self.output().type_ident();
-        let mul_self_expr = mul_self.expr();
-
-        let mul_opposite = MulProduct {
-            lhs: *self,
-            rhs: self.opposite(),
-            f: |l, r| l * r,
-        };
-        let opposite = self.opposite().type_ident();
-        let mul_opposite_output = mul_opposite.output().type_ident();
-        let mul_opposite_expr = mul_opposite.expr();
-
-        let mul_grades = self.algebra().grades().map(|grade| {
-            let mul_grade = MulProduct {
-                lhs: *self,
-                rhs: grade,
-                f: |l: Blade, r: Blade| l * r,
-            };
-            let grade = grade.type_ident();
-            let output = mul_grade.output().type_ident();
-            let expr = mul_grade.expr();
-            quote! {
-                impl std::ops::Mul<#grade> for #ty {
-                    type Output = #output;
-                    fn mul(self, rhs: #grade) -> Self::Output {
-                        #expr
-                    }
+        let type_ops = self.algebra().types().into_iter().flat_map(|t| {
+            ProductOp::iter().map(move |op| {
+                MulProduct {
+                    lhs: *self,
+                    rhs: t,
+                    op,
                 }
-            }
+                .implement()
+            })
         });
 
         quote! {
             #[derive(Debug, Default, Copy, Clone, PartialEq)]
             pub struct #ty {
                 #( #blades )*
+            }
+
+            impl std::ops::Neg for #ty {
+                type Output = #ty;
+                fn neg(self) -> #ty {
+                    Self {
+                        #(#neg_fields)*
+                    }
+                }
             }
 
             impl std::ops::Add<Zero> for #ty {
@@ -382,13 +418,6 @@ impl SubAlgebra {
                 type Output = #ty;
                 fn sub(self, _rhs: Zero) -> Self::Output {
                     self
-                }
-            }
-
-            impl std::ops::Mul<Zero> for #ty {
-                type Output = Zero;
-                fn mul(self, rhs: Zero) -> Self::Output {
-                    rhs
                 }
             }
 
@@ -410,21 +439,7 @@ impl SubAlgebra {
                 }
             }
 
-            impl std::ops::Mul for #ty {
-                type Output = #mul_self_output_ty;
-                fn mul(self, rhs: Self) -> Self::Output {
-                    #mul_self_expr
-                }
-            }
-
-            impl std::ops::Mul<#opposite> for #ty {
-                type Output = #mul_opposite_output;
-                fn mul(self, rhs: #opposite) -> Self::Output {
-                    #mul_opposite_expr
-                }
-            }
-
-            #( #mul_grades )*
+            #( #type_ops )*
         }
     }
 
@@ -438,9 +453,18 @@ impl SubAlgebra {
 }
 
 impl Type {
+    pub fn iter(alg: Algebra) -> Vec<Self> {
+        let mut vec = vec![Type::Zero(alg)];
+
+        vec.extend(alg.grades_without_scalar().map(Type::Grade));
+        vec.extend(alg.subalgebras().map(Type::SubAlgebra));
+
+        vec
+    }
+
     pub fn type_ident(&self) -> Ident {
         match self {
-            Type::Zero => Ident::new("Zero", Span::mixed_site()),
+            Type::Zero(_) => Ident::new("Zero", Span::mixed_site()),
             Type::Grade(grade) => grade.type_ident(),
             Type::SubAlgebra(sub) => sub.type_ident(),
         }
@@ -450,6 +474,7 @@ impl Type {
 pub trait CompoundType {
     fn blades(&self) -> Vec<Blade>;
     fn type_ident(&self) -> proc_macro2::Ident;
+    fn algebra(&self) -> Algebra;
 }
 
 impl CompoundType for Grade {
@@ -459,6 +484,10 @@ impl CompoundType for Grade {
 
     fn type_ident(&self) -> Ident {
         self.type_ident()
+    }
+
+    fn algebra(&self) -> Algebra {
+        self.1
     }
 }
 
@@ -470,30 +499,94 @@ impl CompoundType for SubAlgebra {
     fn type_ident(&self) -> Ident {
         self.type_ident()
     }
+
+    fn algebra(&self) -> Algebra {
+        match self {
+            SubAlgebra::Even(alg) => *alg,
+            SubAlgebra::Odd(alg) => *alg,
+        }
+    }
 }
 
-pub struct MulProduct<A, B, F> {
+impl CompoundType for Type {
+    fn blades(&self) -> Vec<Blade> {
+        match self {
+            Type::Zero(_) => vec![],
+            Type::Grade(grade) => grade.blades().collect(),
+            Type::SubAlgebra(sub) => sub.blades().collect(),
+        }
+    }
+
+    fn type_ident(&self) -> Ident {
+        self.type_ident()
+    }
+
+    fn algebra(&self) -> Algebra {
+        match self {
+            Type::Zero(alg) => *alg,
+            Type::Grade(grade) => grade.1,
+            Type::SubAlgebra(sub) => *sub.algebra(),
+        }
+    }
+}
+
+pub struct MulProduct<A, B> {
     pub lhs: A,
     pub rhs: B,
-    pub f: F,
+    pub op: ProductOp,
 }
 
-impl<A, B, F> MulProduct<A, B, F>
+pub enum ProductOp {
+    Mul,
+    Dot,
+    Wedge,
+}
+
+impl ProductOp {
+    pub fn iter() -> impl Iterator<Item = Self> + 'static {
+        [Self::Mul, Self::Dot, Self::Wedge].into_iter()
+    }
+
+    pub fn call(&self, lhs: Blade, rhs: Blade) -> (Multiplier, Blade) {
+        match self {
+            ProductOp::Mul => lhs * rhs,
+            ProductOp::Dot => lhs.dot(rhs),
+            ProductOp::Wedge => lhs.wedge(rhs),
+        }
+    }
+
+    pub fn trait_ty(&self) -> TokenStream {
+        match self {
+            ProductOp::Mul => quote! { std::ops::Mul },
+            ProductOp::Dot => quote! { Dot },
+            ProductOp::Wedge => quote! { Wedge },
+        }
+    }
+
+    pub fn trait_fn(&self) -> TokenStream {
+        match self {
+            ProductOp::Mul => quote! { mul },
+            ProductOp::Dot => quote! { dot },
+            ProductOp::Wedge => quote! { wedge },
+        }
+    }
+}
+
+impl<A, B> MulProduct<A, B>
 where
     A: CompoundType,
     B: CompoundType,
-    F: Fn(Blade, Blade) -> (Multiplier, Blade) + Copy,
 {
     fn output(&self) -> Type {
-        let f = self.f;
-        self.lhs
+        let iter = self
+            .lhs
             .blades()
             .into_iter()
             .flat_map(|lhs_b| {
                 self.rhs
                     .blades()
                     .into_iter()
-                    .map(move |rhs_b| f(lhs_b, rhs_b))
+                    .map(move |rhs_b| self.op.call(lhs_b, rhs_b))
             })
             .filter_map(|(multiplier, blade)| {
                 if matches!(multiplier, Multiplier::Zero) {
@@ -501,25 +594,30 @@ where
                 } else {
                     Some(blade)
                 }
-            })
-            .collect::<Type>()
+            });
+        Type::from_iter(iter, self.lhs.algebra())
     }
 
     fn expr(&self) -> TokenStream {
         let (ty, blades) = match self.output() {
-            Type::Zero => return quote! { Zero },
+            Type::Zero(_) => return quote! { Zero },
             Type::Grade(grade) => {
-                let ty = grade.type_ident();
                 let blades = grade.blades().collect::<Vec<_>>();
-                (ty, blades)
+                if grade.0 == 0 {
+                    (None, blades)
+                } else {
+                    let ty = grade.type_ident();
+                    (Some(ty), blades)
+                }
             }
             Type::SubAlgebra(sub) => {
                 let ty = sub.type_ident();
                 let blades = sub.blades().collect::<Vec<_>>();
-                (ty, blades)
+                (Some(ty), blades)
             }
         };
 
+        let ty_some = ty.is_some();
         let fields = blades.into_iter().map(|b| {
             let f = b.field();
 
@@ -529,38 +627,67 @@ where
                 .into_iter()
                 .flat_map(|lhs_b| {
                     self.rhs.blades().into_iter().map(move |rhs_b| {
-                        let (product, blade) = lhs_b * rhs_b;
+                        let (product, blade) = self.op.call(lhs_b, rhs_b);
                         (lhs_b, rhs_b, product, blade)
                     })
                 })
                 .filter(|(_, _, multiplier, blade)| *multiplier != Multiplier::Zero && *blade == b)
-                .map(|(lhs_b, rhs_b, multiplier, _)| {
+                .map(|(lhs_b, rhs_b, _, _)| {
                     let lhs_f = lhs_b.field();
                     let rhs_f = rhs_b.field();
-                    (multiplier, quote! { self.#lhs_f * rhs.#rhs_f })
+                    quote! { self.#lhs_f * rhs.#rhs_f }
                 })
-                .collect::<Vec<_>>();
+                .collect::<syn::punctuated::Punctuated<_, syn::token::Add>>();
 
-            if products.is_empty() {
-                quote! { #f: Default::default(), }
+            if ty_some {
+                if products.is_empty() {
+                    if ty_some {
+                        quote! { #f: Default::default(), }
+                    } else {
+                        quote! { Default::default(), }
+                    }
+                } else {
+                    if ty_some {
+                        quote! { #f: #products, }
+                    } else {
+                        quote! { #products }
+                    }
+                }
             } else {
-                let mut products = products.into_iter();
-                let (mult, expr) = products.next().unwrap();
-                let first = match mult {
-                    Multiplier::NegOne => quote! { -(#expr) },
-                    _ => quote! { #expr },
-                };
-                let rest = products.map(|(mult, expr)| {
-                    let sign = mult.sign();
-                    quote! { #sign #expr }
-                });
-                quote! { #f: #first #(#rest)* , }
+                quote! { #products }
             }
         });
 
-        quote! {
-            #ty {
+        if let Some(ty) = ty {
+            quote! {
+                #ty {
+                    #( #fields )*
+                }
+            }
+        } else {
+            quote! {
                 #( #fields )*
+            }
+        }
+    }
+
+    pub fn implement(&self) -> TokenStream {
+        let ty = self.lhs.type_ident();
+        let rhs_ty = self.rhs.type_ident();
+        let trait_ty = self.op.trait_ty();
+        let trait_fn = self.op.trait_fn();
+        let output_ty = self.output().type_ident();
+        let expr = self.expr();
+        let rhs_ident = match self.output() {
+            Type::Zero(_) => quote! { _ },
+            _ => quote! { rhs },
+        };
+        quote! {
+            impl #trait_ty<#rhs_ty> for #ty {
+                type Output = #output_ty;
+                fn #trait_fn(self, #rhs_ident: #rhs_ty) -> Self::Output {
+                    #expr
+                }
             }
         }
     }

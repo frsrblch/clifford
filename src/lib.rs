@@ -2,6 +2,21 @@ use std::collections::HashSet;
 
 mod define;
 
+// #[test]
+// fn vec_mul() {
+//
+//
+//     let a = Vector::new(2., 3., 4., 1.);
+//     let b = Vector::new(3., 5., 7., 1.);
+//     let c = Vector::new(0., 0., 0., 1.);
+//
+//     let line = a.wedge(b);
+//     let plane = line.wedge(c);
+//
+//     dbg!(line, plane);
+//     panic!("done");
+// }
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Algebra {
     one: u8,
@@ -34,20 +49,32 @@ impl Algebra {
         }
     }
 
+    pub fn types(&self) -> Vec<Type> {
+        Type::iter(*self)
+    }
+
     pub fn bases(&self) -> impl Iterator<Item = Basis> + '_ {
         (1..=self.sum()).into_iter().map(|i| self.get(i))
     }
 
-    pub fn grades(&self) -> impl Iterator<Item = Grade> + '_ {
-        (1..self.sum()).into_iter().map(|i| Grade(i, *self))
+    pub fn grades_without_scalar(&self) -> impl Iterator<Item = Grade> + '_ {
+        (1..=self.sum()).into_iter().map(|i| self.grade(i))
     }
 
-    pub fn psuedovector(&self) -> BladeSet {
+    pub fn grades_with_scalar(&self) -> impl Iterator<Item = Grade> + '_ {
+        (0..=self.sum()).into_iter().map(|i| self.grade(i))
+    }
+
+    pub fn psuedovector(&self) -> Blade {
         let mut set = BladeSet(0);
         for i in 1..=self.sum() {
             set.insert(i);
         }
-        set
+        self.blade(set.0)
+    }
+
+    pub fn scalar(&self) -> Blade {
+        self.blade(0)
     }
 
     pub fn grade(&self, grade: u8) -> Grade {
@@ -58,17 +85,28 @@ impl Algebra {
     }
 
     pub fn blades(&self) -> impl Iterator<Item = Blade> + '_ {
-        (0..=self.psuedovector().0)
-            .into_iter()
-            .map(|set| Blade(BladeSet(set), *self))
+        self.grades_with_scalar().flat_map(|grade| {
+            self.blades_unsorted()
+                .filter(move |blade| blade.grade() == grade)
+        })
     }
 
-    fn sum(&self) -> u8 {
-        self.one + self.zero + self.neg_one
+    pub fn subalgebras(&self) -> impl Iterator<Item = SubAlgebra> + '_ {
+        [SubAlgebra::Even(*self), SubAlgebra::Odd(*self)].into_iter()
+    }
+
+    fn blades_unsorted(&self) -> impl Iterator<Item = Blade> + '_ {
+        (0..=self.psuedovector().0 .0)
+            .into_iter()
+            .map(|set| self.blade(set))
     }
 
     pub fn blade(&self, set: u32) -> Blade {
         Blade(BladeSet(set), *self)
+    }
+
+    fn sum(&self) -> u8 {
+        self.one + self.zero + self.neg_one
     }
 }
 
@@ -106,7 +144,7 @@ pub struct Grade(u8, Algebra);
 
 impl Grade {
     fn blades(&self) -> impl Iterator<Item = Blade> + '_ {
-        self.1.blades().filter(|b| b.0.len() == self.0)
+        self.1.blades_unsorted().filter(|b| b.0.len() == self.0)
     }
 }
 
@@ -114,6 +152,10 @@ impl Grade {
 pub struct Blade(BladeSet, Algebra);
 
 impl Blade {
+    pub fn grade(&self) -> Grade {
+        Grade(self.0.len(), self.1)
+    }
+
     pub fn dot(self, rhs: Self) -> (Multiplier, Blade) {
         let (multiplier, blade) = self * rhs;
 
@@ -249,17 +291,19 @@ impl SubAlgebra {
     }
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Type {
-    Zero,
+    Zero(Algebra),
     Grade(Grade),
     SubAlgebra(SubAlgebra),
 }
 
-impl FromIterator<Blade> for Type {
-    fn from_iter<T: IntoIterator<Item = Blade>>(iter: T) -> Self {
+impl Type {
+    fn from_iter<T: IntoIterator<Item = Blade>>(iter: T, alg: Algebra) -> Self {
         let mut all_even = true;
         let mut all_odd = true;
         let mut grades = HashSet::new();
+
         for blade in iter {
             let grade = blade.0.len();
 
@@ -273,7 +317,7 @@ impl FromIterator<Blade> for Type {
         }
 
         if grades.is_empty() {
-            return Type::Zero;
+            return Type::Zero(alg);
         }
 
         if grades.len() == 1 {
@@ -300,7 +344,7 @@ mod tests {
     #[cfg(not(debug_assertions))]
     fn write_to_output_file() {
         let path = std::path::Path::new("output.txt");
-        let _ = std::fs::write(path, Algebra::new(3, 0, 0).define().to_string());
+        let _ = std::fs::write(path, Algebra::new(3, 1, 0).define().to_string());
     }
 
     #[test]
@@ -357,7 +401,7 @@ mod tests {
     fn bases_pseudovector() {
         let alg = Algebra::new(3, 0, 0);
 
-        assert_eq!(BladeSet(0b_0111), alg.psuedovector());
+        assert_eq!(alg.blade(0b_0111), alg.psuedovector());
     }
 
     #[test]
