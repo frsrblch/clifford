@@ -5,11 +5,54 @@
     const_convert
 )]
 
+// TODO consider blade enum model with dynamic multivectors (e.g., BTreeMap<Blade, f64>?)
 // TODO create proc_macro crate
 // TODO grade sub, heterogeneous add/sub,reverses, complements, antiproducts
 
 mod define;
+
+// /// Cl(4,2,0) - 2D conics??
+// #[cfg(test)]
+// mod testing {
+//     use super::*;
 //
+//     const N_X: Vector = Vector::new(0., 0., 1., 0., 1., 0.);
+//     const N_Y: Vector = Vector::new(0., 0., 0., 1., 0., 1.);
+//
+//     const N_X_BAR: Vector = Vector::new(0., 0., 1., 0., -1., 0.);
+//     const N_Y_BAR: Vector = Vector::new(0., 0., 0., 1., 0., -1.);
+//
+//     #[test]
+//     fn conic_consts() {
+//         assert_eq!(0., (N_X.dot(N_X)));
+//         assert_eq!(0., (N_Y.dot(N_Y)));
+//         assert_eq!(0., (N_X_BAR.dot(N_X_BAR)));
+//         assert_eq!(0., (N_Y_BAR.dot(N_Y_BAR)));
+//         assert_eq!(2., (N_Y.dot(N_Y_BAR)));
+//     }
+//
+//     fn point(x: f64, y: f64) -> Vector {
+//         let x2 = x * x;
+//         let y2 = y * y;
+//         let x = Vector::new(x, y, 0., 0., 0., 0.);
+//
+//         2.0 * x + x2 * N_X + y2 * N_Y - N_X_BAR - N_Y_BAR
+//     }
+//
+//     #[test]
+//     fn wedge_points() {
+//         let o = point(0., 0.);
+//         let x = point(1., 0.);
+//         let y = point(0., 1.);
+//
+//         dbg!(o.wedge(x));
+//         dbg!(o.wedge(y));
+//         dbg!(o.wedge(x).wedge(y));
+//         panic!();
+//     }
+// }
+
+// /// 3D CGA
 // /// Point at the origin
 // const N_BAR: Vector = Vector::new(0., 0., 0., 1., -1.);
 //
@@ -414,7 +457,7 @@ mod tests {
     #[cfg(not(debug_assertions))]
     fn write_to_output_file() {
         let path = std::path::Path::new("output.txt");
-        let _ = std::fs::write(path, Algebra::new(4, 0, 1).define().to_string());
+        let _ = std::fs::write(path, Algebra::new(4, 0, 2).define().to_string());
     }
 
     #[test]
