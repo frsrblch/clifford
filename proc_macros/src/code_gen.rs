@@ -12,8 +12,6 @@ impl Algebra {
             .filter(|b| !b.0.is_empty())
             .map(|b| b.define());
 
-        let blade_enum = Blade::define_enum(*self);
-
         let grades = self.grades_without_scalar().map(|g| g.define());
 
         let subalgebra = self.subalgebras().map(|s| s.define());
@@ -24,7 +22,6 @@ impl Algebra {
             #zero
 
             #( #blades )*
-            #blade_enum
 
             #( #grades )*
 
@@ -35,54 +32,14 @@ impl Algebra {
 
 fn zero() -> TokenStream {
     quote! {
-        #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-        pub struct Zero;
-
-        impl<T> std::ops::Add<T> for Zero {
-            type Output = T;
-            fn add(self, rhs: T) -> T {
-                rhs
-            }
-        }
-
-        impl<T: std::ops::Neg<Output = T>> std::ops::Sub<T> for Zero {
-            type Output = T;
-            fn sub(self, rhs: T) -> T {
-                -rhs
-            }
-        }
-
-        impl<T> std::ops::Mul<T> for Zero {
-            type Output = Zero;
-            fn mul(self, _rhs: T) -> Zero {
-                Zero
-            }
-        }
-
-        impl const From<Zero> for f64 {
-            fn from(_: Zero) -> f64 {
-                0.0
-            }
-        }
+        pub use crate::Zero;
     }
 }
 
 fn traits() -> TokenStream {
     quote! {
-        pub trait Dot<Rhs> {
-            type Output;
-            fn dot(self, rhs: Rhs) -> Self::Output;
-        }
-
-        pub trait Commutator<Rhs> {
-            type Output;
-            fn commutator(self, rhs: Rhs) -> Self::Output;
-        }
-
-        pub trait Wedge<Rhs> {
-            type Output;
-            fn wedge(self, rhs: Rhs) -> Self::Output;
-        }
+        // TODO specifty paths explicitly in procedural code
+        pub use crate::{Dot, Wedge, Commutator};
     }
 }
 
@@ -251,53 +208,6 @@ impl Blade {
             }
 
             Ident::new(&output, Span::mixed_site())
-        }
-    }
-
-    fn define_enum(algebra: Algebra) -> TokenStream {
-        let variants = algebra.blades().map(|b| b.type_ident());
-
-        let impl_ops = ProductOp::iter().map(|op| {
-            let op_trait = op.trait_ty();
-            let op_fn = op.trait_fn();
-
-            let matches = algebra.blades().flat_map(|lhs| {
-                algebra.blades().map(move |rhs| {
-                    let (sign, output) = op.call(lhs, rhs);
-                    let output_ty = output.type_ident();
-                    let output = match sign {
-                        Multiplier::One => quote! { Some((Sign::Pos, Self::#output_ty)) },
-                        Multiplier::NegOne => quote! { Some((Sign::Neg, Self::#output_ty)) },
-                        Multiplier::Zero => quote! { None },
-                    };
-                    let lhs = lhs.type_ident();
-                    let rhs = rhs.type_ident();
-                    quote! { (Self::#lhs, Self::#rhs) => #output }
-                })
-            });
-
-            quote! {
-                impl #op_trait<BladeEnum> for BladeEnum {
-                    type Output = Option<(Sign, Self)>;
-                    fn #op_fn(self, rhs: Self) -> Self::Output {
-                        match (self, rhs) {
-                            #( #matches, )*
-                        }
-                    }
-                }
-            }
-        });
-
-        quote! {
-            #[allow(non_camel_case_types)]
-            #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-            pub enum BladeEnum {
-                #( #variants, )*
-            }
-
-            pub enum Sign { Pos, Neg }
-
-            #( #impl_ops )*
         }
     }
 }

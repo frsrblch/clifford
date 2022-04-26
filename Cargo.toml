@@ -14,3 +14,8 @@ criterion = "0.3.5"
 [[bench]]
 name = "mul"
 harness = false
+
+[features]
+pga_3d = []
+cga_2d = []
+cga_3d = []
