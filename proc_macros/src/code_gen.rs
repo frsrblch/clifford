@@ -1,4 +1,4 @@
-use super::*;
+use super::types::*;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{quote, ToTokens};
 
@@ -12,27 +12,23 @@ impl Algebra {
             .filter(|b| !b.0.is_empty())
             .map(|b| b.define());
 
+        let blade_enum = Blade::define_enum(*self);
+
         let grades = self.grades_without_scalar().map(|g| g.define());
 
-        let even = SubAlgebra::Even(*self).define();
-        let odd = SubAlgebra::Odd(*self).define();
+        let subalgebra = self.subalgebras().map(|s| s.define());
 
         quote! {
             #traits
 
             #zero
 
-            #(
-                #blades
-            )*
+            #( #blades )*
+            #blade_enum
 
-            #(
-                #grades
-            )*
+            #( #grades )*
 
-            #even
-
-            #odd
+            #( #subalgebra )*
         }
     }
 }
@@ -232,7 +228,7 @@ impl Blade {
         } else {
             let mut output = "e".to_string();
 
-            for i in 1..=self.1.sum() {
+            for i in 1..=self.1.dimensions() {
                 if self.0.contains(i) {
                     output.push_str(&i.to_string());
                 }
@@ -255,6 +251,53 @@ impl Blade {
             }
 
             Ident::new(&output, Span::mixed_site())
+        }
+    }
+
+    fn define_enum(algebra: Algebra) -> TokenStream {
+        let variants = algebra.blades().map(|b| b.type_ident());
+
+        let impl_ops = ProductOp::iter().map(|op| {
+            let op_trait = op.trait_ty();
+            let op_fn = op.trait_fn();
+
+            let matches = algebra.blades().flat_map(|lhs| {
+                algebra.blades().map(move |rhs| {
+                    let (sign, output) = op.call(lhs, rhs);
+                    let output_ty = output.type_ident();
+                    let output = match sign {
+                        Multiplier::One => quote! { Some((Sign::Pos, Self::#output_ty)) },
+                        Multiplier::NegOne => quote! { Some((Sign::Neg, Self::#output_ty)) },
+                        Multiplier::Zero => quote! { None },
+                    };
+                    let lhs = lhs.type_ident();
+                    let rhs = rhs.type_ident();
+                    quote! { (Self::#lhs, Self::#rhs) => #output }
+                })
+            });
+
+            quote! {
+                impl #op_trait<BladeEnum> for BladeEnum {
+                    type Output = Option<(Sign, Self)>;
+                    fn #op_fn(self, rhs: Self) -> Self::Output {
+                        match (self, rhs) {
+                            #( #matches, )*
+                        }
+                    }
+                }
+            }
+        });
+
+        quote! {
+            #[allow(non_camel_case_types)]
+            #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+            pub enum BladeEnum {
+                #( #variants, )*
+            }
+
+            pub enum Sign { Pos, Neg }
+
+            #( #impl_ops )*
         }
     }
 }
@@ -594,15 +637,6 @@ impl SubAlgebra {
 }
 
 impl Type {
-    pub fn iter(alg: Algebra) -> Vec<Self> {
-        let mut vec = vec![Type::Zero(alg)];
-
-        vec.extend(alg.grades_without_scalar().map(Type::Grade));
-        vec.extend(alg.subalgebras().map(Type::SubAlgebra));
-
-        vec
-    }
-
     pub fn type_ident(&self) -> Ident {
         match self {
             Type::Zero(_) => Ident::new("Zero", Span::mixed_site()),
@@ -613,16 +647,11 @@ impl Type {
 }
 
 pub trait CompoundType {
-    fn blades(&self) -> Vec<Blade>;
     fn type_ident(&self) -> proc_macro2::Ident;
     fn algebra(&self) -> Algebra;
 }
 
 impl CompoundType for Grade {
-    fn blades(&self) -> Vec<Blade> {
-        self.blades().collect()
-    }
-
     fn type_ident(&self) -> Ident {
         self.type_ident()
     }
@@ -633,10 +662,6 @@ impl CompoundType for Grade {
 }
 
 impl CompoundType for SubAlgebra {
-    fn blades(&self) -> Vec<Blade> {
-        self.blades().collect()
-    }
-
     fn type_ident(&self) -> Ident {
         self.type_ident()
     }
@@ -650,14 +675,6 @@ impl CompoundType for SubAlgebra {
 }
 
 impl CompoundType for Type {
-    fn blades(&self) -> Vec<Blade> {
-        match self {
-            Type::Zero(_) => vec![],
-            Type::Grade(grade) => grade.blades().collect(),
-            Type::SubAlgebra(sub) => sub.blades().collect(),
-        }
-    }
-
     fn type_ident(&self) -> Ident {
         self.type_ident()
     }
@@ -666,7 +683,7 @@ impl CompoundType for Type {
         match self {
             Type::Zero(alg) => *alg,
             Type::Grade(grade) => grade.1,
-            Type::SubAlgebra(sub) => *sub.algebra(),
+            Type::SubAlgebra(sub) => sub.algebra(),
         }
     }
 }
@@ -677,6 +694,7 @@ pub struct MulProduct<A, B> {
     pub op: ProductOp,
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum ProductOp {
     Mul,
     Dot,
@@ -715,17 +733,15 @@ impl ProductOp {
 
 impl<A, B> MulProduct<A, B>
 where
-    A: CompoundType,
-    B: CompoundType,
+    A: CompoundType + IntoIterator<Item = Blade> + Copy,
+    B: CompoundType + IntoIterator<Item = Blade> + Copy,
 {
     fn output(&self) -> Type {
         let iter = self
             .lhs
-            .blades()
             .into_iter()
             .flat_map(|lhs_b| {
                 self.rhs
-                    .blades()
                     .into_iter()
                     .map(move |rhs_b| self.op.call(lhs_b, rhs_b))
             })
@@ -743,7 +759,7 @@ where
         let (ty, blades) = match self.output() {
             Type::Zero(_) => return quote! { Zero },
             Type::Grade(grade) => {
-                let blades = grade.blades().collect::<Vec<_>>();
+                let blades = grade.into_iter().collect::<Vec<_>>();
                 if grade.0 == 0 {
                     (None, blades)
                 } else {
@@ -753,7 +769,7 @@ where
             }
             Type::SubAlgebra(sub) => {
                 let ty = sub.type_ident();
-                let blades = sub.blades().collect::<Vec<_>>();
+                let blades = sub.into_iter().collect::<Vec<_>>();
                 (Some(ty), blades)
             }
         };
@@ -764,10 +780,9 @@ where
 
             let products = self
                 .lhs
-                .blades()
                 .into_iter()
                 .flat_map(|lhs_b| {
-                    self.rhs.blades().into_iter().map(move |rhs_b| {
+                    self.rhs.into_iter().map(move |rhs_b| {
                         let (product, blade) = self.op.call(lhs_b, rhs_b);
                         (lhs_b, rhs_b, product, blade)
                     })
