@@ -1,6 +1,4 @@
 use syn::parse::{Parse, ParseStream};
-use syn::token::Comma;
-use syn::LitInt;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Algebra {
@@ -11,6 +9,9 @@ pub struct Algebra {
 
 impl Parse for Algebra {
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        use syn::token::Comma;
+        use syn::LitInt;
+
         let one: LitInt = input.parse()?;
         let _comma: Comma = input.parse()?;
         let neg_one: LitInt = input.parse()?;
@@ -50,8 +51,8 @@ impl Algebra {
         }
     }
 
-    pub fn types(&self) -> Vec<Type> {
-        Type::iter(*self)
+    pub fn types(&self) -> impl Iterator<Item = Type> + '_ {
+        Type::iter(self)
     }
 
     pub fn bases(&self) -> impl Iterator<Item = Basis> + '_ {
@@ -66,7 +67,7 @@ impl Algebra {
         (0..=self.dimensions()).into_iter().map(|i| self.grade(i))
     }
 
-    pub fn psuedovector(&self) -> Blade {
+    pub fn pseudovector(&self) -> Blade {
         let mut set = BladeSet(0);
         for i in 1..=self.dimensions() {
             set.insert(i);
@@ -97,7 +98,7 @@ impl Algebra {
     }
 
     fn blades_unsorted(&self) -> impl Iterator<Item = Blade> + '_ {
-        (0..=self.psuedovector().0 .0)
+        (0..=self.pseudovector().0 .0)
             .into_iter()
             .map(|set| self.blade(set))
     }
@@ -144,6 +145,14 @@ pub struct Basis(pub u8, pub Algebra);
 pub struct Grade(pub u8, pub Algebra);
 
 impl Grade {
+    pub fn as_type(&self) -> Type {
+        Type::Grade(*self)
+    }
+
+    pub fn algebra(&self) -> Algebra {
+        self.1
+    }
+
     pub fn blades(&self) -> impl Iterator<Item = Blade> + '_ {
         self.1.blades_unsorted().filter(|b| b.0.len() == self.0)
     }
@@ -154,19 +163,6 @@ impl Grade {
 
     pub fn is_odd(self) -> bool {
         self.0 % 2 == 1
-    }
-}
-
-impl IntoIterator for Grade {
-    type Item = Blade;
-    type IntoIter = impl Iterator<Item = Blade>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.1
-            .blades()
-            .collect::<Vec<_>>()
-            .into_iter()
-            .filter(move |b| b.grade() == self)
     }
 }
 
@@ -297,30 +293,21 @@ pub enum SubAlgebra {
     Odd(Algebra),
 }
 
-impl IntoIterator for SubAlgebra {
-    type Item = Blade;
-    type IntoIter = impl Iterator<Item = Blade>;
+impl SubAlgebra {
+    pub fn as_type(&self) -> Type {
+        Type::SubAlgebra(*self)
+    }
 
-    fn into_iter(self) -> Self::IntoIter {
-        let algebra = *self.algebra();
+    pub fn blades(&self) -> impl Iterator<Item = Blade> + '_ {
+        let algebra = self.algebra();
         let by_grade = match self {
             SubAlgebra::Even(_) => |b: &Blade| b.is_even(),
             SubAlgebra::Odd(_) => |b: &Blade| b.is_odd(),
         };
-        algebra
-            .blades()
-            .collect::<Vec<_>>()
-            .into_iter()
-            .filter(by_grade)
-    }
-}
-
-impl SubAlgebra {
-    pub fn blades(&self) -> impl Iterator<Item = Blade> + '_ {
-        self.into_iter()
+        algebra.blades().filter(by_grade)
     }
 
-    fn algebra(&self) -> &Algebra {
+    pub fn algebra(&self) -> &Algebra {
         match self {
             SubAlgebra::Even(a) => a,
             SubAlgebra::Odd(a) => a,
@@ -335,28 +322,27 @@ pub enum Type {
     SubAlgebra(SubAlgebra),
 }
 
-impl IntoIterator for Type {
-    type Item = Blade;
-    type IntoIter = impl Iterator<Item = Blade>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        match self {
-            Type::Zero(_) => vec![],
-            Type::Grade(grade) => grade.into_iter().collect(),
-            Type::SubAlgebra(sub) => sub.into_iter().collect(),
-        }
-        .into_iter()
-    }
-}
-
 impl Type {
-    pub fn iter(alg: Algebra) -> Vec<Self> {
-        let mut vec = vec![Type::Zero(alg)];
+    pub fn algebra(&self) -> Algebra {
+        match self {
+            Self::Zero(a) => *a,
+            Self::Grade(g) => g.1,
+            Self::SubAlgebra(s) => *s.algebra(),
+        }
+    }
 
-        vec.extend(alg.grades_without_scalar().map(Type::Grade));
-        vec.extend(alg.subalgebras().map(Type::SubAlgebra));
+    pub fn iter(alg: &Algebra) -> impl Iterator<Item = Type> + '_ {
+        std::iter::once(Type::Zero(*alg))
+            .chain(alg.grades_without_scalar().map(Type::Grade))
+            .chain(alg.subalgebras().map(Type::SubAlgebra))
+    }
 
-        vec
+    pub fn blades(&self) -> Box<dyn Iterator<Item = Blade> + '_> {
+        match self {
+            Type::Zero(_) => Box::new(std::iter::empty()),
+            Type::Grade(grade) => Box::new(grade.blades()),
+            Type::SubAlgebra(sub) => Box::new(sub.blades()),
+        }
     }
 
     pub fn from_iter<T: IntoIterator<Item = Blade>>(iter: T, alg: Algebra) -> Self {
@@ -454,7 +440,7 @@ mod tests {
     fn bases_pseudovector() {
         let alg = Algebra::new(3, 0, 0);
 
-        assert_eq!(alg.blade(0b_0111), alg.psuedovector());
+        assert_eq!(alg.blade(0b_0111), alg.pseudovector());
     }
 
     #[test]

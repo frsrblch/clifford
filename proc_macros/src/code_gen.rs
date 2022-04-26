@@ -264,10 +264,11 @@ impl Grade {
             quote! { #f: self * rhs.#f, }
         });
 
-        let type_ops = self.algebra().types().into_iter().flat_map(|t| {
-            ProductOp::iter().map(move |op| {
-                MulProduct {
-                    lhs: *self,
+        let alg = self.algebra();
+        let type_ops = alg.types().flat_map(|t| {
+            BinaryOp::iter().map(move |op| {
+                ImplementBinaryOp {
+                    lhs: self.as_type(),
                     rhs: t,
                     op,
                 }
@@ -439,11 +440,11 @@ impl SubAlgebra {
             quote! { #f: self * rhs.#f, }
         });
 
-        let type_ops = self.algebra().types().into_iter().flat_map(|t| {
-            ProductOp::iter().map(move |op| {
-                MulProduct {
-                    lhs: *self,
-                    rhs: t,
+        let type_ops = self.algebra().types().into_iter().flat_map(|rhs| {
+            BinaryOp::iter().map(move |op| {
+                ImplementBinaryOp {
+                    lhs: self.as_type(),
+                    rhs,
                     op,
                 }
                 .implement()
@@ -556,103 +557,57 @@ impl Type {
     }
 }
 
-pub trait CompoundType {
-    fn type_ident(&self) -> proc_macro2::Ident;
-    fn algebra(&self) -> Algebra;
-}
-
-impl CompoundType for Grade {
-    fn type_ident(&self) -> Ident {
-        self.type_ident()
-    }
-
-    fn algebra(&self) -> Algebra {
-        self.1
-    }
-}
-
-impl CompoundType for SubAlgebra {
-    fn type_ident(&self) -> Ident {
-        self.type_ident()
-    }
-
-    fn algebra(&self) -> Algebra {
-        match self {
-            SubAlgebra::Even(alg) => *alg,
-            SubAlgebra::Odd(alg) => *alg,
-        }
-    }
-}
-
-impl CompoundType for Type {
-    fn type_ident(&self) -> Ident {
-        self.type_ident()
-    }
-
-    fn algebra(&self) -> Algebra {
-        match self {
-            Type::Zero(alg) => *alg,
-            Type::Grade(grade) => grade.1,
-            Type::SubAlgebra(sub) => sub.algebra(),
-        }
-    }
-}
-
-pub struct MulProduct<A, B> {
-    pub lhs: A,
-    pub rhs: B,
-    pub op: ProductOp,
+pub struct ImplementBinaryOp {
+    pub lhs: Type,
+    pub rhs: Type,
+    pub op: BinaryOp,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum ProductOp {
+pub enum BinaryOp {
     Mul,
     Dot,
     Wedge,
 }
 
-impl ProductOp {
+impl BinaryOp {
     pub fn iter() -> impl Iterator<Item = Self> + 'static {
         [Self::Mul, Self::Dot, Self::Wedge].into_iter()
     }
 
     pub fn call(&self, lhs: Blade, rhs: Blade) -> (Multiplier, Blade) {
         match self {
-            ProductOp::Mul => lhs * rhs,
-            ProductOp::Dot => lhs.dot(rhs),
-            ProductOp::Wedge => lhs.wedge(rhs),
+            BinaryOp::Mul => lhs * rhs,
+            BinaryOp::Dot => lhs.dot(rhs),
+            BinaryOp::Wedge => lhs.wedge(rhs),
         }
     }
 
     pub fn trait_ty(&self) -> TokenStream {
         match self {
-            ProductOp::Mul => quote! { std::ops::Mul },
-            ProductOp::Dot => quote! { Dot },
-            ProductOp::Wedge => quote! { Wedge },
+            BinaryOp::Mul => quote! { std::ops::Mul },
+            BinaryOp::Dot => quote! { crate::Dot },
+            BinaryOp::Wedge => quote! { crate::Wedge },
         }
     }
 
     pub fn trait_fn(&self) -> TokenStream {
         match self {
-            ProductOp::Mul => quote! { mul },
-            ProductOp::Dot => quote! { dot },
-            ProductOp::Wedge => quote! { wedge },
+            BinaryOp::Mul => quote! { mul },
+            BinaryOp::Dot => quote! { dot },
+            BinaryOp::Wedge => quote! { wedge },
         }
     }
 }
 
-impl<A, B> MulProduct<A, B>
-where
-    A: CompoundType + IntoIterator<Item = Blade> + Copy,
-    B: CompoundType + IntoIterator<Item = Blade> + Copy,
-{
+impl ImplementBinaryOp {
     fn output(&self) -> Type {
         let iter = self
             .lhs
-            .into_iter()
+            .blades()
             .flat_map(|lhs_b| {
                 self.rhs
-                    .into_iter()
+                    .blades()
                     .map(move |rhs_b| self.op.call(lhs_b, rhs_b))
             })
             .filter_map(|(multiplier, blade)| {
@@ -669,7 +624,7 @@ where
         let (ty, blades) = match self.output() {
             Type::Zero(_) => return quote! { Zero },
             Type::Grade(grade) => {
-                let blades = grade.into_iter().collect::<Vec<_>>();
+                let blades = grade.blades().collect::<Vec<_>>();
                 if grade.0 == 0 {
                     (None, blades)
                 } else {
@@ -679,7 +634,7 @@ where
             }
             Type::SubAlgebra(sub) => {
                 let ty = sub.type_ident();
-                let blades = sub.into_iter().collect::<Vec<_>>();
+                let blades = sub.blades().collect::<Vec<_>>();
                 (Some(ty), blades)
             }
         };
@@ -690,9 +645,9 @@ where
 
             let products = self
                 .lhs
-                .into_iter()
+                .blades()
                 .flat_map(|lhs_b| {
-                    self.rhs.into_iter().map(move |rhs_b| {
+                    self.rhs.blades().map(move |rhs_b| {
                         let (product, blade) = self.op.call(lhs_b, rhs_b);
                         (lhs_b, rhs_b, product, blade)
                     })
