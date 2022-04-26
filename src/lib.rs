@@ -60,6 +60,10 @@ impl const From<Zero> for f64 {
 pub mod pga_3d {
     proc_macros::clifford!(3, 0, 1);
 
+    pub const fn point(x: f64, y: f64, z: f64) -> Vector {
+        Vector::new(x, y, z, 1.)
+    }
+
     #[test]
     fn vec_mul() {
         let a = Vector::new(2., 3., 4., 1.);

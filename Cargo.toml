@@ -14,6 +14,7 @@ criterion = "0.3.5"
 [[bench]]
 name = "mul"
 harness = false
+required-features = ["pga_3d"]
 
 [features]
 pga_3d = []
