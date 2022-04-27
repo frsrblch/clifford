@@ -47,7 +47,7 @@ impl ToTokens for Multiplier {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let t = match self {
             Multiplier::One => quote! { f64 },
-            Multiplier::Zero => quote! { Zero },
+            Multiplier::Zero => quote! { crate::Zero },
             Multiplier::NegOne => quote! { f64 },
         };
         tokens.extend(t);
@@ -63,7 +63,7 @@ impl Blade {
             let (multiplier, output) = *self * rhs;
 
             let output_ty = match multiplier {
-                Multiplier::Zero => quote! { Zero },
+                Multiplier::Zero => quote! { crate::Zero },
                 _ => {
                     let output_ty = output.type_ident();
                     quote! { #output_ty }
@@ -71,7 +71,7 @@ impl Blade {
             };
 
             let expr = match (multiplier, output) {
-                (Multiplier::Zero, _) => quote! { Zero },
+                (Multiplier::Zero, _) => quote! { crate::Zero },
                 (Multiplier::One, b) => {
                     if b == self.1.scalar() {
                         quote! { self.0 * rhs.0 }
@@ -107,8 +107,8 @@ impl Blade {
             #[derive(Default, Copy, Clone, PartialEq, PartialOrd)]
             pub struct #ty(f64);
 
-            impl const From<Zero> for #ty {
-                fn from(_: Zero) -> #ty {
+            impl const From<crate::Zero> for #ty {
+                fn from(_: crate::Zero) -> #ty {
                     #ty(0.)
                 }
             }
@@ -140,25 +140,25 @@ impl Blade {
                 }
             }
 
-            impl const std::ops::Mul<Zero> for #ty {
-                type Output = Zero;
-                fn mul(self, rhs: Zero) -> Zero {
+            impl const std::ops::Mul<crate::Zero> for #ty {
+                type Output = crate::Zero;
+                fn mul(self, rhs: crate::Zero) -> crate::Zero {
                     rhs
                 }
             }
 
             #(#mul_blades)*
 
-            impl const std::ops::Add<Zero> for #ty {
+            impl const std::ops::Add<crate::Zero> for #ty {
                 type Output = #ty;
-                fn add(self, _rhs: Zero) -> #ty {
+                fn add(self, _rhs: crate::Zero) -> #ty {
                     self
                 }
             }
 
-            impl const std::ops::Sub<Zero> for #ty {
+            impl const std::ops::Sub<crate::Zero> for #ty {
                 type Output = #ty;
-                fn sub(self, _rhs: Zero) -> #ty {
+                fn sub(self, _rhs: crate::Zero) -> #ty {
                     self
                 }
             }
@@ -236,7 +236,7 @@ impl Grade {
         let zero_fields = self.blades().map(|b| {
             let f = b.field();
             let ty = b.type_ident();
-            quote! { #f: #ty::from(Zero), }
+            quote! { #f: #ty::from(crate::Zero), }
         });
 
         let neg_fields = self.blades().map(|b| {
@@ -292,8 +292,8 @@ impl Grade {
                 }
             }
 
-            impl const From<Zero> for #ty {
-                fn from(_: Zero) -> #ty {
+            impl const From<crate::Zero> for #ty {
+                fn from(_: crate::Zero) -> #ty {
                     Self {
                         #(#zero_fields)*
                     }
@@ -318,9 +318,9 @@ impl Grade {
                 }
             }
 
-            impl const std::ops::Add<Zero> for #ty {
+            impl const std::ops::Add<crate::Zero> for #ty {
                 type Output = Self;
-                fn add(self, _rhs: Zero) -> Self {
+                fn add(self, _rhs: crate::Zero) -> Self {
                     self
                 }
             }
@@ -334,9 +334,9 @@ impl Grade {
                 }
             }
 
-            impl const std::ops::Sub<Zero> for #ty {
+            impl const std::ops::Sub<crate::Zero> for #ty {
                 type Output = Self;
-                fn sub(self, _rhs: Zero) -> Self {
+                fn sub(self, _rhs: crate::Zero) -> Self {
                     self
                 }
             }
@@ -412,7 +412,7 @@ impl SubAlgebra {
         let zero_fields = self.blades().map(|b| {
             let f = b.field();
             let ty = b.type_ident();
-            quote! { #f: #ty::from(Zero), }
+            quote! { #f: #ty::from(crate::Zero), }
         });
 
         let neg_fields = self.blades().map(|b| {
@@ -467,8 +467,8 @@ impl SubAlgebra {
                 }
             }
 
-            impl const From<Zero> for #ty {
-                fn from(_: Zero) -> #ty {
+            impl const From<crate::Zero> for #ty {
+                fn from(_: crate::Zero) -> #ty {
                     Self {
                         #(#zero_fields)*
                     }
@@ -484,9 +484,9 @@ impl SubAlgebra {
                 }
             }
 
-            impl const std::ops::Add<Zero> for #ty {
+            impl const std::ops::Add<crate::Zero> for #ty {
                 type Output = #ty;
-                fn add(self, _rhs: Zero) -> Self::Output {
+                fn add(self, _rhs: crate::Zero) -> Self::Output {
                     self
                 }
             }
@@ -500,9 +500,9 @@ impl SubAlgebra {
                 }
             }
 
-            impl const std::ops::Sub<Zero> for #ty {
+            impl const std::ops::Sub<crate::Zero> for #ty {
                 type Output = #ty;
-                fn sub(self, _rhs: Zero) -> Self::Output {
+                fn sub(self, _rhs: crate::Zero) -> Self::Output {
                     self
                 }
             }
@@ -548,11 +548,11 @@ impl SubAlgebra {
 }
 
 impl Type {
-    pub fn type_ident(&self) -> Ident {
+    pub fn type_ident(&self) -> TokenStream {
         match self {
-            Type::Zero(_) => Ident::new("Zero", Span::mixed_site()),
-            Type::Grade(grade) => grade.type_ident(),
-            Type::SubAlgebra(sub) => sub.type_ident(),
+            Type::Zero(_) => quote! { crate::Zero },
+            Type::Grade(grade) => grade.type_ident().to_token_stream(),
+            Type::SubAlgebra(sub) => sub.type_ident().to_token_stream(),
         }
     }
 }
@@ -622,7 +622,7 @@ impl ImplementBinaryOp {
 
     fn expr(&self) -> TokenStream {
         let (ty, blades) = match self.output() {
-            Type::Zero(_) => return quote! { Zero },
+            Type::Zero(_) => return quote! { crate::Zero },
             Type::Grade(grade) => {
                 let blades = grade.blades().collect::<Vec<_>>();
                 if grade.0 == 0 {
@@ -663,9 +663,9 @@ impl ImplementBinaryOp {
             if ty_some {
                 if products.is_empty() {
                     if ty_some {
-                        quote! { #f: Zero.into(), }
+                        quote! { #f: crate::Zero.into(), }
                     } else {
-                        quote! { Zero.into(), }
+                        quote! { crate::Zero.into(), }
                     }
                 } else {
                     if ty_some {
