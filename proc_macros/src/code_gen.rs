@@ -32,6 +32,7 @@ impl Algebra {
 
 fn zero() -> TokenStream {
     quote! {
+        // TODO check that type paths are correct according to best practices
         pub use crate::Zero;
     }
 }

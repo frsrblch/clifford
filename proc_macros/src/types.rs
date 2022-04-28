@@ -225,8 +225,6 @@ impl std::ops::Mul for Blade {
     type Output = (Multiplier, Blade);
 
     fn mul(mut self, mut rhs: Self) -> Self::Output {
-        assert_eq!(self.1, rhs.1, "different algebras");
-
         let mut multiplier = Multiplier::One;
 
         for base in self.1.bases() {
