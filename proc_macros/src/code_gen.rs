@@ -4,21 +4,13 @@ use quote::{quote, ToTokens};
 
 impl Algebra {
     pub fn define(&self) -> TokenStream {
-        let traits = traits();
-
         let types = self.types().map(|ty| ty.define());
 
         quote! {
-            #traits
+            pub use crate::{Dot, Wedge, Commutator, ZeroValue};
 
             #( #types )*
         }
-    }
-}
-
-fn traits() -> TokenStream {
-    quote! {
-        pub use crate::{Dot, Wedge, Commutator};
     }
 }
 
@@ -50,9 +42,6 @@ impl Grade {
             4 => "Quadvector",
             5 => "Pentavector",
             6 => "Hexavector",
-            7 => "Heptavector",
-            8 => "Octovector",
-            9 => "Nonavector",
             _ => unimplemented!("not implemented for grade: {}", self.0),
         };
         Ident::new(str, Span::mixed_site())
@@ -70,9 +59,17 @@ impl SubAlgebra {
 }
 
 impl Type {
+    pub fn type_ident(&self) -> TokenStream {
+        match self {
+            Type::Zero(_) => quote! { crate::Zero },
+            Type::Grade(grade) => grade.type_ident().to_token_stream(),
+            Type::SubAlgebra(sub) => sub.type_ident().to_token_stream(),
+        }
+    }
+
     pub fn define(&self) -> TokenStream {
-        if matches!(*self, Type::Zero(_)) {
-            return quote! {};
+        if let Type::Zero(_) = self {
+            return quote!();
         }
 
         let ty = self.type_ident();
@@ -128,14 +125,11 @@ impl Type {
         });
 
         let algebra = self.algebra();
-        let type_ops = algebra.types().into_iter().flat_map(|rhs| {
-            BinaryOp::iter().map(move |op| {
-                ImplementBinaryOp {
-                    lhs: *self,
-                    rhs,
-                    op,
-                }
-                .implement()
+        let type_ops = algebra.types().flat_map(|rhs| {
+            BinaryOp::iter().map(move |op| ImplBinaryOp {
+                lhs: *self,
+                rhs,
+                op,
             })
         });
 
@@ -155,8 +149,8 @@ impl Type {
                 }
             }
 
-            impl const From<crate::Zero> for #ty {
-                fn from(_: crate::Zero) -> #ty {
+            impl const crate::ZeroValue for #ty {
+                fn zero() -> Self {
                     Self {
                         #(#zero_fields)*
                     }
@@ -172,26 +166,12 @@ impl Type {
                 }
             }
 
-            impl const std::ops::Add<crate::Zero> for #ty {
-                type Output = #ty;
-                fn add(self, _rhs: crate::Zero) -> Self::Output {
-                    self
-                }
-            }
-
             impl const std::ops::Add for #ty {
                 type Output = #ty;
                 fn add(self, rhs: Self) -> Self {
                     Self {
                         #( #add_self_fields )*
                     }
-                }
-            }
-
-            impl const std::ops::Sub<crate::Zero> for #ty {
-                type Output = #ty;
-                fn sub(self, _rhs: crate::Zero) -> Self::Output {
-                    self
                 }
             }
 
@@ -236,17 +216,7 @@ impl Type {
     }
 }
 
-impl Type {
-    pub fn type_ident(&self) -> TokenStream {
-        match self {
-            Type::Zero(_) => quote! { crate::Zero },
-            Type::Grade(grade) => grade.type_ident().to_token_stream(),
-            Type::SubAlgebra(sub) => sub.type_ident().to_token_stream(),
-        }
-    }
-}
-
-pub struct ImplementBinaryOp {
+pub struct ImplBinaryOp {
     pub lhs: Type,
     pub rhs: Type,
     pub op: BinaryOp,
@@ -289,7 +259,7 @@ impl BinaryOp {
     }
 }
 
-impl ImplementBinaryOp {
+impl ImplBinaryOp {
     fn output(&self) -> Type {
         let iter = self
             .lhs
@@ -304,105 +274,106 @@ impl ImplementBinaryOp {
     }
 
     fn expr(&self) -> TokenStream {
-        let (ty, blades) = match self.output() {
+        let output = self.output();
+
+        let is_scalar = match output {
+            Type::Grade(grade) => grade.is_scalar(),
+            _ => false,
+        };
+
+        let (ty, blades) = &match self.output() {
             Type::Zero(_) => return quote! { crate::Zero },
             Type::Grade(grade) => {
+                let ty = grade.type_ident();
                 let blades = grade.blades().collect::<Vec<_>>();
-                if grade.0 == 0 {
-                    (None, blades)
-                } else {
-                    let ty = grade.type_ident();
-                    (Some(ty), blades)
-                }
+                (ty, blades)
             }
             Type::SubAlgebra(sub) => {
                 let ty = sub.type_ident();
                 let blades = sub.blades().collect::<Vec<_>>();
-                (Some(ty), blades)
+                (ty, blades)
             }
         };
 
-        let ty_some = ty.is_some();
-        let fields = blades.into_iter().map(|b| {
-            let f = b.field();
-
+        let fields = blades.iter().map(|&blade| {
             let products = self
                 .lhs
                 .blades()
-                .flat_map(|lhs_b| {
-                    self.rhs.blades().map(move |rhs_b| {
-                        let product = self.op.call(lhs_b, rhs_b);
-                        (lhs_b, rhs_b, product)
+                .flat_map(|lhs| {
+                    self.rhs.blades().map(move |rhs| {
+                        let product = self.op.call(lhs, rhs);
+                        (lhs, rhs, product)
                     })
                 })
-                .filter(|(_, _, product)| {
-                    if let Some(blade) = product.blade() {
-                        blade == b
-                    } else {
-                        false
+                .filter_map(|(lhs, rhs, product)| match product {
+                    Product::Pos(b) | Product::Neg(b) if blade == b => {
+                        let lhs = lhs.field();
+                        let rhs = rhs.field();
+                        let expr = quote! { self.#lhs * rhs.#rhs };
+
+                        if product.is_neg() {
+                            Some(quote! { -(#expr) })
+                        } else {
+                            Some(expr)
+                        }
                     }
-                })
-                .map(|(lhs_b, rhs_b, p)| {
-                    let lhs_f = lhs_b.field();
-                    let rhs_f = rhs_b.field();
-                    match p {
-                        Product::Pos(_) => quote! { self.#lhs_f * rhs.#rhs_f },
-                        Product::Neg(_) => quote! { -(self.#lhs_f * rhs.#rhs_f) },
-                        Product::Zero => unreachable!(),
-                    }
+                    _ => None,
                 })
                 .collect::<syn::punctuated::Punctuated<_, syn::token::Add>>();
 
-            if ty_some {
-                if products.is_empty() {
-                    if ty_some {
-                        quote! { #f: 0., }
-                    } else {
-                        quote! { 0., }
-                    }
-                } else {
-                    if ty_some {
-                        quote! { #f: #products, }
-                    } else {
-                        quote! { #products }
-                    }
-                }
+            let expr = if products.is_empty() {
+                quote! { 0. }
             } else {
                 quote! { #products }
+            };
+
+            if is_scalar {
+                expr
+            } else {
+                let f = blade.field();
+                quote! { #f: #expr, }
             }
         });
 
-        if let Some(ty) = ty {
+        if is_scalar {
+            quote! {
+                #( #fields )*
+            }
+        } else {
             quote! {
                 #ty {
                     #( #fields )*
                 }
             }
-        } else {
-            quote! {
-                #( #fields )*
-            }
         }
     }
+}
 
-    pub fn implement(&self) -> TokenStream {
+impl ToTokens for ImplBinaryOp {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
         let ty = self.lhs.type_ident();
         let rhs_ty = self.rhs.type_ident();
         let trait_ty = self.op.trait_ty();
         let trait_fn = self.op.trait_fn();
-        let output_ty = self.output().type_ident();
+
+        let output = self.output();
+
+        let output_ty = output.type_ident();
         let expr = self.expr();
-        let rhs_ident = match self.output() {
+        let rhs_ident = match output {
             Type::Zero(_) => quote! { _ },
             _ => quote! { rhs },
         };
-        quote! {
+
+        let op_impl = quote! {
             impl const #trait_ty<#rhs_ty> for #ty {
                 type Output = #output_ty;
                 fn #trait_fn(self, #rhs_ident: #rhs_ty) -> Self::Output {
                     #expr
                 }
             }
-        }
+        };
+
+        tokens.extend(op_impl)
     }
 }

@@ -1,5 +1,3 @@
-use syn::parse::{Parse, ParseStream};
-
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Algebra {
     one: u8,
@@ -7,28 +5,13 @@ pub struct Algebra {
     zero: u8,
 }
 
-impl Parse for Algebra {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        use syn::token::Comma;
-        use syn::LitInt;
-
-        let one: LitInt = input.parse()?;
-        let _comma: Comma = input.parse()?;
-        let neg_one: LitInt = input.parse()?;
-        let _comma: Comma = input.parse()?;
-        let zero: LitInt = input.parse()?;
-
-        let one = one.base10_parse()?;
-        let neg_one = neg_one.base10_parse()?;
-        let zero = zero.base10_parse()?;
-
-        Ok(Algebra { one, neg_one, zero })
-    }
-}
-
 impl Algebra {
-    #[allow(dead_code)]
-    pub fn new(one: u8, zero: u8, neg_one: u8) -> Self {
+    pub fn new(one: u8, neg_one: u8, zero: u8) -> Self {
+        assert!(
+            one + zero + neg_one <= 6,
+            "too many bases to define algebra"
+        );
+
         Self { one, zero, neg_one }
     }
 
@@ -73,11 +56,11 @@ impl Algebra {
         for i in 1..=self.dimensions() {
             set.insert(i);
         }
-        self.blade(set.0)
+        self.blade(set)
     }
 
     pub fn scalar(&self) -> Blade {
-        self.blade(0)
+        self.blade(BladeSet::default())
     }
 
     pub fn grade(&self, grade: u8) -> Grade {
@@ -101,11 +84,11 @@ impl Algebra {
     fn blades_unsorted(&self) -> impl Iterator<Item = Blade> + '_ {
         (0..=self.pseudoscalar().0 .0)
             .into_iter()
-            .map(|set| self.blade(set))
+            .map(|set| self.blade(BladeSet(set)))
     }
 
-    pub fn blade(&self, set: u32) -> Blade {
-        Blade(BladeSet(set), *self)
+    pub fn blade(&self, set: BladeSet) -> Blade {
+        Blade(set, *self)
     }
 
     pub fn dimensions(&self) -> u8 {
@@ -121,6 +104,10 @@ pub enum Product {
 }
 
 impl Product {
+    pub fn is_neg(&self) -> bool {
+        matches!(self, Product::Neg(_))
+    }
+
     pub fn blade(self) -> Option<Blade> {
         match self {
             Self::Pos(blade) | Self::Neg(blade) => Some(blade),
@@ -168,6 +155,10 @@ pub struct Grade(pub u8, pub Algebra);
 impl Grade {
     pub fn blades(&self) -> impl Iterator<Item = Blade> + '_ {
         self.1.blades_unsorted().filter(|b| b.0.len() == self.0)
+    }
+
+    pub fn is_scalar(&self) -> bool {
+        self.0 == 0
     }
 
     pub fn is_even(self) -> bool {
@@ -277,8 +268,8 @@ impl std::ops::Mul for Blade {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct BladeSet(pub u32);
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+pub struct BladeSet(pub u64);
 
 impl BladeSet {
     pub fn contains(&self, index: u8) -> bool {
@@ -405,6 +396,12 @@ mod tests {
     #[should_panic]
     fn no_bases() {
         Algebra::new(0, 0, 0).square(0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn too_many_bases() {
+        Algebra::new(7, 0, 0);
     }
 
     #[test]

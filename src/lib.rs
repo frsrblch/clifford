@@ -12,6 +12,10 @@
 // Geometric algebra feature set:
 //   https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features.html
 
+pub trait ZeroValue {
+    fn zero() -> Self;
+}
+
 pub trait Dot<Rhs> {
     type Output;
     fn dot(self, rhs: Rhs) -> Self::Output;
@@ -203,10 +207,10 @@ pub mod cga_2d {
     impl<T, U> IsFlat for T
     where
         T: crate::Wedge<Vector, Output = U>,
-        U: From<crate::Zero> + PartialEq,
+        U: ZeroValue + PartialEq,
     {
         fn is_flat(self) -> bool {
-            self.wedge(N_BAR) == U::from(crate::Zero)
+            self.wedge(N_BAR) == U::zero()
         }
     }
 
@@ -260,10 +264,10 @@ pub mod cga_3d {
     impl<T, U> IsFlat for T
     where
         T: crate::Wedge<Vector, Output = U>,
-        U: From<crate::Zero> + PartialEq,
+        U: ZeroValue + PartialEq,
     {
         fn is_flat(self) -> bool {
-            self.wedge(N_BAR) == U::from(crate::Zero)
+            self.wedge(N_BAR) == U::zero()
         }
     }
 
