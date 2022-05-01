@@ -148,6 +148,13 @@ impl Blade {
                 }
             }
 
+            impl const std::ops::Div<f64> for #ty {
+                type Output = #ty;
+                fn div(self, rhs: f64) -> #ty {
+                    #ty(self.0 / rhs)
+                }
+            }
+
             #(#mul_blades)*
 
             impl const std::ops::Add<crate::Zero> for #ty {
@@ -265,6 +272,11 @@ impl Grade {
             quote! { #f: self * rhs.#f, }
         });
 
+        let div_f64_fields = self.blades().map(|b| {
+            let f = b.field();
+            quote! { #f: self.#f / rhs, }
+        });
+
         let alg = self.algebra();
         let type_ops = alg.types().flat_map(|t| {
             BinaryOp::iter().map(move |op| {
@@ -347,6 +359,15 @@ impl Grade {
                 fn mul(self, rhs: f64) -> Self {
                     Self {
                         #(#mul_f64_fields)*
+                    }
+                }
+            }
+
+            impl const std::ops::Div<f64> for #ty {
+                type Output = Self;
+                fn div(self, rhs: f64) -> Self {
+                    Self {
+                        #(#div_f64_fields)*
                     }
                 }
             }
@@ -441,6 +462,11 @@ impl SubAlgebra {
             quote! { #f: self * rhs.#f, }
         });
 
+        let div_f64_fields = self.blades().map(|b| {
+            let f = b.field();
+            quote! { #f: self.#f / rhs, }
+        });
+
         let type_ops = self.algebra().types().into_iter().flat_map(|rhs| {
             BinaryOp::iter().map(move |op| {
                 ImplementBinaryOp {
@@ -531,6 +557,15 @@ impl SubAlgebra {
                 fn mul(self, rhs: #ty) -> Self::Output {
                     #ty {
                         #(#f64_mul_fields)*
+                    }
+                }
+            }
+
+            impl const std::ops::Div<f64> for #ty {
+                type Output = Self;
+                fn div(self, rhs: f64) -> Self {
+                    Self {
+                        #(#div_f64_fields)*
                     }
                 }
             }
