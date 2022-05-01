@@ -166,14 +166,6 @@ pub struct Basis(pub u8, pub Algebra);
 pub struct Grade(pub u8, pub Algebra);
 
 impl Grade {
-    pub fn as_type(&self) -> Type {
-        Type::Grade(*self)
-    }
-
-    pub fn algebra(&self) -> Algebra {
-        self.1
-    }
-
     pub fn blades(&self) -> impl Iterator<Item = Blade> + '_ {
         self.1.blades_unsorted().filter(|b| b.0.len() == self.0)
     }
@@ -321,10 +313,6 @@ pub enum SubAlgebra {
 }
 
 impl SubAlgebra {
-    pub fn as_type(&self) -> Type {
-        Type::SubAlgebra(*self)
-    }
-
     pub fn blades(&self) -> impl Iterator<Item = Blade> + '_ {
         let algebra = self.algebra();
         let by_grade = match self {

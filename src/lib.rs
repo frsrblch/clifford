@@ -103,7 +103,6 @@ pub mod va_3d {
                 e2: y,
                 e3: z,
             } = x;
-            let (x, y, z) = (x.0, y.0, z.0);
             let (x2, y2, z2) = (x * x, y * y, z * z);
             let da = Vector::new(
                 -2. * x2 + y2 + z2 - 3. * x * (y + z),
@@ -171,121 +170,121 @@ pub mod pga_3d {
     }
 }
 
-// #[cfg(feature = "cga_2d")]
-// pub mod cga_2d {
-//     proc_macros::clifford!(3, 1, 0);
-//
-//     /// Point at the origin
-//     pub const N: Vector = Vector::new(0., 0., 0.5, 0.5);
-//
-//     /// Point through infinity
-//     pub const N_BAR: Vector = Vector::new(0., 0., -1., 1.);
-//
-//     pub const fn point(x: f64, y: f64) -> Vector {
-//         let x2 = x * x + y * y;
-//         Vector::new(x, y, 0.5 - 0.5 * x2, 0.5 + 0.5 * x2)
-//     }
-//
-//     #[test]
-//     fn vector_test() {
-//         let x = Vector::new(2., 3., 0., 0.);
-//         let x2 = 2. * 2. + 3. * 3.;
-//         let expected = x + 0.5 * x2 * N_BAR + N;
-//
-//         let actual = point(2., 3.);
-//
-//         assert_eq!(expected, actual);
-//     }
-//
-//     trait IsFlat {
-//         fn is_flat(self) -> bool;
-//     }
-//
-//     impl<T, U> IsFlat for T
-//     where
-//         T: Wedge<Vector, Output = U>,
-//         U: From<Zero> + PartialEq,
-//     {
-//         fn is_flat(self) -> bool {
-//             self.wedge(N_BAR) == U::from(Zero)
-//         }
-//     }
-//
-//     #[test]
-//     fn flat_test() {
-//         let o = point(0., 0.);
-//         let a = point(1., 0.);
-//         let b = point(0., 1.);
-//
-//         let points = o.wedge(a);
-//         let line = points.wedge(N_BAR);
-//         let circle = points.wedge(b);
-//
-//         assert!(!o.is_flat());
-//         assert!(!points.is_flat());
-//         assert!(!circle.is_flat());
-//         assert!(line.is_flat());
-//     }
-// }
-//
-// #[cfg(feature = "cga_3d")]
-// pub mod cga_3d {
-//     proc_macros::clifford!(4, 1, 0);
-//
-//     /// Point at the origin
-//     pub const N: Vector = Vector::new(0., 0., 0., 0.5, 0.5);
-//
-//     /// Point through infinity
-//     pub const N_BAR: Vector = Vector::new(0., 0., 0., -1., 1.);
-//
-//     pub const fn point(x: f64, y: f64, z: f64) -> Vector {
-//         let x2 = x * x + y * y + z * z;
-//         Vector::new(x, y, z, 0.5 - 0.5 * x2, 0.5 + 0.5 * x2)
-//     }
-//
-//     #[test]
-//     fn vector_test() {
-//         let x = Vector::new(2., 3., 5., 0., 0.);
-//         let x2 = 2. * 2. + 3. * 3. + 5. * 5.;
-//         let expected = x + 0.5 * x2 * N_BAR + N;
-//
-//         let actual = point(2., 3., 5.);
-//
-//         assert_eq!(expected, actual);
-//     }
-//
-//     trait IsFlat {
-//         fn is_flat(self) -> bool;
-//     }
-//
-//     impl<T, U> IsFlat for T
-//     where
-//         T: Wedge<Vector, Output = U>,
-//         U: From<Zero> + PartialEq,
-//     {
-//         fn is_flat(self) -> bool {
-//             self.wedge(N_BAR) == U::from(Zero)
-//         }
-//     }
-//
-//     #[test]
-//     fn flat_test() {
-//         let o = point(0., 0., 0.);
-//         let a = point(1., 0., 0.);
-//         let b = point(0., 1., 0.);
-//         let c = point(0., 0., 1.);
-//
-//         let points: Bivector = o.wedge(a);
-//         let line: Trivector = points.wedge(N_BAR);
-//         let circle: Trivector = points.wedge(b);
-//         let plane: Quadvector = line.wedge(c);
-//         let sphere: Quadvector = circle.wedge(c);
-//
-//         assert!(!o.is_flat());
-//         assert!(!points.is_flat());
-//         assert!(!circle.is_flat());
-//         assert!(!sphere.is_flat());
-//         assert!(line.is_flat());
-//         assert!(plane.is_flat());
-//     }
-// }
+#[cfg(feature = "cga_2d")]
+pub mod cga_2d {
+    proc_macros::clifford!(3, 1, 0);
+
+    /// Point at the origin
+    pub const N: Vector = Vector::new(0., 0., 0.5, 0.5);
+
+    /// Point through infinity
+    pub const N_BAR: Vector = Vector::new(0., 0., -1., 1.);
+
+    pub const fn point(x: f64, y: f64) -> Vector {
+        let x2 = x * x + y * y;
+        Vector::new(x, y, 0.5 - 0.5 * x2, 0.5 + 0.5 * x2)
+    }
+
+    #[test]
+    fn vector_test() {
+        let x = Vector::new(2., 3., 0., 0.);
+        let x2 = 2. * 2. + 3. * 3.;
+        let expected = x + 0.5 * x2 * N_BAR + N;
+
+        let actual = point(2., 3.);
+
+        assert_eq!(expected, actual);
+    }
+
+    trait IsFlat {
+        fn is_flat(self) -> bool;
+    }
+
+    impl<T, U> IsFlat for T
+    where
+        T: crate::Wedge<Vector, Output = U>,
+        U: From<crate::Zero> + PartialEq,
+    {
+        fn is_flat(self) -> bool {
+            self.wedge(N_BAR) == U::from(crate::Zero)
+        }
+    }
+
+    #[test]
+    fn flat_test() {
+        let o = point(0., 0.);
+        let a = point(1., 0.);
+        let b = point(0., 1.);
+
+        let points = o.wedge(a);
+        let line = points.wedge(N_BAR);
+        let circle = points.wedge(b);
+
+        assert!(!o.is_flat());
+        assert!(!points.is_flat());
+        assert!(!circle.is_flat());
+        assert!(line.is_flat());
+    }
+}
+
+#[cfg(feature = "cga_3d")]
+pub mod cga_3d {
+    proc_macros::clifford!(4, 1, 0);
+
+    /// Point at the origin
+    pub const N: Vector = Vector::new(0., 0., 0., 0.5, 0.5);
+
+    /// Point through infinity
+    pub const N_BAR: Vector = Vector::new(0., 0., 0., -1., 1.);
+
+    pub const fn point(x: f64, y: f64, z: f64) -> Vector {
+        let x2 = x * x + y * y + z * z;
+        Vector::new(x, y, z, 0.5 - 0.5 * x2, 0.5 + 0.5 * x2)
+    }
+
+    #[test]
+    fn vector_test() {
+        let x = Vector::new(2., 3., 5., 0., 0.);
+        let x2 = 2. * 2. + 3. * 3. + 5. * 5.;
+        let expected = x + 0.5 * x2 * N_BAR + N;
+
+        let actual = point(2., 3., 5.);
+
+        assert_eq!(expected, actual);
+    }
+
+    trait IsFlat {
+        fn is_flat(self) -> bool;
+    }
+
+    impl<T, U> IsFlat for T
+    where
+        T: crate::Wedge<Vector, Output = U>,
+        U: From<crate::Zero> + PartialEq,
+    {
+        fn is_flat(self) -> bool {
+            self.wedge(N_BAR) == U::from(crate::Zero)
+        }
+    }
+
+    #[test]
+    fn flat_test() {
+        let o = point(0., 0., 0.);
+        let a = point(1., 0., 0.);
+        let b = point(0., 1., 0.);
+        let c = point(0., 0., 1.);
+
+        let points: Bivector = o.wedge(a);
+        let line: Trivector = points.wedge(N_BAR);
+        let circle: Trivector = points.wedge(b);
+        let plane: Quadvector = line.wedge(c);
+        let sphere: Quadvector = circle.wedge(c);
+
+        assert!(!o.is_flat());
+        assert!(!points.is_flat());
+        assert!(!circle.is_flat());
+        assert!(!sphere.is_flat());
+        assert!(line.is_flat());
+        assert!(plane.is_flat());
+    }
+}
