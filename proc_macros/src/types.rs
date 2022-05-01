@@ -21,6 +21,7 @@ impl Parse for Algebra {
         let one = one.base10_parse()?;
         let neg_one = neg_one.base10_parse()?;
         let zero = zero.base10_parse()?;
+
         Ok(Algebra { one, neg_one, zero })
     }
 }
@@ -35,17 +36,17 @@ impl Algebra {
         Basis(index, *self)
     }
 
-    pub fn square(&self, index: u8) -> Multiplier {
+    pub fn square(&self, index: u8) -> Product {
         if index == 0 {
             panic!("zero is not a valid index");
         }
 
         if index <= self.one {
-            Multiplier::One
+            Product::Pos(self.scalar())
         } else if index <= self.one + self.zero {
-            Multiplier::Zero
+            Product::Zero
         } else if index <= self.one + self.zero + self.neg_one {
-            Multiplier::NegOne
+            Product::Neg(self.scalar())
         } else {
             panic!("index out of range: {index}");
         }
@@ -67,7 +68,7 @@ impl Algebra {
         (0..=self.dimensions()).into_iter().map(|i| self.grade(i))
     }
 
-    pub fn pseudovector(&self) -> Blade {
+    pub fn pseudoscalar(&self) -> Blade {
         let mut set = BladeSet(0);
         for i in 1..=self.dimensions() {
             set.insert(i);
@@ -98,7 +99,7 @@ impl Algebra {
     }
 
     fn blades_unsorted(&self) -> impl Iterator<Item = Blade> + '_ {
-        (0..=self.pseudovector().0 .0)
+        (0..=self.pseudoscalar().0 .0)
             .into_iter()
             .map(|set| self.blade(set))
     }
@@ -113,26 +114,46 @@ impl Algebra {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum Multiplier {
-    One,
+pub enum Product {
+    Pos(Blade),
     Zero,
-    NegOne,
+    Neg(Blade),
 }
 
-impl std::ops::Mul for Multiplier {
-    type Output = Multiplier;
-
-    fn mul(self, rhs: Self) -> Self::Output {
-        use Multiplier::*;
-        match (self, rhs) {
-            (Zero, _) | (_, Zero) => Zero,
-            (One, One) | (NegOne, NegOne) => One,
-            (One, NegOne) | (NegOne, One) => NegOne,
+impl Product {
+    pub fn blade(self) -> Option<Blade> {
+        match self {
+            Self::Pos(blade) | Self::Neg(blade) => Some(blade),
+            Self::Zero => None,
         }
     }
 }
 
-impl std::ops::MulAssign for Multiplier {
+impl std::ops::Mul for Product {
+    type Output = Product;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        use Product::*;
+        match (self, rhs) {
+            (Zero, _) | (_, Zero) => Zero,
+            (Pos(lhs), Pos(rhs)) | (Neg(lhs), Neg(rhs)) => lhs * rhs,
+            (Pos(lhs), Neg(rhs)) | (Neg(lhs), Pos(rhs)) => -(lhs * rhs),
+        }
+    }
+}
+
+impl std::ops::Neg for Product {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        match self {
+            Self::Zero => Self::Zero,
+            Self::Pos(b) => Self::Neg(b),
+            Self::Neg(b) => Self::Pos(b),
+        }
+    }
+}
+
+impl std::ops::MulAssign for Product {
     fn mul_assign(&mut self, rhs: Self) {
         *self = *self * rhs;
     }
@@ -170,6 +191,10 @@ impl Grade {
 pub struct Blade(pub BladeSet, pub Algebra);
 
 impl Blade {
+    pub fn contains(&self, basis: Basis) -> bool {
+        self.1 == basis.1 && self.0.contains(basis.0)
+    }
+
     pub fn grade(&self) -> Grade {
         Grade(self.0.len(), self.1)
     }
@@ -182,53 +207,53 @@ impl Blade {
         self.grade().is_odd()
     }
 
-    pub fn dot(self, rhs: Self) -> (Multiplier, Blade) {
-        let (multiplier, blade) = self * rhs;
+    pub fn dot(self, rhs: Self) -> Product {
+        let multiplier = self * rhs;
 
-        if multiplier == Multiplier::Zero {
-            return (multiplier, blade);
-        }
+        if let Some(blade) = multiplier.blade() {
+            let a = self.0.len();
+            let b = rhs.0.len();
+            let max = a.max(b);
+            let min = a.min(b);
+            let grade = max - min;
 
-        let a = self.0.len();
-        let b = rhs.0.len();
-        let max = a.max(b);
-        let min = a.min(b);
-        let grade = max - min;
-
-        if blade.0.len() == grade {
-            (multiplier, blade)
+            if blade.0.len() == grade {
+                multiplier
+            } else {
+                Product::Zero
+            }
         } else {
-            (Multiplier::Zero, blade)
+            Product::Zero
         }
     }
 
-    pub fn wedge(self, rhs: Self) -> (Multiplier, Blade) {
-        let (multiplier, blade) = self * rhs;
+    pub fn wedge(self, rhs: Self) -> Product {
+        let multiplier = self * rhs;
 
-        if multiplier == Multiplier::Zero {
-            return (multiplier, blade);
-        }
+        if let Some(blade) = multiplier.blade() {
+            let a = self.0.len();
+            let b = rhs.0.len();
+            let grade = a + b;
 
-        let a = self.0.len();
-        let b = rhs.0.len();
-        let grade = a + b;
-
-        if blade.0.len() == grade {
-            (multiplier, blade)
+            if blade.0.len() == grade {
+                multiplier
+            } else {
+                Product::Zero
+            }
         } else {
-            (Multiplier::Zero, blade)
+            Product::Zero
         }
     }
 }
 
 impl std::ops::Mul for Blade {
-    type Output = (Multiplier, Blade);
+    type Output = Product;
 
     fn mul(mut self, mut rhs: Self) -> Self::Output {
-        let mut multiplier = Multiplier::One;
+        let mut multiplier = Product::Pos(self.1.scalar());
 
         for base in self.1.bases() {
-            if rhs.0.contains(base.0) {
+            if rhs.contains(base) {
                 let swaps = ((base.0 + 1)..=self.1.dimensions())
                     .into_iter()
                     .filter(|&b| self.0.contains(b))
@@ -239,7 +264,7 @@ impl std::ops::Mul for Blade {
                         .count();
 
                 if swaps % 2 == 1 {
-                    multiplier *= Multiplier::NegOne;
+                    multiplier *= Product::Neg(self.1.scalar());
                 }
 
                 if self.0.contains(base.0) {
@@ -252,7 +277,11 @@ impl std::ops::Mul for Blade {
 
         debug_assert!(rhs.0.is_empty());
 
-        (multiplier, self)
+        match multiplier {
+            Product::Zero => Product::Zero,
+            Product::Pos(_) => Product::Pos(self),
+            Product::Neg(_) => Product::Neg(self),
+        }
     }
 }
 
@@ -393,23 +422,23 @@ mod tests {
     #[test]
     fn one_d() {
         let alg = Algebra::new(1, 0, 0);
-        assert_eq!(Multiplier::One, alg.square(1));
+        assert_eq!(Product::Pos, alg.square(1));
         assert!(std::panic::catch_unwind(|| alg.square(2)).is_err());
     }
 
     #[test]
     fn pga() {
         let alg = Algebra::new(3, 1, 0);
-        assert_eq!(Multiplier::One, alg.square(3));
-        assert_eq!(Multiplier::Zero, alg.square(4));
+        assert_eq!(Product::Pos, alg.square(3));
+        assert_eq!(Product::Zero, alg.square(4));
         assert!(std::panic::catch_unwind(|| alg.square(5)).is_err());
     }
 
     #[test]
     fn cga() {
         let bases = Algebra::new(4, 0, 1);
-        assert_eq!(Multiplier::One, bases.square(4));
-        assert_eq!(Multiplier::NegOne, bases.square(5));
+        assert_eq!(Product::Pos, bases.square(4));
+        assert_eq!(Product::Neg, bases.square(5));
         assert!(std::panic::catch_unwind(|| bases.square(6)).is_err());
     }
 
@@ -438,7 +467,7 @@ mod tests {
     fn bases_pseudovector() {
         let alg = Algebra::new(3, 0, 0);
 
-        assert_eq!(alg.blade(0b_0111), alg.pseudovector());
+        assert_eq!(alg.blade(0b_0111), alg.pseudoscalar());
     }
 
     #[test]
@@ -460,11 +489,11 @@ mod tests {
         let e24 = alg.blade(0b_1010);
         let e5 = alg.blade(0b_1_0000);
 
-        assert_eq!((Multiplier::NegOne, alg.blade(0)), e12 * e12);
-        assert_eq!((Multiplier::One, alg.blade(0b_0101)), e12 * e23);
-        assert_eq!((Multiplier::One, alg.blade(0b_1001)), e12 * e24);
-        assert_eq!(Multiplier::Zero, (e24 * e24).0);
-        assert_eq!((Multiplier::NegOne, alg.blade(0)), e5 * e5);
+        assert_eq!((Product::Neg, alg.blade(0)), e12 * e12);
+        assert_eq!((Product::Pos, alg.blade(0b_0101)), e12 * e23);
+        assert_eq!((Product::Pos, alg.blade(0b_1001)), e12 * e24);
+        assert_eq!(Product::Zero, (e24 * e24).0);
+        assert_eq!((Product::Neg, alg.blade(0)), e5 * e5);
     }
 
     #[test]
@@ -474,9 +503,9 @@ mod tests {
         let e23 = alg.blade(0b_0110);
         let e34 = alg.blade(0b_1100);
 
-        assert_eq!((Multiplier::NegOne, alg.blade(0)), e12.dot(e12));
-        assert_eq!((Multiplier::Zero, alg.blade(0b_0101)), e12.dot(e23));
-        assert_eq!((Multiplier::Zero, alg.blade(0b_1111)), e12.dot(e34));
+        assert_eq!((Product::Neg, alg.blade(0)), e12.dot(e12));
+        assert_eq!((Product::Zero, alg.blade(0b_0101)), e12.dot(e23));
+        assert_eq!((Product::Zero, alg.blade(0b_1111)), e12.dot(e34));
     }
 
     #[test]
@@ -486,8 +515,8 @@ mod tests {
         let e23 = alg.blade(0b_0110);
         let e34 = alg.blade(0b_1100);
 
-        assert_eq!((Multiplier::Zero, alg.blade(0)), e12.wedge(e12));
-        assert_eq!((Multiplier::Zero, alg.blade(0b_0101)), e12.wedge(e23));
-        assert_eq!((Multiplier::One, alg.blade(0b_1111)), e12.wedge(e34));
+        assert_eq!((Product::Zero, alg.blade(0)), e12.wedge(e12));
+        assert_eq!((Product::Zero, alg.blade(0b_0101)), e12.wedge(e23));
+        assert_eq!((Product::Pos, alg.blade(0b_1111)), e12.wedge(e34));
     }
 }

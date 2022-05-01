@@ -44,43 +44,32 @@ fn traits() -> TokenStream {
     }
 }
 
-impl ToTokens for Multiplier {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let t = match self {
-            Multiplier::One => quote! { f64 },
-            Multiplier::Zero => quote! { crate::Zero },
-            Multiplier::NegOne => quote! { f64 },
-        };
-        tokens.extend(t);
-    }
-}
-
 impl Blade {
     pub fn define(&self) -> proc_macro2::TokenStream {
         let ty = self.type_ident();
 
         let mul_blades = self.1.blades().filter(|b| b.0 .0 != 0).map(|rhs| {
             let rhs_ty = rhs.type_ident();
-            let (multiplier, output) = *self * rhs;
+            let product = *self * rhs;
 
-            let output_ty = match multiplier {
-                Multiplier::Zero => quote! { crate::Zero },
-                _ => {
-                    let output_ty = output.type_ident();
-                    quote! { #output_ty }
+            let output_ty = match product.blade() {
+                Some(blade) => {
+                    let ty = blade.type_ident();
+                    quote! { #ty }
                 }
+                None => quote! { crate::Zero },
             };
 
-            let expr = match (multiplier, output) {
-                (Multiplier::Zero, _) => quote! { crate::Zero },
-                (Multiplier::One, b) => {
+            let expr = match product {
+                Product::Zero => quote! { crate::Zero },
+                Product::Pos(b) => {
                     if b == self.1.scalar() {
                         quote! { self.0 * rhs.0 }
                     } else {
                         quote! { #output_ty(self.0 * rhs.0) }
                     }
                 }
-                (Multiplier::NegOne, b) => {
+                Product::Neg(b) => {
                     if b == self.1.scalar() {
                         quote! { -(self.0 * rhs.0) }
                     } else {
@@ -89,8 +78,8 @@ impl Blade {
                 }
             };
 
-            let rhs_ident = match multiplier {
-                Multiplier::Zero => quote! { _ },
+            let rhs_ident = match product {
+                Product::Zero => quote! { _ },
                 _ => quote! { rhs },
             };
 
@@ -611,7 +600,7 @@ impl BinaryOp {
         [Self::Mul, Self::Dot, Self::Wedge].into_iter()
     }
 
-    pub fn call(&self, lhs: Blade, rhs: Blade) -> (Multiplier, Blade) {
+    pub fn call(&self, lhs: Blade, rhs: Blade) -> Product {
         match self {
             BinaryOp::Mul => lhs * rhs,
             BinaryOp::Dot => lhs.dot(rhs),
@@ -646,13 +635,7 @@ impl ImplementBinaryOp {
                     .blades()
                     .map(move |rhs_b| self.op.call(lhs_b, rhs_b))
             })
-            .filter_map(|(multiplier, blade)| {
-                if matches!(multiplier, Multiplier::Zero) {
-                    None
-                } else {
-                    Some(blade)
-                }
-            });
+            .filter_map(|product| product.blade());
         Type::from_iter(iter, self.lhs.algebra())
     }
 
@@ -684,12 +667,18 @@ impl ImplementBinaryOp {
                 .blades()
                 .flat_map(|lhs_b| {
                     self.rhs.blades().map(move |rhs_b| {
-                        let (product, blade) = self.op.call(lhs_b, rhs_b);
-                        (lhs_b, rhs_b, product, blade)
+                        let product = self.op.call(lhs_b, rhs_b);
+                        (lhs_b, rhs_b, product)
                     })
                 })
-                .filter(|(_, _, multiplier, blade)| *multiplier != Multiplier::Zero && *blade == b)
-                .map(|(lhs_b, rhs_b, _, _)| {
+                .filter(|(_, _, product)| {
+                    if let Some(blade) = product.blade() {
+                        blade == b
+                    } else {
+                        false
+                    }
+                })
+                .map(|(lhs_b, rhs_b, _)| {
                     let lhs_f = lhs_b.field();
                     let rhs_f = rhs_b.field();
                     quote! { self.#lhs_f * rhs.#rhs_f }
