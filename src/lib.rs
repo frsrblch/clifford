@@ -56,6 +56,11 @@ pub trait LeftComplement {
     fn left_comp(self) -> Self::Output;
 }
 
+pub trait RightComplement {
+    type Output;
+    fn right_comp(self) -> Self::Output;
+}
+
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Zero;
 

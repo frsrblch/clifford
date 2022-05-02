@@ -451,6 +451,7 @@ enum UnaryOp {
     Reverse,
     Antireverse,
     LeftComplement,
+    RightComplement,
 }
 
 impl UnaryOp {
@@ -460,6 +461,7 @@ impl UnaryOp {
             Self::Reverse,
             Self::Antireverse,
             Self::LeftComplement,
+            Self::RightComplement,
         ]
         .into_iter()
     }
@@ -470,6 +472,7 @@ impl UnaryOp {
             Self::Reverse => quote! { crate::Reverse },
             Self::Antireverse => quote! { crate::Antireverse },
             Self::LeftComplement => quote! { crate::LeftComplement },
+            Self::RightComplement => quote! { crate::RightComplement },
         }
     }
 
@@ -479,6 +482,7 @@ impl UnaryOp {
             Self::Reverse => quote! { rev },
             Self::Antireverse => quote! { antirev },
             Self::LeftComplement => quote! { left_comp },
+            Self::RightComplement => quote! { right_comp },
         }
     }
 
@@ -504,6 +508,12 @@ impl UnaryOp {
                 let set = antiscalar.0 .0 ^ blade.0 .0;
                 let complement = blade.1.blade(set);
                 (complement * blade).with_blade(complement)
+            }
+            Self::RightComplement => {
+                let antiscalar = blade.1.pseudoscalar();
+                let set = antiscalar.0 .0 ^ blade.0 .0;
+                let complement = blade.1.blade(set);
+                (blade * complement).with_blade(complement)
             }
         }
     }
@@ -565,5 +575,25 @@ mod tests {
         assert_eq!(Product::Pos(e34), left_comp(e12));
         assert_eq!(Product::Neg(e4), left_comp(e123));
         assert_eq!(Product::Pos(s), left_comp(e1234));
+    }
+
+    #[test]
+    fn right_comp() {
+        let right_comp = |blade: Blade| UnaryOp::RightComplement.call(blade);
+        let pga = Algebra::new(3, 0, 1);
+        let s = pga.blade(0);
+        let e1 = pga.blade(0b0001);
+        let e12 = pga.blade(0b0011);
+        let e123 = pga.blade(0b0111);
+        let e1234 = pga.blade(0b1111);
+        let e234 = pga.blade(0b1110);
+        let e34 = pga.blade(0b1100);
+        let e4 = pga.blade(0b1000);
+
+        assert_eq!(Product::Pos(e1234), right_comp(s));
+        assert_eq!(Product::Pos(e234), right_comp(e1));
+        assert_eq!(Product::Pos(e34), right_comp(e12));
+        assert_eq!(Product::Pos(e4), right_comp(e123));
+        assert_eq!(Product::Pos(s), right_comp(e1234));
     }
 }
