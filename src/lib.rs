@@ -46,6 +46,11 @@ pub trait Reverse {
     fn rev(self) -> Self::Output;
 }
 
+pub trait Antireverse {
+    type Output;
+    fn antirev(self) -> Self::Output;
+}
+
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Zero;
 

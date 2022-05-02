@@ -449,17 +449,19 @@ impl ToTokens for ImplUnaryOp {
 enum UnaryOp {
     Neg,
     Reverse,
+    Antireverse,
 }
 
 impl UnaryOp {
     fn iter() -> impl Iterator<Item = Self> {
-        [Self::Neg, Self::Reverse].into_iter()
+        [Self::Neg, Self::Reverse, Self::Antireverse].into_iter()
     }
 
     fn trait_ty(&self) -> TokenStream {
         match self {
             Self::Neg => quote! { std::ops::Neg },
             Self::Reverse => quote! { crate::Reverse },
+            Self::Antireverse => quote! { crate::Antireverse },
         }
     }
 
@@ -467,6 +469,7 @@ impl UnaryOp {
         match self {
             Self::Neg => quote! { neg },
             Self::Reverse => quote! { rev },
+            Self::Antireverse => quote! { antirev },
         }
     }
 
@@ -481,6 +484,16 @@ impl UnaryOp {
                     Product::Neg(blade)
                 }
             }
+            Self::Antireverse => {
+                let antiscalar = blade.1.pseudoscalar();
+                let set = antiscalar.0 .0 ^ blade.0 .0;
+                let anti = blade.1.blade(set);
+                match Self::Reverse.call(anti) {
+                    Product::Zero => Product::Zero,
+                    Product::Pos(_) => Product::Pos(blade),
+                    Product::Neg(_) => Product::Neg(blade),
+                }
+            }
         }
     }
 }
@@ -492,7 +505,7 @@ mod tests {
     #[test]
     fn reverse() {
         let op = UnaryOp::Reverse;
-        let alg = Algebra::new(6, 0, 0);
+        let alg = Algebra::new(4, 0, 0);
         let scalar = Blade(BladeSet(0), alg);
         let vector = Blade(BladeSet(0b_1), alg);
         let bivector = Blade(BladeSet(0b_11), alg);
@@ -503,6 +516,23 @@ mod tests {
         assert!(matches!(op.call(vector), Product::Pos(_)));
         assert!(matches!(op.call(bivector), Product::Neg(_)));
         assert!(matches!(op.call(trivector), Product::Neg(_)));
+        assert!(matches!(op.call(quadvector), Product::Pos(_)));
+    }
+
+    #[test]
+    fn antireverse() {
+        let op = UnaryOp::Antireverse;
+        let alg = Algebra::new(4, 0, 0);
+        let scalar = Blade(BladeSet(0), alg);
+        let vector = Blade(BladeSet(0b_1), alg);
+        let bivector = Blade(BladeSet(0b_11), alg);
+        let trivector = Blade(BladeSet(0b_111), alg);
+        let quadvector = Blade(BladeSet(0b_1111), alg);
+
+        assert!(matches!(op.call(scalar), Product::Pos(_)));
+        assert!(matches!(op.call(vector), Product::Neg(_)));
+        assert!(matches!(op.call(bivector), Product::Neg(_)));
+        assert!(matches!(op.call(trivector), Product::Pos(_)));
         assert!(matches!(op.call(quadvector), Product::Pos(_)));
     }
 }
