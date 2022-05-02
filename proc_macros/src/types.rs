@@ -104,6 +104,14 @@ pub enum Product {
 }
 
 impl Product {
+    pub fn with_blade(&self, blade: Blade) -> Self {
+        match self {
+            Product::Pos(_) => Product::Pos(blade),
+            Product::Neg(_) => Product::Neg(blade),
+            Product::Zero => Product::Zero,
+        }
+    }
+
     #[allow(dead_code)]
     pub fn is_pos(&self) -> bool {
         matches!(self, Product::Pos(_))
@@ -265,11 +273,7 @@ impl std::ops::Mul for Blade {
 
         debug_assert!(rhs.0.is_empty());
 
-        match multiplier {
-            Product::Zero => Product::Zero,
-            Product::Pos(_) => Product::Pos(self),
-            Product::Neg(_) => Product::Neg(self),
-        }
+        multiplier.with_blade(self)
     }
 }
 

@@ -450,11 +450,18 @@ enum UnaryOp {
     Neg,
     Reverse,
     Antireverse,
+    LeftComplement,
 }
 
 impl UnaryOp {
     fn iter() -> impl Iterator<Item = Self> {
-        [Self::Neg, Self::Reverse, Self::Antireverse].into_iter()
+        [
+            Self::Neg,
+            Self::Reverse,
+            Self::Antireverse,
+            Self::LeftComplement,
+        ]
+        .into_iter()
     }
 
     fn trait_ty(&self) -> TokenStream {
@@ -462,6 +469,7 @@ impl UnaryOp {
             Self::Neg => quote! { std::ops::Neg },
             Self::Reverse => quote! { crate::Reverse },
             Self::Antireverse => quote! { crate::Antireverse },
+            Self::LeftComplement => quote! { crate::LeftComplement },
         }
     }
 
@@ -470,6 +478,7 @@ impl UnaryOp {
             Self::Neg => quote! { neg },
             Self::Reverse => quote! { rev },
             Self::Antireverse => quote! { antirev },
+            Self::LeftComplement => quote! { left_comp },
         }
     }
 
@@ -487,12 +496,14 @@ impl UnaryOp {
             Self::Antireverse => {
                 let antiscalar = blade.1.pseudoscalar();
                 let set = antiscalar.0 .0 ^ blade.0 .0;
-                let anti = blade.1.blade(set);
-                match Self::Reverse.call(anti) {
-                    Product::Zero => Product::Zero,
-                    Product::Pos(_) => Product::Pos(blade),
-                    Product::Neg(_) => Product::Neg(blade),
-                }
+                let complement = blade.1.blade(set);
+                Self::Reverse.call(complement).with_blade(blade)
+            }
+            Self::LeftComplement => {
+                let antiscalar = blade.1.pseudoscalar();
+                let set = antiscalar.0 .0 ^ blade.0 .0;
+                let complement = blade.1.blade(set);
+                (complement * blade).with_blade(complement)
             }
         }
     }
@@ -534,5 +545,25 @@ mod tests {
         assert!(matches!(op.call(bivector), Product::Neg(_)));
         assert!(matches!(op.call(trivector), Product::Pos(_)));
         assert!(matches!(op.call(quadvector), Product::Pos(_)));
+    }
+
+    #[test]
+    fn left_comp() {
+        let left_comp = |blade: Blade| UnaryOp::LeftComplement.call(blade);
+        let pga = Algebra::new(3, 0, 1);
+        let s = pga.blade(0);
+        let e1 = pga.blade(0b0001);
+        let e12 = pga.blade(0b0011);
+        let e123 = pga.blade(0b0111);
+        let e1234 = pga.blade(0b1111);
+        let e234 = pga.blade(0b1110);
+        let e34 = pga.blade(0b1100);
+        let e4 = pga.blade(0b1000);
+
+        assert_eq!(Product::Pos(e1234), left_comp(s));
+        assert_eq!(Product::Neg(e234), left_comp(e1));
+        assert_eq!(Product::Pos(e34), left_comp(e12));
+        assert_eq!(Product::Neg(e4), left_comp(e123));
+        assert_eq!(Product::Pos(s), left_comp(e1234));
     }
 }

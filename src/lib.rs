@@ -51,6 +51,11 @@ pub trait Antireverse {
     fn antirev(self) -> Self::Output;
 }
 
+pub trait LeftComplement {
+    type Output;
+    fn left_comp(self) -> Self::Output;
+}
+
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Zero;
 
