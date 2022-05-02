@@ -1,6 +1,8 @@
 use super::types::*;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{quote, ToTokens};
+use syn::punctuated::Punctuated;
+use syn::token::Add;
 
 impl Algebra {
     pub fn define(&self) -> TokenStream {
@@ -94,11 +96,6 @@ impl Type {
             quote! { #f: 0., }
         });
 
-        let neg_fields = self.blades().map(|b| {
-            let f = b.field();
-            quote! { #f: -self.#f, }
-        });
-
         let add_self_fields = self.blades().map(|b| {
             let f = b.field();
             quote! { #f: self.#f + rhs.#f, }
@@ -133,6 +130,8 @@ impl Type {
             })
         });
 
+        let unary_ops = UnaryOp::iter().map(|op| ImplUnaryOp { ty: *self, op });
+
         quote! {
             #[derive(Debug, Default, Copy, Clone, PartialEq)]
             pub struct #ty {
@@ -153,15 +152,6 @@ impl Type {
                 fn zero() -> Self {
                     Self {
                         #(#zero_fields)*
-                    }
-                }
-            }
-
-            impl const std::ops::Neg for #ty {
-                type Output = #ty;
-                fn neg(self) -> #ty {
-                    Self {
-                        #(#neg_fields)*
                     }
                 }
             }
@@ -212,6 +202,8 @@ impl Type {
             }
 
             #( #type_ops )*
+
+            #(#unary_ops)*
         }
     }
 }
@@ -259,6 +251,15 @@ impl BinaryOp {
     }
 }
 
+impl Type {
+    fn is_scalar(&self) -> bool {
+        match self {
+            Self::Grade(grade) => grade.is_scalar(),
+            _ => false,
+        }
+    }
+}
+
 impl ImplBinaryOp {
     fn output(&self) -> Type {
         let iter = self
@@ -276,12 +277,7 @@ impl ImplBinaryOp {
     fn expr(&self) -> TokenStream {
         let output = self.output();
 
-        let is_scalar = match output {
-            Type::Grade(grade) => grade.is_scalar(),
-            _ => false,
-        };
-
-        let (ty, blades) = &match self.output() {
+        let (ty, blades) = &match output {
             Type::Zero(_) => return quote! { crate::Zero },
             Type::Grade(grade) => {
                 let ty = grade.type_ident();
@@ -319,7 +315,7 @@ impl ImplBinaryOp {
                     }
                     _ => None,
                 })
-                .collect::<syn::punctuated::Punctuated<_, syn::token::Add>>();
+                .collect::<Punctuated<_, Add>>();
 
             let expr = if products.is_empty() {
                 quote! { 0. }
@@ -327,7 +323,7 @@ impl ImplBinaryOp {
                 quote! { #products }
             };
 
-            if is_scalar {
+            if output.is_scalar() {
                 expr
             } else {
                 let f = blade.field();
@@ -335,7 +331,7 @@ impl ImplBinaryOp {
             }
         });
 
-        if is_scalar {
+        if output.is_scalar() {
             quote! {
                 #( #fields )*
             }
@@ -375,5 +371,138 @@ impl ToTokens for ImplBinaryOp {
         };
 
         tokens.extend(op_impl)
+    }
+}
+
+struct ImplUnaryOp {
+    pub ty: Type,
+    pub op: UnaryOp,
+}
+
+impl ToTokens for ImplUnaryOp {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let ty = self.ty.type_ident();
+        let output_blades = self.ty.blades().filter_map(|b| self.op.call(b).blade());
+        let output = Type::from_iter(output_blades, self.ty.algebra());
+        let output_ty = output.type_ident();
+
+        let op_trait = self.op.trait_ty();
+        let op_fn = self.op.trait_fn();
+
+        let fields = output.blades().map(|blade| {
+            let sum = self
+                .ty
+                .blades()
+                .filter_map(|b| {
+                    let f = b.field();
+                    let product = self.op.call(b);
+                    let product_blade = product.blade()?;
+
+                    if product_blade == blade {
+                        let expr = if product.is_neg() {
+                            quote! { -self.#f }
+                        } else {
+                            quote! { self.#f }
+                        };
+
+                        Some(expr)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Punctuated<_, Add>>();
+
+            let expr = if sum.is_empty() {
+                quote! { 0. }
+            } else {
+                quote! { #sum }
+            };
+
+            if output.is_scalar() {
+                quote! { #expr }
+            } else {
+                let f = blade.field();
+                quote! { #f: #expr }
+            }
+        });
+
+        let expr = if self.ty.is_scalar() {
+            quote! { #(#fields)* }
+        } else {
+            quote! { #ty { #(#fields,)* } }
+        };
+
+        let t = quote! {
+            impl #op_trait for #ty {
+                type Output = #output_ty;
+                fn #op_fn(self) -> Self::Output {
+                    #expr
+                }
+            }
+        };
+
+        tokens.extend(t);
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+enum UnaryOp {
+    Neg,
+    Reverse,
+}
+
+impl UnaryOp {
+    fn iter() -> impl Iterator<Item = Self> {
+        [Self::Neg, Self::Reverse].into_iter()
+    }
+
+    fn trait_ty(&self) -> TokenStream {
+        match self {
+            Self::Neg => quote! { std::ops::Neg },
+            Self::Reverse => quote! { crate::Reverse },
+        }
+    }
+
+    fn trait_fn(&self) -> TokenStream {
+        match self {
+            Self::Neg => quote! { neg },
+            Self::Reverse => quote! { rev },
+        }
+    }
+
+    fn call(&self, blade: Blade) -> Product {
+        match self {
+            Self::Neg => Product::Neg(blade),
+            Self::Reverse => {
+                let grade = blade.grade().0;
+                if (grade / 2) % 2 == 0 {
+                    Product::Pos(blade)
+                } else {
+                    Product::Neg(blade)
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reverse() {
+        let op = UnaryOp::Reverse;
+        let alg = Algebra::new(6, 0, 0);
+        let scalar = Blade(BladeSet(0), alg);
+        let vector = Blade(BladeSet(0b_1), alg);
+        let bivector = Blade(BladeSet(0b_11), alg);
+        let trivector = Blade(BladeSet(0b_111), alg);
+        let quadvector = Blade(BladeSet(0b_1111), alg);
+
+        assert!(matches!(op.call(scalar), Product::Pos(_)));
+        assert!(matches!(op.call(vector), Product::Pos(_)));
+        assert!(matches!(op.call(bivector), Product::Neg(_)));
+        assert!(matches!(op.call(trivector), Product::Neg(_)));
+        assert!(matches!(op.call(quadvector), Product::Pos(_)));
     }
 }

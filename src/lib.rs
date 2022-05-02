@@ -41,6 +41,11 @@ pub trait Meet<Rhs> {
     fn meet(self, rhs: Rhs) -> Self::Output;
 }
 
+pub trait Reverse {
+    type Output;
+    fn rev(self) -> Self::Output;
+}
+
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Zero;
 

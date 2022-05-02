@@ -87,8 +87,8 @@ impl Algebra {
             .map(|set| self.blade(BladeSet(set)))
     }
 
-    pub fn blade(&self, set: BladeSet) -> Blade {
-        Blade(set, *self)
+    pub fn blade<B: Into<BladeSet>>(&self, set: B) -> Blade {
+        Blade(set.into(), *self)
     }
 
     pub fn dimensions(&self) -> u8 {
@@ -104,6 +104,11 @@ pub enum Product {
 }
 
 impl Product {
+    #[allow(dead_code)]
+    pub fn is_pos(&self) -> bool {
+        matches!(self, Product::Pos(_))
+    }
+
     pub fn is_neg(&self) -> bool {
         matches!(self, Product::Neg(_))
     }
@@ -271,6 +276,12 @@ impl std::ops::Mul for Blade {
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct BladeSet(pub u64);
 
+impl From<u64> for BladeSet {
+    fn from(value: u64) -> Self {
+        BladeSet(value)
+    }
+}
+
 impl BladeSet {
     pub fn contains(&self, index: u8) -> bool {
         assert!(index > 0, "index cannot be zero (e1 is stored at index 0)");
@@ -407,23 +418,23 @@ mod tests {
     #[test]
     fn one_d() {
         let alg = Algebra::new(1, 0, 0);
-        assert_eq!(Product::Pos, alg.square(1));
+        assert!(alg.square(1).is_pos());
         assert!(std::panic::catch_unwind(|| alg.square(2)).is_err());
     }
 
     #[test]
     fn pga() {
-        let alg = Algebra::new(3, 1, 0);
-        assert_eq!(Product::Pos, alg.square(3));
+        let alg = Algebra::new(3, 0, 1);
+        assert!(alg.square(3).is_pos());
         assert_eq!(Product::Zero, alg.square(4));
         assert!(std::panic::catch_unwind(|| alg.square(5)).is_err());
     }
 
     #[test]
     fn cga() {
-        let bases = Algebra::new(4, 0, 1);
-        assert_eq!(Product::Pos, bases.square(4));
-        assert_eq!(Product::Neg, bases.square(5));
+        let bases = Algebra::new(4, 1, 0);
+        assert!(bases.square(4).is_pos());
+        assert!(bases.square(5).is_neg());
         assert!(std::panic::catch_unwind(|| bases.square(6)).is_err());
     }
 
@@ -474,11 +485,11 @@ mod tests {
         let e24 = alg.blade(0b_1010);
         let e5 = alg.blade(0b_1_0000);
 
-        assert_eq!((Product::Neg, alg.blade(0)), e12 * e12);
-        assert_eq!((Product::Pos, alg.blade(0b_0101)), e12 * e23);
-        assert_eq!((Product::Pos, alg.blade(0b_1001)), e12 * e24);
-        assert_eq!(Product::Zero, (e24 * e24).0);
-        assert_eq!((Product::Neg, alg.blade(0)), e5 * e5);
+        assert_eq!(Product::Neg(alg.blade(0)), e12 * e12);
+        assert_eq!(Product::Pos(alg.blade(0b_0101)), e12 * e23);
+        assert_eq!(Product::Pos(alg.blade(0b_1001)), e12 * e24);
+        assert_eq!(Product::Zero, e24 * e24);
+        assert_eq!(Product::Neg(alg.blade(0)), e5 * e5);
     }
 
     #[test]
@@ -488,9 +499,9 @@ mod tests {
         let e23 = alg.blade(0b_0110);
         let e34 = alg.blade(0b_1100);
 
-        assert_eq!((Product::Neg, alg.blade(0)), e12.dot(e12));
-        assert_eq!((Product::Zero, alg.blade(0b_0101)), e12.dot(e23));
-        assert_eq!((Product::Zero, alg.blade(0b_1111)), e12.dot(e34));
+        assert_eq!(Product::Neg(alg.blade(0)), e12.dot(e12));
+        assert_eq!(Product::Zero, e12.dot(e23));
+        assert_eq!(Product::Zero, e12.dot(e34));
     }
 
     #[test]
@@ -500,8 +511,8 @@ mod tests {
         let e23 = alg.blade(0b_0110);
         let e34 = alg.blade(0b_1100);
 
-        assert_eq!((Product::Zero, alg.blade(0)), e12.wedge(e12));
-        assert_eq!((Product::Zero, alg.blade(0b_0101)), e12.wedge(e23));
-        assert_eq!((Product::Pos, alg.blade(0b_1111)), e12.wedge(e34));
+        assert_eq!(Product::Zero, e12.wedge(e12));
+        assert_eq!(Product::Zero, e12.wedge(e23));
+        assert_eq!(Product::Pos(alg.blade(0b_1111)), e12.wedge(e34));
     }
 }
