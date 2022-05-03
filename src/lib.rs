@@ -11,13 +11,23 @@
 //!
 //! Models of geometry:
 //! - [ ] Euclidean
-//! - [ ] Homogeneous
+//!     - [ ] Meet
+//!     - [ ] Join
+//! - [ ] Homogeneous 3D - points as vectors
+//!     - [x] Antigeometric
+//!     - [x] Antiwedge
+//!     - [x] Antidot
+//!     - [x] Antireverse
+//!     - [x] Meet
+//!     - [x] Join
 //!     - [ ] IsIdeal
 //!     - [ ] Projection
 //!     - [ ] Antiprojection
 //!     - [ ] Weight
 //!     - [ ] Bulk
 //! - [ ] Conformal
+//!     - [ ] Meet
+//!     - [ ] Join
 //!     - [ ] Origin
 //!     - [ ] Infinity
 //!     - [ ] IsFlat
@@ -30,20 +40,18 @@
 //! - [ ] Multivector
 //!
 //! Main products:
+//! - [x] Mul
 //! - [x] Geometric
-//! - [ ] Antigeometric
 //! - [ ] Commutator
 //! - [ ] Sandwich
 //!
 //! Inner products:
 //! - [x] Dot
-//! - [ ] Antidot
 //! - [ ] Left contraction
 //! - [ ] Right contraction
 //!
 //! Outer products:
 //! - [x] Wedge
-//! - [ ] Antiwedge (regressive)
 //!
 //! Sum products:
 //! - [x] Addition
@@ -54,7 +62,6 @@
 //! - [x] Left complement
 //! - [x] Right complement
 //! - [x] Reverse
-//! - [x] Antireverse
 //!
 //! Norm-based operations:
 //! - [ ] Inverse
@@ -67,8 +74,14 @@
 
 pub use proc_macros::clifford;
 
-pub trait ZeroValue {
-    fn zero() -> Self;
+pub trait Geometric<Rhs> {
+    type Output;
+    fn geo(self, rhs: Rhs) -> Self::Output;
+}
+
+pub trait Wedge<Rhs> {
+    type Output;
+    fn wedge(self, rhs: Rhs) -> Self::Output;
 }
 
 pub trait Dot<Rhs> {
@@ -81,29 +94,9 @@ pub trait Commutator<Rhs> {
     fn commutator(self, rhs: Rhs) -> Self::Output;
 }
 
-pub trait Wedge<Rhs> {
-    type Output;
-    fn wedge(self, rhs: Rhs) -> Self::Output;
-}
-
-pub trait Join<Rhs> {
-    type Output;
-    fn join(self, rhs: Rhs) -> Self::Output;
-}
-
-pub trait Meet<Rhs> {
-    type Output;
-    fn meet(self, rhs: Rhs) -> Self::Output;
-}
-
 pub trait Reverse {
     type Output;
     fn rev(self) -> Self::Output;
-}
-
-pub trait Antireverse {
-    type Output;
-    fn antirev(self) -> Self::Output;
 }
 
 pub trait LeftComplement {
@@ -171,10 +164,6 @@ pub mod va_3d {
 
         let norm = |v: Vector| v.dot(v).sqrt();
 
-        // let dx = Vector::new(1e-6, 0., 0.);
-        // let dy = Vector::new(0., 1e-6, 0.);
-        // let dz = Vector::new(0., 0., 1e-6);
-
         let da = |x: Vector| {
             let inv_det = x.dot(x).powf(-2.5);
             let Vector {
@@ -190,10 +179,6 @@ pub mod va_3d {
             ) * inv_det;
             move |h: Vector| Vector::new(da.e1 * h.e1, da.e2 * h.e2, da.e3 * h.e3) / norm(h)
         };
-
-        // dbg!(da(x_0)(dx));
-        // dbg!(da(x_0)(dy));
-        // dbg!(da(x_0)(dz));
 
         let dt = 0.05;
         let dt2 = dt * dt;
@@ -218,34 +203,174 @@ pub mod va_3d {
 pub mod pga_3d {
     proc_macros::clifford!(3, 0, 1);
 
+    pub trait Antigeometric<Rhs> {
+        type Output;
+        fn antigeo(self, rhs: Rhs) -> Self::Output;
+    }
+
+    impl<Lhs, Rhs, LhsComp, RhsComp, OutputComp> Antigeometric<Rhs> for Lhs
+    where
+        Lhs: LeftComplement<Output = LhsComp>,
+        Rhs: LeftComplement<Output = RhsComp>,
+        LhsComp: Geometric<RhsComp, Output = OutputComp>,
+        OutputComp: RightComplement,
+    {
+        type Output = OutputComp::Output;
+        fn antigeo(self, rhs: Rhs) -> Self::Output {
+            let lhs = self.left_comp();
+            let rhs = rhs.left_comp();
+            let output_complement = lhs.geo(rhs);
+            output_complement.right_comp()
+        }
+    }
+
+    pub trait Antiwedge<Rhs> {
+        type Output;
+        fn antiwedge(self, rhs: Rhs) -> Self::Output;
+    }
+
+    impl<Lhs, Rhs, LhsComp, RhsComp, OutputComp> Antiwedge<Rhs> for Lhs
+    where
+        Lhs: LeftComplement<Output = LhsComp>,
+        Rhs: LeftComplement<Output = RhsComp>,
+        LhsComp: Wedge<RhsComp, Output = OutputComp>,
+        OutputComp: RightComplement,
+    {
+        type Output = OutputComp::Output;
+
+        fn antiwedge(self, rhs: Rhs) -> Self::Output {
+            let lhs = self.left_comp();
+            let rhs = rhs.left_comp();
+            let output_complement = lhs.wedge(rhs);
+            output_complement.right_comp()
+        }
+    }
+
+    pub trait Antidot<Rhs> {
+        type Output;
+        fn antiwedge(self, rhs: Rhs) -> Self::Output;
+    }
+
+    impl<Lhs, Rhs, LhsComp, RhsComp, OutputComp> Antidot<Rhs> for Lhs
+    where
+        Lhs: LeftComplement<Output = LhsComp>,
+        Rhs: LeftComplement<Output = RhsComp>,
+        LhsComp: Dot<RhsComp, Output = OutputComp>,
+        OutputComp: RightComplement,
+    {
+        type Output = OutputComp::Output;
+
+        fn antiwedge(self, rhs: Rhs) -> Self::Output {
+            let lhs = self.left_comp();
+            let rhs = rhs.left_comp();
+            let output_complement = lhs.dot(rhs);
+            output_complement.right_comp()
+        }
+    }
+
+    pub trait Join<Rhs> {
+        type Output;
+        fn join(self, rhs: Rhs) -> Self::Output;
+    }
+
+    impl<Lhs, Rhs> Join<Rhs> for Lhs
+    where
+        Lhs: Wedge<Rhs>,
+    {
+        type Output = Lhs::Output;
+
+        fn join(self, rhs: Rhs) -> Self::Output {
+            self.wedge(rhs)
+        }
+    }
+
+    pub trait Meet<Rhs> {
+        type Output;
+        fn meet(self, rhs: Rhs) -> Self::Output;
+    }
+
+    impl<Lhs, Rhs> Meet<Rhs> for Lhs
+    where
+        Lhs: Antiwedge<Rhs>,
+    {
+        type Output = Lhs::Output;
+
+        fn meet(self, rhs: Rhs) -> Self::Output {
+            self.antiwedge(rhs)
+        }
+    }
+
+    pub trait Antireverse {
+        type Output;
+        fn antirev(self) -> Self::Output;
+    }
+
+    impl<T, Comp, CompRev> Antireverse for T
+    where
+        T: LeftComplement<Output = Comp>,
+        Comp: Reverse<Output = CompRev>,
+        CompRev: RightComplement,
+    {
+        type Output = CompRev::Output;
+
+        fn antirev(self) -> Self::Output {
+            self.left_comp().rev().right_comp()
+        }
+    }
+
     pub const fn point(x: f64, y: f64, z: f64) -> Vector {
         Vector::new(x, y, z, 1.)
     }
 
-    #[test]
-    fn vec_mul() {
-        let a = point(2., 3., 4.);
-        let b = point(3., 5., 7.);
-        let c = point(0., 0., 0.);
+    #[cfg(test)]
+    mod tests {
+        use super::*;
 
-        let line = a.wedge(b);
-        let plane = line.wedge(c);
+        #[test]
+        fn vec_mul() {
+            let a = point(2., 3., 4.);
+            let b = point(3., 5., 7.);
+            let c = point(0., 0., 0.);
 
-        dbg!(line, plane, a * b);
+            let line = a.wedge(b);
+            let plane = line.wedge(c);
 
-        // panic!("done");
-    }
+            dbg!(line, plane, a * b);
 
-    #[test]
-    fn plane_dual() {
-        let o = point(0., 0., 0.);
-        let x = point(1., 0., 0.);
-        let y = point(0., 1., 0.);
+            // panic!("done");
+        }
 
-        let plane = o.wedge(x).wedge(y);
-        dbg!(plane);
+        #[test]
+        fn plane_dual() {
+            let o = point(0., 0., 0.);
+            let x = point(1., 0., 0.);
+            let y = point(0., 1., 0.);
 
-        // panic!();
+            let plane = o.wedge(x).wedge(y);
+            dbg!(plane);
+
+            // panic!();
+        }
+
+        #[test]
+        fn antigeometric_product() {
+            let e14 = Bivector {
+                e14: 1.,
+                ..Default::default()
+            };
+
+            let e24 = Bivector {
+                e24: 1.,
+                ..Default::default()
+            };
+
+            let expected = Even {
+                e34: -1.,
+                ..Default::default()
+            };
+
+            assert_eq!(expected, e14.antigeo(e24));
+        }
     }
 }
 
@@ -282,10 +407,10 @@ pub mod cga_2d {
     impl<T, U> IsFlat for T
     where
         T: crate::Wedge<Vector, Output = U>,
-        U: ZeroValue + PartialEq,
+        U: Default + PartialEq,
     {
         fn is_flat(self) -> bool {
-            self.wedge(N_BAR) == U::zero()
+            self.wedge(N_BAR) == U::default()
         }
     }
 
@@ -339,10 +464,10 @@ pub mod cga_3d {
     impl<T, U> IsFlat for T
     where
         T: crate::Wedge<Vector, Output = U>,
-        U: ZeroValue + PartialEq,
+        U: Default + PartialEq,
     {
         fn is_flat(self) -> bool {
-            self.wedge(N_BAR) == U::zero()
+            self.wedge(N_BAR) == U::default()
         }
     }
 

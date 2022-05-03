@@ -9,7 +9,7 @@ impl Algebra {
         let types = self.types().map(|ty| ty.define());
 
         quote! {
-            pub use crate::{Dot, Wedge, Commutator, ZeroValue};
+            pub use crate::{Dot, Wedge, Commutator, Geometric, LeftComplement, RightComplement, Reverse };
 
             #( #types )*
         }
@@ -91,7 +91,7 @@ impl Type {
             quote! { #f, }
         });
 
-        let zero_fields = self.blades().map(|b| {
+        let default_fields = self.blades().map(|b| {
             let f = b.field();
             quote! { #f: 0., }
         });
@@ -133,7 +133,7 @@ impl Type {
         let unary_ops = UnaryOp::iter().map(|op| ImplUnaryOp { ty: *self, op });
 
         quote! {
-            #[derive(Debug, Default, Copy, Clone, PartialEq)]
+            #[derive(Debug, Copy, Clone, PartialEq)]
             pub struct #ty {
                 #( #blades )*
             }
@@ -143,15 +143,15 @@ impl Type {
                     #(#new_fn_fields,)*
                 ) -> Self {
                     Self {
-                        #(#new_fn_struct_fields)*
+                        #( #new_fn_struct_fields )*
                     }
                 }
             }
 
-            impl const crate::ZeroValue for #ty {
-                fn zero() -> Self {
+            impl const Default for #ty {
+                fn default() -> Self {
                     Self {
-                        #(#zero_fields)*
+                        #( #default_fields )*
                     }
                 }
             }
@@ -178,7 +178,7 @@ impl Type {
                 type Output = Self;
                 fn mul(self, rhs: f64) -> Self {
                     Self {
-                        #(#mul_f64_fields)*
+                        #( #mul_f64_fields )*
                     }
                 }
             }
@@ -187,7 +187,7 @@ impl Type {
                 type Output = #ty;
                 fn mul(self, rhs: #ty) -> Self::Output {
                     #ty {
-                        #(#f64_mul_fields)*
+                        #( #f64_mul_fields )*
                     }
                 }
             }
@@ -196,7 +196,7 @@ impl Type {
                 type Output = Self;
                 fn div(self, rhs: f64) -> Self {
                     Self {
-                        #(#div_f64_fields)*
+                        #( #div_f64_fields )*
                     }
                 }
             }
@@ -217,18 +217,20 @@ pub struct ImplBinaryOp {
 #[derive(Debug, Copy, Clone)]
 pub enum BinaryOp {
     Mul,
+    Geometric,
     Dot,
     Wedge,
 }
 
 impl BinaryOp {
     pub fn iter() -> impl Iterator<Item = Self> + 'static {
-        [Self::Mul, Self::Dot, Self::Wedge].into_iter()
+        [Self::Mul, Self::Geometric, Self::Dot, Self::Wedge].into_iter()
     }
 
     pub fn call(&self, lhs: Blade, rhs: Blade) -> Product {
         match self {
             BinaryOp::Mul => lhs * rhs,
+            BinaryOp::Geometric => lhs * rhs,
             BinaryOp::Dot => lhs.dot(rhs),
             BinaryOp::Wedge => lhs.wedge(rhs),
         }
@@ -237,6 +239,7 @@ impl BinaryOp {
     pub fn trait_ty(&self) -> TokenStream {
         match self {
             BinaryOp::Mul => quote! { std::ops::Mul },
+            BinaryOp::Geometric => quote! { crate::Geometric },
             BinaryOp::Dot => quote! { crate::Dot },
             BinaryOp::Wedge => quote! { crate::Wedge },
         }
@@ -245,6 +248,7 @@ impl BinaryOp {
     pub fn trait_fn(&self) -> TokenStream {
         match self {
             BinaryOp::Mul => quote! { mul },
+            BinaryOp::Geometric => quote! { geo },
             BinaryOp::Dot => quote! { dot },
             BinaryOp::Wedge => quote! { wedge },
         }
@@ -449,7 +453,6 @@ impl ToTokens for ImplUnaryOp {
 enum UnaryOp {
     Neg,
     Reverse,
-    Antireverse,
     LeftComplement,
     RightComplement,
 }
@@ -459,7 +462,6 @@ impl UnaryOp {
         [
             Self::Neg,
             Self::Reverse,
-            Self::Antireverse,
             Self::LeftComplement,
             Self::RightComplement,
         ]
@@ -470,7 +472,6 @@ impl UnaryOp {
         match self {
             Self::Neg => quote! { std::ops::Neg },
             Self::Reverse => quote! { crate::Reverse },
-            Self::Antireverse => quote! { crate::Antireverse },
             Self::LeftComplement => quote! { crate::LeftComplement },
             Self::RightComplement => quote! { crate::RightComplement },
         }
@@ -480,7 +481,6 @@ impl UnaryOp {
         match self {
             Self::Neg => quote! { neg },
             Self::Reverse => quote! { rev },
-            Self::Antireverse => quote! { antirev },
             Self::LeftComplement => quote! { left_comp },
             Self::RightComplement => quote! { right_comp },
         }
@@ -496,12 +496,6 @@ impl UnaryOp {
                 } else {
                     Product::Neg(blade)
                 }
-            }
-            Self::Antireverse => {
-                let antiscalar = blade.1.pseudoscalar();
-                let set = antiscalar.0 .0 ^ blade.0 .0;
-                let complement = blade.1.blade(set);
-                Self::Reverse.call(complement).with_blade(blade)
             }
             Self::LeftComplement => {
                 let antiscalar = blade.1.pseudoscalar();
