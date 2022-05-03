@@ -203,7 +203,7 @@ impl Type {
 
             #( #type_ops )*
 
-            #(#unary_ops)*
+            #( #unary_ops )*
         }
     }
 }
@@ -426,10 +426,10 @@ impl ToTokens for ImplUnaryOp {
             }
         });
 
-        let expr = if self.ty.is_scalar() {
+        let expr = if output.is_scalar() {
             quote! { #(#fields)* }
         } else {
-            quote! { #ty { #(#fields,)* } }
+            quote! { #output_ty { #(#fields,)* } }
         };
 
         let t = quote! {
