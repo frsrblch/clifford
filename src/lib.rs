@@ -65,6 +65,8 @@
 // TODO add efficient implementation for null cone geometries
 // TODO consider grade enum model with dynamic multivectors (e.g., BTreeMap<Grade, f64>)?
 
+pub use proc_macros::clifford;
+
 pub trait ZeroValue {
     fn zero() -> Self;
 }
