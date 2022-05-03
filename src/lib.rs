@@ -5,12 +5,65 @@
     const_convert
 )]
 
+//! Proc macros for defining Clifford algebras of arbitrary dimension
+//!
+//! [`Feature set`]
+//!
+//! Models of geometry:
+//! - [ ] Euclidean
+//! - [ ] Homogeneous
+//!     - [ ] IsIdeal
+//!     - [ ] Projection
+//!     - [ ] Antiprojection
+//!     - [ ] Weight
+//!     - [ ] Bulk
+//! - [ ] Conformal
+//!     - [ ] Origin
+//!     - [ ] Infinity
+//!     - [ ] IsFlat
+//! - [ ] Minkowski
+//!
+//! Types:
+//! - [x] Grades
+//! - [x] Even subalgebra
+//! - [x] Odd subalgebra
+//! - [ ] Multivector
+//!
+//! Main products:
+//! - [x] Geometric
+//! - [ ] Antigeometric
+//! - [ ] Commutator
+//! - [ ] Sandwich
+//!
+//! Inner products:
+//! - [x] Dot
+//! - [ ] Antidot
+//! - [ ] Left contraction
+//! - [ ] Right contraction
+//!
+//! Outer products:
+//! - [x] Wedge
+//! - [ ] Antiwedge (regressive)
+//!
+//! Sum products:
+//! - [x] Addition
+//! - [x] Subtraction
+//!
+//! Unary operations:
+//! - [x] Neg
+//! - [x] Left complement
+//! - [x] Right complement
+//! - [x] Reverse
+//! - [x] Antireverse
+//!
+//! Norm-based operations:
+//! - [ ] Inverse
+//! - [ ] Normalize
+//!
+//! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features.html
+
 // TODO add efficient implementation for null cone geometries
 // TODO consider grade enum model with dynamic multivectors (e.g., BTreeMap<Grade, f64>)?
-// TODO create proc_macro crate
-// TODO grade sub, heterogeneous add/sub,reverses, complements, antiproducts
-// Geometric algebra feature set:
-//   https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features.html
 
 pub trait ZeroValue {
     fn zero() -> Self;
