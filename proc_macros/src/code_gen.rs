@@ -8,11 +8,34 @@ impl Algebra {
     pub fn define(&self) -> TokenStream {
         let traits = if self.is_homogenous() {
             quote! {
-                pub use crate::{Dot, Wedge, Commutator, Geometric, LeftComplement, RightComplement, Reverse, Bulk, Weight, IsIdeal };
+                pub use crate::{
+                    Dot,
+                    Antidot,
+                    Wedge,
+                    Antiwedge,
+                    Commutator,
+                    Geometric,
+                    Antigeometric,
+                    LeftComplement,
+                    RightComplement,
+                    Reverse,
+                    Antireverse,
+                    Bulk,
+                    Weight,
+                    IsIdeal
+                };
             }
         } else {
             quote! {
-                pub use crate::{Dot, Wedge, Commutator, Geometric, LeftComplement, RightComplement, Reverse };
+                pub use crate::{
+                    Dot,
+                    Wedge,
+                    Commutator,
+                    Geometric,
+                    LeftComplement,
+                    RightComplement,
+                    Reverse
+                };
             }
         };
         let types = self.types().map(|ty| ty.define());
@@ -45,6 +68,7 @@ impl Blade {
 impl Grade {
     pub fn type_ident(&self) -> Ident {
         let str = match self.0 {
+            i if i == self.1.pseudoscalar().grade().0 => "Pseudoscalar",
             0 => "f64",
             1 => "Vector",
             2 => "Bivector",
@@ -71,65 +95,113 @@ impl SubAlgebra {
 impl Type {
     pub fn type_ident(&self) -> TokenStream {
         match self {
-            Type::Zero(_) => quote! { crate::Zero },
+            Type::Zero(_) => quote! { Zero },
             Type::Grade(grade) => grade.type_ident().to_token_stream(),
             Type::SubAlgebra(sub) => sub.type_ident().to_token_stream(),
         }
     }
 
     pub fn define(&self) -> TokenStream {
-        if let Type::Zero(_) = self {
-            return quote!();
-        }
-
         let ty = self.type_ident();
 
-        let blades = self.blades().map(|b| {
-            let f = b.field();
-            quote! { pub #f: f64, }
-        });
+        let definition = if self.is_local() {
+            let blades = self.blades().map(|b| {
+                let f = b.field();
+                quote! { pub #f: f64, }
+            });
 
-        let new_fn_fields = self.blades().map(|b| {
-            let f = b.field();
-            quote! { #f: f64 }
-        });
+            let new_fn_fields = self.blades().map(|b| {
+                let f = b.field();
+                quote! { #f: f64 }
+            });
 
-        let new_fn_struct_fields = self.blades().map(|b| {
-            let f = b.field();
-            quote! { #f, }
-        });
+            let new_fn_struct_fields = self.blades().map(|b| {
+                let f = b.field();
+                quote! { #f, }
+            });
 
-        let default_fields = self.blades().map(|b| {
-            let f = b.field();
-            quote! { #f: 0., }
-        });
+            let default_fields = self.blades().map(|b| {
+                let f = b.field();
+                quote! { #f: 0., }
+            });
 
-        let add_self_fields = self.blades().map(|b| {
-            let f = b.field();
-            quote! { #f: self.#f + rhs.#f, }
-        });
+            let add_self_fields = self.blades().map(|b| {
+                let f = b.field();
+                quote! { #f: self.#f + rhs.#f, }
+            });
 
-        let sub_self_fields = self.blades().map(|b| {
-            let f = b.field();
-            quote! { #f: self.#f - rhs.#f, }
-        });
+            let sub_self_fields = self.blades().map(|b| {
+                let f = b.field();
+                quote! { #f: self.#f - rhs.#f, }
+            });
 
-        let mul_f64_fields = self.blades().map(|b| {
-            let f = b.field();
-            quote! { #f: self.#f * rhs, }
-        });
+            let div_f64_fields = self.blades().map(|b| {
+                let f = b.field();
+                quote! { #f: self.#f / rhs, }
+            });
 
-        let f64_mul_fields = self.blades().map(|b| {
-            let f = b.field();
-            quote! { #f: self * rhs.#f, }
-        });
+            quote! {
+                #[derive(Debug, Copy, Clone, PartialEq)]
+                pub struct #ty {
+                    #( #blades )*
+                }
 
-        let div_f64_fields = self.blades().map(|b| {
-            let f = b.field();
-            quote! { #f: self.#f / rhs, }
-        });
+                impl #ty {
+                    #[inline]
+                    pub const fn new(
+                        #(#new_fn_fields,)*
+                    ) -> Self {
+                        Self {
+                            #( #new_fn_struct_fields )*
+                        }
+                    }
+                }
+
+                impl const Default for #ty {
+                    #[inline]
+                    fn default() -> Self {
+                        Self {
+                            #( #default_fields )*
+                        }
+                    }
+                }
+
+                impl const std::ops::Add for #ty {
+                    type Output = #ty;
+                    #[inline]
+                    fn add(self, rhs: Self) -> Self {
+                        Self {
+                            #( #add_self_fields )*
+                        }
+                    }
+                }
+
+                impl const std::ops::Sub for #ty {
+                    type Output = #ty;
+                    #[inline]
+                    fn sub(self, rhs: Self) -> Self {
+                        Self {
+                            #( #sub_self_fields )*
+                        }
+                    }
+                }
+
+                impl const std::ops::Div<f64> for #ty {
+                    type Output = Self;
+                    #[inline]
+                    fn div(self, rhs: f64) -> Self {
+                        Self {
+                            #( #div_f64_fields )*
+                        }
+                    }
+                }
+            }
+        } else {
+            quote! {}
+        };
 
         let algebra = self.algebra();
+
         let type_ops = algebra.types().flat_map(|rhs| {
             BinaryOp::iter().map(move |op| ImplBinaryOp {
                 lhs: *self,
@@ -141,73 +213,7 @@ impl Type {
         let unary_ops = UnaryOp::iter().map(|op| ImplUnaryOp { ty: *self, op });
 
         quote! {
-            #[derive(Debug, Copy, Clone, PartialEq)]
-            pub struct #ty {
-                #( #blades )*
-            }
-
-            impl #ty {
-                pub const fn new(
-                    #(#new_fn_fields,)*
-                ) -> Self {
-                    Self {
-                        #( #new_fn_struct_fields )*
-                    }
-                }
-            }
-
-            impl const Default for #ty {
-                fn default() -> Self {
-                    Self {
-                        #( #default_fields )*
-                    }
-                }
-            }
-
-            impl const std::ops::Add for #ty {
-                type Output = #ty;
-                fn add(self, rhs: Self) -> Self {
-                    Self {
-                        #( #add_self_fields )*
-                    }
-                }
-            }
-
-            impl const std::ops::Sub for #ty {
-                type Output = #ty;
-                fn sub(self, rhs: Self) -> Self {
-                    Self {
-                        #( #sub_self_fields )*
-                    }
-                }
-            }
-
-            impl const std::ops::Mul<f64> for #ty {
-                type Output = Self;
-                fn mul(self, rhs: f64) -> Self {
-                    Self {
-                        #( #mul_f64_fields )*
-                    }
-                }
-            }
-
-            impl const std::ops::Mul<#ty> for f64 {
-                type Output = #ty;
-                fn mul(self, rhs: #ty) -> Self::Output {
-                    #ty {
-                        #( #f64_mul_fields )*
-                    }
-                }
-            }
-
-            impl const std::ops::Div<f64> for #ty {
-                type Output = Self;
-                fn div(self, rhs: f64) -> Self {
-                    Self {
-                        #( #div_f64_fields )*
-                    }
-                }
-            }
+            #definition
 
             #( #type_ops )*
 
@@ -222,7 +228,7 @@ pub struct ImplBinaryOp {
     pub op: BinaryOp,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum BinaryOp {
     Mul,
     Geometric,
@@ -270,6 +276,13 @@ impl Type {
             _ => false,
         }
     }
+
+    fn is_local(&self) -> bool {
+        match self {
+            Type::Grade(g) => !g.is_scalar(),
+            _ => true,
+        }
+    }
 }
 
 impl ImplBinaryOp {
@@ -290,7 +303,7 @@ impl ImplBinaryOp {
         let output = self.output();
 
         let (ty, blades) = &match output {
-            Type::Zero(_) => return quote! { crate::Zero },
+            Type::Zero(_) => return quote! { Zero {} },
             Type::Grade(grade) => {
                 let ty = grade.type_ident();
                 let blades = grade.blades().collect::<Vec<_>>();
@@ -315,9 +328,20 @@ impl ImplBinaryOp {
                 })
                 .filter_map(|(lhs, rhs, product)| match product {
                     Product::Pos(b) | Product::Neg(b) if blade == b => {
-                        let lhs = lhs.field();
-                        let rhs = rhs.field();
-                        let expr = quote! { self.#lhs * rhs.#rhs };
+                        let lhs = if self.lhs.is_scalar() {
+                            quote! { self }
+                        } else {
+                            let f = lhs.field();
+                            quote! { self.#f }
+                        };
+
+                        let rhs = if self.rhs.is_scalar() {
+                            quote! { rhs }
+                        } else {
+                            let f = rhs.field();
+                            quote! { rhs.#f }
+                        };
+                        let expr = quote! { #lhs * #rhs };
 
                         if product.is_neg() {
                             Some(quote! { -(#expr) })
@@ -359,6 +383,10 @@ impl ImplBinaryOp {
 
 impl ToTokens for ImplBinaryOp {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        if self.lhs.is_scalar() && self.rhs.is_scalar() {
+            return;
+        }
+
         let ty = self.lhs.type_ident();
         let rhs_ty = self.rhs.type_ident();
         let trait_ty = self.op.trait_ty();
@@ -376,6 +404,7 @@ impl ToTokens for ImplBinaryOp {
         let op_impl = quote! {
             impl const #trait_ty<#rhs_ty> for #ty {
                 type Output = #output_ty;
+                #[inline]
                 fn #trait_fn(self, #rhs_ident: #rhs_ty) -> Self::Output {
                     #expr
                 }
@@ -393,6 +422,10 @@ struct ImplUnaryOp {
 
 impl ToTokens for ImplUnaryOp {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        if self.ty.is_scalar() {
+            return;
+        }
+
         if matches!(self.op, UnaryOp::Bulk | UnaryOp::Weight) && !self.ty.algebra().is_homogenous()
         {
             return;
@@ -452,6 +485,7 @@ impl ToTokens for ImplUnaryOp {
         let t = quote! {
             impl #op_trait for #ty {
                 type Output = #output_ty;
+                #[inline]
                 fn #op_fn(self) -> Self::Output {
                     #expr
                 }

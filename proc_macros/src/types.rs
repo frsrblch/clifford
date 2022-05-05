@@ -43,10 +43,6 @@ impl Algebra {
         (1..=self.dimensions()).into_iter().map(|i| self.basis(i))
     }
 
-    pub fn grades_without_scalar(&self) -> impl Iterator<Item = Grade> + '_ {
-        (1..=self.dimensions()).into_iter().map(|i| self.grade(i))
-    }
-
     pub fn grades_with_scalar(&self) -> impl Iterator<Item = Grade> + '_ {
         (0..=self.dimensions()).into_iter().map(|i| self.grade(i))
     }
@@ -369,7 +365,7 @@ impl Type {
 
     pub fn iter(alg: &Algebra) -> impl Iterator<Item = Type> + '_ {
         std::iter::once(Type::Zero(*alg))
-            .chain(alg.grades_without_scalar().map(Type::Grade))
+            .chain(alg.grades_with_scalar().map(Type::Grade))
             .chain(alg.subalgebras().map(Type::SubAlgebra))
     }
 
