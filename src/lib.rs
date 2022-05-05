@@ -20,11 +20,11 @@
 //!     - [x] Antireverse
 //!     - [x] Meet
 //!     - [x] Join
-//!     - [ ] IsIdeal
+//!     - [x] Weight
+//!     - [x] Bulk
+//!     - [x] IsIdeal
 //!     - [ ] Projection
 //!     - [ ] Antiprojection
-//!     - [ ] Weight
-//!     - [ ] Bulk
 //! - [ ] Conformal
 //!     - [ ] Meet
 //!     - [ ] Join
@@ -107,6 +107,29 @@ pub trait LeftComplement {
 pub trait RightComplement {
     type Output;
     fn right_comp(self) -> Self::Output;
+}
+
+pub trait Bulk {
+    type Output;
+    fn bulk(self) -> Self::Output;
+}
+
+pub trait Weight {
+    type Output;
+    fn weight(self) -> Self::Output;
+}
+
+pub trait IsIdeal {
+    fn is_ideal(&self) -> bool;
+}
+
+impl<T> IsIdeal for T
+where
+    T: PartialEq<T::Output> + Bulk + Copy,
+{
+    fn is_ideal(&self) -> bool {
+        self.eq(&self.bulk())
+    }
 }
 
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -370,6 +393,36 @@ pub mod pga_3d {
             };
 
             assert_eq!(expected, e14.antigeo(e24));
+        }
+
+        #[test]
+        fn bivector_bulk_weight() {
+            let b = Bivector::new(1., 1., 1., 1., 1., 1.);
+
+            let bulk = Bivector {
+                e12: 1.,
+                e23: 1.,
+                e13: 1.,
+                ..Default::default()
+            };
+            let weight = Bivector {
+                e14: 1.,
+                e24: 1.,
+                e34: 1.,
+                ..Default::default()
+            };
+
+            assert_eq!(bulk, b.bulk());
+            assert_eq!(weight, b.weight());
+        }
+
+        #[test]
+        fn ideal_point() {
+            let real = point(1., 2., 3.);
+            let ideal = Vector::new(1., 2., 3., 0.);
+
+            assert!(!real.is_ideal());
+            assert!(ideal.is_ideal());
         }
     }
 }

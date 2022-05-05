@@ -94,6 +94,21 @@ impl Algebra {
     pub fn dimensions(&self) -> u8 {
         self.one + self.zero + self.neg_one
     }
+
+    pub fn is_homogenous(&self) -> bool {
+        match (self.one, self.neg_one, self.zero) {
+            (3, 0, 1) | (2, 0, 1) => true,
+            _ => false,
+        }
+    }
+
+    pub fn null_basis(&self) -> Option<Blade> {
+        if self.is_homogenous() {
+            Some(self.blade(1 << self.one))
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]

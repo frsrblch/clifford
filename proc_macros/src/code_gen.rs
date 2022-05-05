@@ -6,11 +6,19 @@ use syn::token::Add;
 
 impl Algebra {
     pub fn define(&self) -> TokenStream {
+        let traits = if self.is_homogenous() {
+            quote! {
+                pub use crate::{Dot, Wedge, Commutator, Geometric, LeftComplement, RightComplement, Reverse, Bulk, Weight, IsIdeal };
+            }
+        } else {
+            quote! {
+                pub use crate::{Dot, Wedge, Commutator, Geometric, LeftComplement, RightComplement, Reverse };
+            }
+        };
         let types = self.types().map(|ty| ty.define());
 
         quote! {
-            pub use crate::{Dot, Wedge, Commutator, Geometric, LeftComplement, RightComplement, Reverse };
-
+            #traits
             #( #types )*
         }
     }
@@ -385,6 +393,11 @@ struct ImplUnaryOp {
 
 impl ToTokens for ImplUnaryOp {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        if matches!(self.op, UnaryOp::Bulk | UnaryOp::Weight) && !self.ty.algebra().is_homogenous()
+        {
+            return;
+        }
+
         let ty = self.ty.type_ident();
         let output_blades = self.ty.blades().filter_map(|b| self.op.call(b).blade());
         let output = Type::from_iter(output_blades, self.ty.algebra());
@@ -455,6 +468,8 @@ enum UnaryOp {
     Reverse,
     LeftComplement,
     RightComplement,
+    Bulk,
+    Weight,
 }
 
 impl UnaryOp {
@@ -464,6 +479,8 @@ impl UnaryOp {
             Self::Reverse,
             Self::LeftComplement,
             Self::RightComplement,
+            Self::Bulk,
+            Self::Weight,
         ]
         .into_iter()
     }
@@ -474,6 +491,8 @@ impl UnaryOp {
             Self::Reverse => quote! { crate::Reverse },
             Self::LeftComplement => quote! { crate::LeftComplement },
             Self::RightComplement => quote! { crate::RightComplement },
+            Self::Bulk => quote! { crate::Bulk },
+            Self::Weight => quote! { crate::Weight },
         }
     }
 
@@ -483,6 +502,8 @@ impl UnaryOp {
             Self::Reverse => quote! { rev },
             Self::LeftComplement => quote! { left_comp },
             Self::RightComplement => quote! { right_comp },
+            Self::Bulk => quote! { bulk },
+            Self::Weight => quote! { weight },
         }
     }
 
@@ -508,6 +529,20 @@ impl UnaryOp {
                 let set = antiscalar.0 .0 ^ blade.0 .0;
                 let complement = blade.1.blade(set);
                 (blade * complement).with_blade(complement)
+            }
+            Self::Bulk => {
+                let null_blade = blade.1.null_basis().unwrap();
+                match blade.wedge(null_blade) {
+                    Product::Zero => Product::Zero,
+                    _ => Product::Pos(blade),
+                }
+            }
+            Self::Weight => {
+                let null_blade = blade.1.null_basis().unwrap();
+                match blade.wedge(null_blade) {
+                    Product::Zero => Product::Pos(blade),
+                    _ => Product::Zero,
+                }
             }
         }
     }
