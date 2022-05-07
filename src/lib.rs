@@ -85,7 +85,6 @@ pub mod cga_2d;
 pub mod cga_3d;
 
 pub use proc_macros::clifford;
-use std::fmt::Debug;
 
 pub trait Geometric<Rhs> {
     type Output;
@@ -123,6 +122,19 @@ impl Dot<f64> for f64 {
     }
 }
 
+pub trait Sandwich<Rhs> {
+    type Output;
+    fn sandwich(self, rhs: Rhs) -> Self::Output;
+}
+
+impl Sandwich<f64> for f64 {
+    type Output = f64;
+
+    fn sandwich(self, rhs: f64) -> Self::Output {
+        rhs
+    }
+}
+
 pub trait Commutator<Rhs> {
     type Output;
     fn commutator(self, rhs: Rhs) -> Self::Output;
@@ -137,25 +149,6 @@ impl Reverse for f64 {
     type Output = f64;
     fn rev(self) -> Self {
         self
-    }
-}
-
-pub trait Antireverse {
-    type Output;
-    fn antirev(self) -> Self::Output;
-}
-
-impl<T, Comp, CompRev> Antireverse for T
-where
-    T: LeftComplement<Output = Comp>,
-    Comp: Reverse<Output = CompRev>,
-    CompRev: RightComplement,
-{
-    type Output = CompRev::Output;
-
-    #[inline]
-    fn antirev(self) -> Self::Output {
-        self.left_comp().rev().right_comp()
     }
 }
 
@@ -177,6 +170,25 @@ pub trait Bulk {
 pub trait Weight {
     type Output;
     fn weight(self) -> Self::Output;
+}
+
+pub trait Antireverse {
+    type Output;
+    fn antirev(self) -> Self::Output;
+}
+
+impl<T, Comp, CompRev> Antireverse for T
+where
+    T: LeftComplement<Output = Comp>,
+    Comp: Reverse<Output = CompRev>,
+    CompRev: RightComplement,
+{
+    type Output = CompRev::Output;
+
+    #[inline]
+    fn antirev(self) -> Self::Output {
+        self.left_comp().rev().right_comp()
+    }
 }
 
 pub trait Antigeometric<Rhs> {
@@ -247,6 +259,28 @@ where
     }
 }
 
+pub trait Antisandwich<Rhs> {
+    type Output;
+    fn antisandwich(self, rhs: Rhs) -> Self::Output;
+}
+
+impl<Lhs, Rhs, LhsComp, RhsComp, OutputComp> Antisandwich<Rhs> for Lhs
+where
+    Lhs: LeftComplement<Output = LhsComp>,
+    Rhs: LeftComplement<Output = RhsComp>,
+    LhsComp: Sandwich<RhsComp, Output = OutputComp>,
+    OutputComp: RightComplement,
+{
+    type Output = OutputComp::Output;
+    #[inline]
+    fn antisandwich(self, rhs: Rhs) -> Self::Output {
+        let lhs = self.left_comp();
+        let rhs = rhs.left_comp();
+        let output_complement = lhs.sandwich(rhs);
+        output_complement.right_comp()
+    }
+}
+
 pub trait IsIdeal {
     fn is_ideal(&self) -> bool;
 }
@@ -258,45 +292,5 @@ where
     #[inline]
     fn is_ideal(&self) -> bool {
         self.eq(&self.bulk())
-    }
-}
-
-pub trait Project<Target> {
-    type Output;
-    fn project(self, target: Target) -> Self::Output;
-}
-
-impl<T, Target, TargetWeight, TargetComp, Wedged> Project<Target> for T
-where
-    Target: Weight<Output = TargetWeight> + Copy,
-    TargetWeight: LeftComplement<Output = TargetComp>,
-    TargetComp: Wedge<T, Output = Wedged>,
-    Wedged: Antiwedge<Target> + Debug,
-{
-    type Output = Wedged::Output;
-
-    #[inline]
-    fn project(self, target: Target) -> Self::Output {
-        target.weight().left_comp().wedge(self).antiwedge(target)
-    }
-}
-
-pub trait Antiproject<Target> {
-    type Output;
-    fn antiproject(self, target: Target) -> Self::Output;
-}
-
-impl<T, Target, TargetWeight, TargetComp, Antiwedged> Antiproject<Target> for T
-where
-    Target: Weight<Output = TargetWeight> + Copy,
-    TargetWeight: LeftComplement<Output = TargetComp>,
-    TargetComp: Antiwedge<T, Output = Antiwedged>,
-    Antiwedged: Wedge<Target>,
-{
-    type Output = Antiwedged::Output;
-
-    #[inline]
-    fn antiproject(self, target: Target) -> Self::Output {
-        target.weight().left_comp().antiwedge(self).wedge(target)
     }
 }

@@ -32,6 +32,46 @@ where
     }
 }
 
+pub trait Project<Target> {
+    type Output;
+    fn project(self, target: Target) -> Self::Output;
+}
+
+impl<T, Target, TargetWeight, TargetComp, Wedged> Project<Target> for T
+where
+    Target: Weight<Output = TargetWeight> + Copy,
+    TargetWeight: LeftComplement<Output = TargetComp>,
+    TargetComp: Wedge<T, Output = Wedged>,
+    Wedged: Antiwedge<Target>,
+{
+    type Output = Wedged::Output;
+
+    #[inline]
+    fn project(self, target: Target) -> Self::Output {
+        target.weight().left_comp().wedge(self).antiwedge(target)
+    }
+}
+
+pub trait Antiproject<Target> {
+    type Output;
+    fn antiproject(self, target: Target) -> Self::Output;
+}
+
+impl<T, Target, TargetWeight, TargetComp, Antiwedged> Antiproject<Target> for T
+where
+    Target: Weight<Output = TargetWeight> + Copy,
+    TargetWeight: LeftComplement<Output = TargetComp>,
+    TargetComp: Antiwedge<T, Output = Antiwedged>,
+    Antiwedged: Wedge<Target>,
+{
+    type Output = Antiwedged::Output;
+
+    #[inline]
+    fn antiproject(self, target: Target) -> Self::Output {
+        target.weight().left_comp().antiwedge(self).wedge(target)
+    }
+}
+
 pub const fn point(x: f64, y: f64, z: f64) -> Vector {
     Vector::new(x, y, z, 1.)
 }
@@ -39,7 +79,6 @@ pub const fn point(x: f64, y: f64, z: f64) -> Vector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Project;
 
     #[test]
     fn vec_mul() {
