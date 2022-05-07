@@ -192,6 +192,10 @@ impl Grade {
     pub fn is_odd(self) -> bool {
         self.0 % 2 == 1
     }
+
+    pub fn is_pseudoscalar(&self) -> bool {
+        self.blades().next() == Some(self.1.pseudoscalar())
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]

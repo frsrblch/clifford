@@ -67,16 +67,19 @@ impl Blade {
 
 impl Grade {
     pub fn type_ident(&self) -> Ident {
-        let str = match self.0 {
-            i if i == self.1.pseudoscalar().grade().0 => "Pseudoscalar",
-            0 => "f64",
-            1 => "Vector",
-            2 => "Bivector",
-            3 => "Trivector",
-            4 => "Quadvector",
-            5 => "Pentavector",
-            6 => "Hexavector",
-            _ => unimplemented!("not implemented for grade: {}", self.0),
+        let str = if self.is_pseudoscalar() {
+            "Pseudoscalar"
+        } else {
+            match self.0 {
+                0 => "f64",
+                1 => "Vector",
+                2 => "Bivector",
+                3 => "Trivector",
+                4 => "Quadvector",
+                5 => "Pentavector",
+                6 => "Hexavector",
+                _ => unimplemented!("not implemented for grade: {}", self.0),
+            }
         };
         Ident::new(str, Span::mixed_site())
     }
