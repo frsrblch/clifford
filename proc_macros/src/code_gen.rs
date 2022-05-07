@@ -95,7 +95,7 @@ impl SubAlgebra {
 impl Type {
     pub fn type_ident(&self) -> TokenStream {
         match self {
-            Type::Zero(_) => quote! { Zero },
+            Type::Zero(_) => quote! { crate::Zero },
             Type::Grade(grade) => grade.type_ident().to_token_stream(),
             Type::SubAlgebra(sub) => sub.type_ident().to_token_stream(),
         }
@@ -135,10 +135,7 @@ impl Type {
                 quote! { #f: self.#f - rhs.#f, }
             });
 
-            let div_f64_fields = self.blades().map(|b| {
-                let f = b.field();
-                quote! { #f: self.#f / rhs, }
-            });
+            let div_f64 = impl_div_f64(*self, &ty);
 
             quote! {
                 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -186,24 +183,15 @@ impl Type {
                     }
                 }
 
-                impl const std::ops::Div<f64> for #ty {
-                    type Output = Self;
-                    #[inline]
-                    fn div(self, rhs: f64) -> Self {
-                        Self {
-                            #( #div_f64_fields )*
-                        }
-                    }
-                }
+                #div_f64
             }
         } else {
             quote! {}
         };
 
         let algebra = self.algebra();
-
-        let type_ops = algebra.types().flat_map(|rhs| {
-            BinaryOp::iter().map(move |op| ImplBinaryOp {
+        let product_ops = algebra.types().flat_map(|rhs| {
+            ProductOps::iter().map(move |op| ImplProductOp {
                 lhs: *self,
                 rhs,
                 op,
@@ -215,109 +203,135 @@ impl Type {
         quote! {
             #definition
 
-            #( #type_ops )*
+            #( #product_ops )*
 
             #( #unary_ops )*
         }
     }
 }
 
-pub struct ImplBinaryOp {
+fn impl_div_f64(lhs: Type, ty: &TokenStream) -> TokenStream {
+    let fields = lhs.blades().map(|b| {
+        let f = b.field();
+        let lhs = access_value(lhs, b, quote!(self));
+        quote! { #f: #lhs / rhs }
+    });
+
+    let expr = construct_output(lhs, fields);
+
+    quote! {
+        impl const std::ops::Div<f64> for #ty {
+            type Output = Self;
+            #[inline]
+            fn div(self, rhs: f64) -> Self {
+                #expr
+            }
+        }
+    }
+}
+
+fn access_value(parent: Type, blade: Blade, ident: TokenStream) -> TokenStream {
+    if parent.is_scalar() {
+        ident
+    } else {
+        let field = blade.field();
+        quote! {
+            #ident.#field
+        }
+    }
+}
+
+fn construct_output<F: Iterator<Item = TokenStream>>(output: Type, fields: F) -> TokenStream {
+    if output.is_zero() {
+        output.type_ident()
+    } else if output.is_scalar() {
+        quote! { #( #fields )* }
+    } else {
+        let ty = output.type_ident();
+        quote! {
+            #ty {
+                #( #fields, )*
+            }
+        }
+    }
+}
+
+fn assign_value(output: Type, blade: Blade, sum: Punctuated<TokenStream, Add>) -> TokenStream {
+    let expr = if sum.is_empty() {
+        quote! { 0. }
+    } else {
+        sum.to_token_stream()
+    };
+    if output.is_scalar() {
+        expr
+    } else {
+        let field = blade.field();
+        quote! { #field: #expr }
+    }
+}
+
+pub struct ImplProductOp {
     pub lhs: Type,
     pub rhs: Type,
-    pub op: BinaryOp,
+    pub op: ProductOps,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum BinaryOp {
+pub enum ProductOps {
     Mul,
     Geometric,
     Dot,
     Wedge,
 }
 
-impl BinaryOp {
+impl ProductOps {
     pub fn iter() -> impl Iterator<Item = Self> + 'static {
         [Self::Mul, Self::Geometric, Self::Dot, Self::Wedge].into_iter()
     }
 
     pub fn call(&self, lhs: Blade, rhs: Blade) -> Product {
         match self {
-            BinaryOp::Mul => lhs * rhs,
-            BinaryOp::Geometric => lhs * rhs,
-            BinaryOp::Dot => lhs.dot(rhs),
-            BinaryOp::Wedge => lhs.wedge(rhs),
+            ProductOps::Mul => lhs * rhs,
+            ProductOps::Geometric => lhs * rhs,
+            ProductOps::Dot => lhs.dot(rhs),
+            ProductOps::Wedge => lhs.wedge(rhs),
         }
     }
 
     pub fn trait_ty(&self) -> TokenStream {
         match self {
-            BinaryOp::Mul => quote! { std::ops::Mul },
-            BinaryOp::Geometric => quote! { crate::Geometric },
-            BinaryOp::Dot => quote! { crate::Dot },
-            BinaryOp::Wedge => quote! { crate::Wedge },
+            ProductOps::Mul => quote! { std::ops::Mul },
+            ProductOps::Geometric => quote! { crate::Geometric },
+            ProductOps::Dot => quote! { crate::Dot },
+            ProductOps::Wedge => quote! { crate::Wedge },
         }
     }
 
     pub fn trait_fn(&self) -> TokenStream {
         match self {
-            BinaryOp::Mul => quote! { mul },
-            BinaryOp::Geometric => quote! { geo },
-            BinaryOp::Dot => quote! { dot },
-            BinaryOp::Wedge => quote! { wedge },
+            ProductOps::Mul => quote! { mul },
+            ProductOps::Geometric => quote! { geo },
+            ProductOps::Dot => quote! { dot },
+            ProductOps::Wedge => quote! { wedge },
         }
     }
 }
 
-impl Type {
-    fn is_scalar(&self) -> bool {
-        match self {
-            Self::Grade(grade) => grade.is_scalar(),
-            _ => false,
-        }
-    }
-
-    fn is_local(&self) -> bool {
-        match self {
-            Type::Grade(g) => !g.is_scalar(),
-            _ => true,
-        }
-    }
-}
-
-impl ImplBinaryOp {
+impl ImplProductOp {
     fn output(&self) -> Type {
-        let iter = self
-            .lhs
-            .blades()
-            .flat_map(|lhs_b| {
+        Type::from_iter(
+            self.lhs.blades().flat_map(|lhs| {
                 self.rhs
                     .blades()
-                    .map(move |rhs_b| self.op.call(lhs_b, rhs_b))
-            })
-            .filter_map(|product| product.blade());
-        Type::from_iter(iter, self.lhs.algebra())
+                    .filter_map(move |rhs| self.op.call(lhs, rhs).blade())
+            }),
+            self.lhs.algebra(),
+        )
     }
 
-    fn expr(&self) -> TokenStream {
-        let output = self.output();
-
-        let (ty, blades) = &match output {
-            Type::Zero(_) => return quote! { Zero {} },
-            Type::Grade(grade) => {
-                let ty = grade.type_ident();
-                let blades = grade.blades().collect::<Vec<_>>();
-                (ty, blades)
-            }
-            Type::SubAlgebra(sub) => {
-                let ty = sub.type_ident();
-                let blades = sub.blades().collect::<Vec<_>>();
-                (ty, blades)
-            }
-        };
-
-        let fields = blades.iter().map(|&blade| {
-            let products = self
+    fn expr(&self, output: Type) -> TokenStream {
+        let fields = output.blades().map(|blade| {
+            let sum = self
                 .lhs
                 .blades()
                 .flat_map(|lhs| {
@@ -326,21 +340,10 @@ impl ImplBinaryOp {
                         (lhs, rhs, product)
                     })
                 })
-                .filter_map(|(lhs, rhs, product)| match product {
-                    Product::Pos(b) | Product::Neg(b) if blade == b => {
-                        let lhs = if self.lhs.is_scalar() {
-                            quote! { self }
-                        } else {
-                            let f = lhs.field();
-                            quote! { self.#f }
-                        };
-
-                        let rhs = if self.rhs.is_scalar() {
-                            quote! { rhs }
-                        } else {
-                            let f = rhs.field();
-                            quote! { rhs.#f }
-                        };
+                .filter_map(|(lhs, rhs, product)| {
+                    if product.blade() == Some(blade) {
+                        let lhs = access_value(self.lhs, lhs, quote!(self));
+                        let rhs = access_value(self.rhs, rhs, quote!(rhs));
                         let expr = quote! { #lhs * #rhs };
 
                         if product.is_neg() {
@@ -348,42 +351,23 @@ impl ImplBinaryOp {
                         } else {
                             Some(expr)
                         }
+                    } else {
+                        None
                     }
-                    _ => None,
                 })
                 .collect::<Punctuated<_, Add>>();
 
-            let expr = if products.is_empty() {
-                quote! { 0. }
-            } else {
-                quote! { #products }
-            };
-
-            if output.is_scalar() {
-                expr
-            } else {
-                let f = blade.field();
-                quote! { #f: #expr, }
-            }
+            assign_value(output, blade, sum)
         });
 
-        if output.is_scalar() {
-            quote! {
-                #( #fields )*
-            }
-        } else {
-            quote! {
-                #ty {
-                    #( #fields )*
-                }
-            }
-        }
+        construct_output(output, fields)
     }
 }
 
-impl ToTokens for ImplBinaryOp {
+impl ToTokens for ImplProductOp {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        if self.lhs.is_scalar() && self.rhs.is_scalar() {
+        // product traits for f64 and f64 are implemented in the clifford crate
+        if !self.lhs.is_local() && !self.rhs.is_local() {
             return;
         }
 
@@ -395,10 +379,11 @@ impl ToTokens for ImplBinaryOp {
         let output = self.output();
 
         let output_ty = output.type_ident();
-        let expr = self.expr();
-        let rhs_ident = match output {
-            Type::Zero(_) => quote! { _ },
-            _ => quote! { rhs },
+        let expr = self.expr(output);
+        let rhs_ident = if output.is_zero() {
+            quote! { _ }
+        } else {
+            quote! { rhs }
         };
 
         let op_impl = quote! {
@@ -422,7 +407,7 @@ struct ImplUnaryOp {
 
 impl ToTokens for ImplUnaryOp {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        if self.ty.is_scalar() {
+        if !self.ty.is_local() {
             return;
         }
 
@@ -444,17 +429,14 @@ impl ToTokens for ImplUnaryOp {
                 .ty
                 .blades()
                 .filter_map(|b| {
-                    let f = b.field();
                     let product = self.op.call(b);
-                    let product_blade = product.blade()?;
-
-                    if product_blade == blade {
+                    if product.blade() == Some(blade) {
+                        let value = access_value(self.ty, b, quote!(self));
                         let expr = if product.is_neg() {
-                            quote! { -self.#f }
+                            quote! { -#value }
                         } else {
-                            quote! { self.#f }
+                            quote! { #value }
                         };
-
                         Some(expr)
                     } else {
                         None
@@ -462,25 +444,10 @@ impl ToTokens for ImplUnaryOp {
                 })
                 .collect::<Punctuated<_, Add>>();
 
-            let expr = if sum.is_empty() {
-                quote! { 0. }
-            } else {
-                quote! { #sum }
-            };
-
-            if output.is_scalar() {
-                quote! { #expr }
-            } else {
-                let f = blade.field();
-                quote! { #f: #expr }
-            }
+            assign_value(output, blade, sum)
         });
 
-        let expr = if output.is_scalar() {
-            quote! { #(#fields)* }
-        } else {
-            quote! { #output_ty { #(#fields,)* } }
-        };
+        let expr = construct_output(output, fields);
 
         let t = quote! {
             impl #op_trait for #ty {
@@ -582,6 +549,37 @@ impl UnaryOp {
     }
 }
 
+struct SandwichProduct {
+    lhs: Type,
+    rhs: Type,
+}
+
+impl ToTokens for SandwichProduct {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let lhs_ty = self.lhs.type_ident();
+        let rhs_ty = self.rhs.type_ident();
+
+        let _intermediate = ImplProductOp {
+            lhs: self.lhs,
+            rhs: self.rhs,
+            op: ProductOps::Geometric,
+        }
+        .output();
+
+        let t = quote! {
+            impl crate::Sandwich<#rhs_ty> for #lhs_ty {
+                type Output = #rhs_ty;
+                fn sandwich(self, rhs: #rhs_ty) -> Self::Output {
+                    let int = self.geo(rhs);
+                    todo!()
+                }
+            }
+        };
+
+        tokens.extend(t);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -600,23 +598,6 @@ mod tests {
         assert!(matches!(op.call(vector), Product::Pos(_)));
         assert!(matches!(op.call(bivector), Product::Neg(_)));
         assert!(matches!(op.call(trivector), Product::Neg(_)));
-        assert!(matches!(op.call(quadvector), Product::Pos(_)));
-    }
-
-    #[test]
-    fn antireverse() {
-        let op = UnaryOp::Antireverse;
-        let alg = Algebra::new(4, 0, 0);
-        let scalar = Blade(BladeSet(0), alg);
-        let vector = Blade(BladeSet(0b_1), alg);
-        let bivector = Blade(BladeSet(0b_11), alg);
-        let trivector = Blade(BladeSet(0b_111), alg);
-        let quadvector = Blade(BladeSet(0b_1111), alg);
-
-        assert!(matches!(op.call(scalar), Product::Pos(_)));
-        assert!(matches!(op.call(vector), Product::Neg(_)));
-        assert!(matches!(op.call(bivector), Product::Neg(_)));
-        assert!(matches!(op.call(trivector), Product::Pos(_)));
         assert!(matches!(op.call(quadvector), Product::Pos(_)));
     }
 

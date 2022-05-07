@@ -294,3 +294,22 @@ where
         self.eq(&self.bulk())
     }
 }
+
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct Zero;
+
+impl const std::ops::Add for Zero {
+    type Output = Zero;
+    #[inline]
+    fn add(self, _: Self) -> Self {
+        Zero
+    }
+}
+
+impl const std::ops::Sub for Zero {
+    type Output = Zero;
+    #[inline]
+    fn sub(self, _: Self) -> Self {
+        Zero
+    }
+}

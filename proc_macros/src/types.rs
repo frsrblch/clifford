@@ -412,6 +412,25 @@ impl Type {
 
         unimplemented!("multi vector")
     }
+
+    pub fn is_zero(&self) -> bool {
+        matches!(self, Type::Zero(_))
+    }
+
+    pub fn is_scalar(&self) -> bool {
+        match self {
+            Self::Grade(grade) => grade.is_scalar(),
+            _ => false,
+        }
+    }
+
+    pub fn is_local(&self) -> bool {
+        match self {
+            Type::Zero(_) => false,
+            Type::Grade(g) => !g.is_scalar(),
+            _ => true,
+        }
+    }
 }
 
 #[cfg(test)]
