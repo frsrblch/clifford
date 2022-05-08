@@ -1,3 +1,11 @@
+pub struct Zero;
+
+impl Zero {
+    pub fn ty() -> proc_macro2::TokenStream {
+        quote::quote! { crate::Zero }
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Algebra {
     one: u8,
@@ -303,19 +311,22 @@ impl From<u64> for BladeSet {
 
 impl BladeSet {
     pub fn contains(&self, index: u8) -> bool {
-        assert!(index > 0, "index cannot be zero (e1 is stored at index 0)");
-        let flag = 1 << (index - 1);
+        let flag = Self::flag(index);
         self.0 & flag == flag
     }
 
     pub fn insert(&mut self, index: u8) {
-        assert!(index > 0, "index cannot be zero (e1 is stored at index 0)");
-        self.0 |= 1 << (index - 1);
+        self.0 |= Self::flag(index);
     }
 
     pub fn flip(&mut self, index: u8) {
-        let flag = 1 << (index - 1);
+        let flag = Self::flag(index);
         self.0 ^= flag;
+    }
+
+    fn flag(index: u8) -> u64 {
+        assert!(index > 0, "index cannot be zero (e1 is stored at index 0)");
+        1 << (index - 1)
     }
 
     pub fn is_empty(&self) -> bool {

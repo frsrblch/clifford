@@ -98,7 +98,7 @@ impl SubAlgebra {
 impl Type {
     pub fn type_ident(&self) -> TokenStream {
         match self {
-            Type::Zero(_) => quote! { crate::Zero },
+            Type::Zero(_) => Zero::ty(),
             Type::Grade(grade) => grade.type_ident().to_token_stream(),
             Type::SubAlgebra(sub) => sub.type_ident().to_token_stream(),
         }
