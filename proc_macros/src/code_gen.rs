@@ -66,41 +66,50 @@ impl Blade {
 }
 
 impl Grade {
-    pub fn type_ident(&self) -> Ident {
-        let str = if self.is_pseudoscalar() {
-            "Pseudoscalar"
-        } else {
-            match self.0 {
-                0 => "f64",
-                1 => "Vector",
-                2 => "Bivector",
-                3 => "Trivector",
-                4 => "Quadvector",
-                5 => "Pentavector",
-                6 => "Hexavector",
-                _ => unimplemented!("not implemented for grade: {}", self.0),
-            }
+    pub fn name(&self) -> &'static str {
+        match self.0 {
+            0 => "Scalar",
+            1 => "Vector",
+            2 => "Bivector",
+            3 => "Trivector",
+            4 => "Quadvector",
+            5 => "Pentavector",
+            6 => "Hexavector",
+            _ => unimplemented!("not implemented for grade: {}", self.0),
+        }
+    }
+
+    pub fn type_ident(&self) -> syn::Type {
+        let str = match self.0 {
+            0 => "f64",
+            1 => "Vector",
+            2 => "Bivector",
+            3 => "Trivector",
+            4 => "Quadvector",
+            5 => "Pentavector",
+            6 => "Hexavector",
+            _ => unimplemented!("not implemented for grade: {}", self.0),
         };
-        Ident::new(str, Span::mixed_site())
+        syn::parse_str(str).unwrap()
     }
 }
 
 impl SubAlgebra {
-    fn type_ident(&self) -> Ident {
+    fn type_ident(&self) -> syn::Type {
         let str = match self {
             SubAlgebra::Even(_) => "Even",
             SubAlgebra::Odd(_) => "Odd",
         };
-        Ident::new(str, Span::mixed_site())
+        syn::parse_str(str).unwrap()
     }
 }
 
 impl Type {
-    pub fn type_ident(&self) -> TokenStream {
+    pub fn type_ident(&self) -> syn::Type {
         match self {
             Type::Zero(_) => Zero::ty(),
-            Type::Grade(grade) => grade.type_ident().to_token_stream(),
-            Type::SubAlgebra(sub) => sub.type_ident().to_token_stream(),
+            Type::Grade(grade) => grade.type_ident(),
+            Type::SubAlgebra(sub) => sub.type_ident(),
         }
     }
 
@@ -194,7 +203,7 @@ impl Type {
 
         let algebra = self.algebra();
         let product_ops = algebra.types().flat_map(|rhs| {
-            ProductOps::iter().map(move |op| ImplProductOp {
+            ProductOp::iter().map(move |op| ImplProductOp {
                 lhs: *self,
                 rhs,
                 op,
@@ -213,7 +222,7 @@ impl Type {
     }
 }
 
-fn impl_div_f64(lhs: Type, ty: &TokenStream) -> TokenStream {
+fn impl_div_f64(lhs: Type, ty: &syn::Type) -> TokenStream {
     let fields = lhs.blades().map(|b| {
         let f = b.field();
         let lhs = access_value(lhs, b, quote!(self));
@@ -246,7 +255,7 @@ fn access_value(parent: Type, blade: Blade, ident: TokenStream) -> TokenStream {
 
 fn construct_output<F: Iterator<Item = TokenStream>>(output: Type, fields: F) -> TokenStream {
     if output.is_zero() {
-        output.type_ident()
+        output.type_ident().to_token_stream()
     } else if output.is_scalar() {
         quote! { #( #fields )* }
     } else {
@@ -276,48 +285,7 @@ fn assign_value(output: Type, blade: Blade, sum: Punctuated<TokenStream, Add>) -
 pub struct ImplProductOp {
     pub lhs: Type,
     pub rhs: Type,
-    pub op: ProductOps,
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum ProductOps {
-    Mul,
-    Geometric,
-    Dot,
-    Wedge,
-}
-
-impl ProductOps {
-    pub fn iter() -> impl Iterator<Item = Self> + 'static {
-        [Self::Mul, Self::Geometric, Self::Dot, Self::Wedge].into_iter()
-    }
-
-    pub fn call(&self, lhs: Blade, rhs: Blade) -> Product {
-        match self {
-            ProductOps::Mul => lhs * rhs,
-            ProductOps::Geometric => lhs * rhs,
-            ProductOps::Dot => lhs.dot(rhs),
-            ProductOps::Wedge => lhs.wedge(rhs),
-        }
-    }
-
-    pub fn trait_ty(&self) -> TokenStream {
-        match self {
-            ProductOps::Mul => quote! { std::ops::Mul },
-            ProductOps::Geometric => quote! { crate::Geometric },
-            ProductOps::Dot => quote! { crate::Dot },
-            ProductOps::Wedge => quote! { crate::Wedge },
-        }
-    }
-
-    pub fn trait_fn(&self) -> TokenStream {
-        match self {
-            ProductOps::Mul => quote! { mul },
-            ProductOps::Geometric => quote! { geo },
-            ProductOps::Dot => quote! { dot },
-            ProductOps::Wedge => quote! { wedge },
-        }
-    }
+    pub op: ProductOp,
 }
 
 impl ImplProductOp {
@@ -565,7 +533,7 @@ impl ToTokens for SandwichProduct {
         let _intermediate = ImplProductOp {
             lhs: self.lhs,
             rhs: self.rhs,
-            op: ProductOps::Geometric,
+            op: ProductOp::Geometric,
         }
         .output();
 

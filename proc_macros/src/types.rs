@@ -1,8 +1,13 @@
+use proc_macro2::{Ident, Span, TokenStream};
+use quote::{quote, ToTokens};
+use syn::punctuated::Punctuated;
+use syn::token::Comma;
+
 pub struct Zero;
 
 impl Zero {
-    pub fn ty() -> proc_macro2::TokenStream {
-        quote::quote! { crate::Zero }
+    pub fn ty() -> syn::Type {
+        syn::parse_str("crate::Zero").unwrap()
     }
 }
 
@@ -51,7 +56,7 @@ impl Algebra {
         (1..=self.dimensions()).into_iter().map(|i| self.basis(i))
     }
 
-    pub fn grades_with_scalar(&self) -> impl Iterator<Item = Grade> + '_ {
+    pub fn grades(&self) -> impl Iterator<Item = Grade> + '_ {
         (0..=self.dimensions()).into_iter().map(|i| self.grade(i))
     }
 
@@ -75,7 +80,7 @@ impl Algebra {
     }
 
     pub fn blades(&self) -> impl Iterator<Item = Blade> + '_ {
-        self.grades_with_scalar().flat_map(|grade| {
+        self.grades().flat_map(|grade| {
             self.blades_unsorted()
                 .filter(move |blade| blade.grade() == grade)
         })
@@ -89,6 +94,12 @@ impl Algebra {
         (0..=self.pseudoscalar().0 .0)
             .into_iter()
             .map(|set| self.blade(BladeSet(set)))
+    }
+
+    fn to_blades_unsorted(self) -> impl Iterator<Item = Blade> + 'static {
+        (0..=self.pseudoscalar().0 .0)
+            .into_iter()
+            .map(move |set| self.blade(BladeSet(set)))
     }
 
     pub fn blade<B: Into<BladeSet>>(&self, set: B) -> Blade {
@@ -184,9 +195,20 @@ pub struct Basis(pub u8, pub Algebra);
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Grade(pub u8, pub Algebra);
 
+impl ToBlades for Grade {
+    fn blades(&self) -> Box<dyn Iterator<Item = Blade> + '_> {
+        Box::new(self.blades())
+    }
+}
+
 impl Grade {
     pub fn blades(&self) -> impl Iterator<Item = Blade> + '_ {
         self.1.blades_unsorted().filter(|b| b.0.len() == self.0)
+    }
+    pub fn to_blades(self) -> impl Iterator<Item = Blade> + 'static {
+        self.1
+            .to_blades_unsorted()
+            .filter(move |b| b.0.len() == self.0)
     }
 
     pub fn is_scalar(&self) -> bool {
@@ -380,7 +402,7 @@ impl Type {
 
     pub fn iter(alg: &Algebra) -> impl Iterator<Item = Type> + '_ {
         std::iter::once(Type::Zero(*alg))
-            .chain(alg.grades_with_scalar().map(Type::Grade))
+            .chain(alg.grades().map(Type::Grade))
             .chain(alg.subalgebras().map(Type::SubAlgebra))
     }
 
@@ -444,6 +466,311 @@ impl Type {
             Type::Zero(_) => false,
             Type::Grade(g) => !g.is_scalar(),
             _ => true,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum TypeMv {
+    Zero(Algebra),
+    Grade(Grade),
+    Multivector(Multivector),
+}
+
+impl ToBlades for TypeMv {
+    fn blades(&self) -> Box<dyn Iterator<Item = Blade> + '_> {
+        match self {
+            Self::Zero(_) => Box::new(std::iter::empty()),
+            Self::Grade(g) => Box::new(g.blades()),
+            Self::Multivector(mv) => mv.blades(),
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct WhereClause {
+    pub bounds: Punctuated<Bound, Comma>,
+}
+
+impl ToTokens for WhereClause {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let bounds = &self.bounds;
+        if !bounds.is_empty() {
+            tokens.extend(quote! {
+                where #bounds
+            })
+        }
+    }
+}
+
+impl FromIterator<Bound> for WhereClause {
+    fn from_iter<T: IntoIterator<Item = Bound>>(iter: T) -> Self {
+        Self {
+            bounds: iter.into_iter().collect(),
+        }
+    }
+}
+
+pub struct Bound {
+    pub ty: Box<dyn ToTokens>,
+    pub trait_ty: TokenStream,
+    pub generics: Generics,
+}
+
+impl ToTokens for Bound {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Bound {
+            ty,
+            trait_ty,
+            generics,
+        } = self;
+        tokens.extend(quote! {
+            #ty: #trait_ty #generics
+        });
+    }
+}
+
+#[derive(Clone)]
+pub enum Generic {
+    Generic(Ident),
+    Concrete(syn::Type),
+    Output(Ident),
+}
+
+impl Generic {
+    pub fn ident(&self) -> Option<Ident> {
+        match self {
+            Self::Generic(i) | Self::Output(i) => Some(i.clone()),
+            _ => None,
+        }
+    }
+}
+
+// TODO create enum TypeParam { Generic(Ident), TokenStream } with Ord
+#[derive(Default)]
+pub struct Generics {
+    pub params: Punctuated<Generic, Comma>,
+}
+
+impl FromIterator<Generic> for Generics {
+    fn from_iter<T: IntoIterator<Item = Generic>>(iter: T) -> Self {
+        Generics {
+            params: iter.into_iter().collect(),
+        }
+    }
+}
+
+impl ToTokens for Generic {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        match self {
+            Self::Generic(i) => i.to_tokens(tokens),
+            Self::Concrete(ty) => ty.to_tokens(tokens),
+            Self::Output(ty) => tokens.extend(quote! { Output = #ty }),
+        }
+    }
+}
+
+impl ToTokens for Generics {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        if !self.params.is_empty() {
+            let params = &self.params;
+            tokens.extend(quote! { <#params> })
+        }
+    }
+}
+
+impl Generics {
+    pub fn iter(&self) -> syn::punctuated::Iter<Generic> {
+        self.params.iter()
+    }
+}
+
+impl std::ops::Index<usize> for Generics {
+    type Output = Generic;
+    fn index(&self, index: usize) -> &Self::Output {
+        self.params.index(index)
+    }
+}
+
+impl TypeMv {
+    pub fn is_scalar(&self) -> bool {
+        matches!(self, Self::Grade(g) if g.is_scalar())
+    }
+
+    pub fn is_zero(&self) -> bool {
+        matches!(self, Self::Zero(_))
+    }
+
+    pub fn generics(&self, suffix: &str) -> Generics {
+        match self {
+            Self::Multivector(mv) => Generics {
+                params: mv
+                    .1
+                    .grades()
+                    .map(|g| Generic::Generic(g.generic(suffix)))
+                    .collect(),
+            },
+            _ => Generics::default(),
+        }
+    }
+
+    pub fn iter(algebra: &Algebra) -> impl Iterator<Item = Self> + '_ {
+        use std::iter::once;
+        once(TypeMv::Zero(*algebra))
+            .chain(algebra.grades().map(Self::Grade))
+            .chain(once(TypeMv::Multivector(Multivector(
+                GradeSet::default(),
+                *algebra,
+            ))))
+    }
+
+    pub fn from_iter<I: IntoIterator<Item = Product>>(iter: I, algebra: Algebra) -> Self {
+        let mut grades = std::collections::HashSet::<Grade>::default();
+        for product in iter {
+            if let Some(blade) = product.blade() {
+                grades.insert(blade.grade());
+            }
+        }
+        match grades.len() {
+            0 => Self::Zero(algebra),
+            1 => Self::Grade(grades.into_iter().next().unwrap()),
+            _ => {
+                let mut mv = Multivector::new(algebra);
+
+                for grade in grades.into_iter() {
+                    mv.0.insert(grade);
+                }
+
+                Self::Multivector(mv)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct Multivector(pub GradeSet, pub Algebra);
+
+impl Multivector {
+    pub fn new(algebra: Algebra) -> Self {
+        Self(GradeSet::default(), algebra)
+    }
+
+    pub fn generics(&self, suffix: &str) -> Generics {
+        if self.0 == GradeSet::default() {
+            Generics {
+                params: self
+                    .1
+                    .grades()
+                    .map(|g| Generic::Generic(g.generic(suffix)))
+                    .collect(),
+            }
+        } else {
+            Generics {
+                params: self
+                    .1
+                    .grades()
+                    .map(|g| {
+                        if self.0.contains(g) {
+                            Generic::Concrete(g.type_ident())
+                        } else {
+                            Generic::Concrete(Zero::ty())
+                        }
+                    })
+                    .collect(),
+            }
+        }
+    }
+
+    pub fn blades(&self) -> Box<dyn Iterator<Item = Blade> + '_> {
+        if self.0 == GradeSet::default() {
+            Box::new(self.1.grades().flat_map(|g| g.to_blades()))
+        } else {
+            Box::new(
+                self.1
+                    .grades()
+                    .filter(|g| self.0.contains(*g))
+                    .flat_map(|g| g.to_blades()),
+            )
+        }
+    }
+
+    pub fn grades(&self) -> impl Iterator<Item = Grade> + '_ {
+        self.1.grades().filter(|g| self.0.contains(*g))
+    }
+}
+
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+pub struct GradeSet(u64);
+
+impl GradeSet {
+    pub fn contains(&self, grade: Grade) -> bool {
+        if *self == GradeSet::default() {
+            return true;
+        }
+
+        let flag = GradeSet::flag(grade);
+        self.0 & flag == flag
+    }
+
+    pub fn insert(&mut self, grade: Grade) {
+        self.0 |= GradeSet::flag(grade);
+    }
+
+    fn flag(grade: Grade) -> u64 {
+        1 << grade.0
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum ProductOp {
+    Mul,
+    Geometric,
+    Dot,
+    Wedge,
+}
+
+pub trait ToBlades {
+    fn blades(&self) -> Box<dyn Iterator<Item = Blade> + '_>;
+}
+
+impl ProductOp {
+    pub fn output_contains(&self, lhs: impl ToBlades, rhs: impl ToBlades, output: Grade) -> bool {
+        lhs.blades()
+            .flat_map(|lhs| {
+                rhs.blades()
+                    .filter_map(move |rhs| self.call(lhs, rhs).blade())
+            })
+            .any(|g| g.grade() == output)
+    }
+
+    pub fn iter() -> impl Iterator<Item = Self> + 'static {
+        [Self::Mul, Self::Geometric, Self::Dot, Self::Wedge].into_iter()
+    }
+
+    pub fn call(&self, lhs: Blade, rhs: Blade) -> Product {
+        match self {
+            ProductOp::Mul => lhs * rhs,
+            ProductOp::Geometric => lhs * rhs,
+            ProductOp::Dot => lhs.dot(rhs),
+            ProductOp::Wedge => lhs.wedge(rhs),
+        }
+    }
+
+    pub fn trait_ty(&self) -> TokenStream {
+        match self {
+            ProductOp::Mul => quote! { std::ops::Mul },
+            ProductOp::Geometric => quote! { crate::Geometric },
+            ProductOp::Dot => quote! { crate::Dot },
+            ProductOp::Wedge => quote! { crate::Wedge },
+        }
+    }
+
+    pub fn trait_fn(&self) -> TokenStream {
+        match self {
+            ProductOp::Mul => quote! { mul },
+            ProductOp::Geometric => quote! { geo },
+            ProductOp::Dot => quote! { dot },
+            ProductOp::Wedge => quote! { wedge },
         }
     }
 }
@@ -565,3 +892,9 @@ mod tests {
         assert_eq!(Product::Pos(alg.blade(0b_1111)), e12.wedge(e34));
     }
 }
+
+// #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+// pub enum SumOp {
+//     Add,
+//     Sub,
+// }

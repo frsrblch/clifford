@@ -3,6 +3,7 @@
 extern crate proc_macro;
 
 mod code_gen;
+mod code_gen_mv;
 mod types;
 
 use syn::parse::{Parse, ParseStream};
@@ -13,6 +14,12 @@ use types::Algebra;
 pub fn clifford(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let algebra = parse_macro_input!(input as Algebra);
     algebra.define().into()
+}
+
+#[proc_macro]
+pub fn clifford_mv(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let algebra = parse_macro_input!(input as Algebra);
+    algebra.define_mv().into()
 }
 
 impl Parse for Algebra {

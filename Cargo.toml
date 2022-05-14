@@ -19,5 +19,6 @@ proc_macros = { path = "./proc_macros" }
 [features]
 va_3d = []
 pga_3d = []
+va_3d_mv = []
 cga_2d = []
 cga_3d = []

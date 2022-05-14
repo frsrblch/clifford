@@ -72,6 +72,11 @@
 // TODO add efficient implementation for null cone geometries
 // TODO consider grade enum model with dynamic multivectors (e.g., BTreeMap<Grade, f64>)?
 
+pub mod va_3d_manual;
+
+#[cfg(feature = "va_3d_mv")]
+pub mod va_3d_mv;
+
 #[cfg(feature = "va_3d")]
 pub mod va_3d;
 
