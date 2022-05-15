@@ -5,7 +5,7 @@ use syn::punctuated::Punctuated;
 use syn::token::{Add, Comma};
 
 impl Algebra {
-    pub fn define_mv(&self) -> TokenStream {
+    pub fn define_mv(self) -> TokenStream {
         let traits = if self.is_homogenous() {
             quote! {
                 pub use crate::{
@@ -39,7 +39,7 @@ impl Algebra {
             }
         };
 
-        let grade_products = GradeProducts(*self);
+        let grade_products = GradeProducts(self);
 
         let types = TypeMv::iter(self).map(TypeMv::define);
 
@@ -263,10 +263,6 @@ impl Algebra {
             #(#types)*
             #(#impl_grade_products)*
         }
-    }
-
-    fn types_mv(&self) -> impl Iterator<Item = TypeMv> + '_ {
-        TypeMv::iter(self)
     }
 }
 
@@ -568,13 +564,6 @@ impl Grade {
 //         }
 //     }
 // }
-
-fn mv_generics(algebra: Algebra, suffix: &str) -> Punctuated<TokenStream, Comma> {
-    algebra
-        .grades()
-        .map(|g| g.generic(suffix).to_token_stream())
-        .collect()
-}
 
 #[test]
 fn print_to_file() {

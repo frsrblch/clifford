@@ -7,7 +7,7 @@ pub struct Zero;
 
 impl Zero {
     pub fn ty() -> syn::Type {
-        syn::parse_str("crate::Zero").unwrap()
+        syn::parse_str("Zero").unwrap()
     }
 }
 
@@ -28,11 +28,11 @@ impl Algebra {
         Self { one, zero, neg_one }
     }
 
-    pub fn basis(&self, index: u8) -> Basis {
-        Basis(index, *self)
+    pub fn basis(self, index: u8) -> Basis {
+        Basis(index, self)
     }
 
-    pub fn square(&self, index: u8) -> Product {
+    pub fn square(self, index: u8) -> Product {
         if index == 0 {
             panic!("zero is not a valid index");
         }
@@ -48,19 +48,23 @@ impl Algebra {
         }
     }
 
-    pub fn types(&self) -> impl Iterator<Item = Type> + '_ {
+    pub fn types(self) -> impl Iterator<Item = Type> {
         Type::iter(self)
     }
 
-    pub fn bases(&self) -> impl Iterator<Item = Basis> + '_ {
-        (1..=self.dimensions()).into_iter().map(|i| self.basis(i))
+    pub fn bases(self) -> impl Iterator<Item = Basis> {
+        (1..=self.dimensions())
+            .into_iter()
+            .map(move |i| self.basis(i))
     }
 
-    pub fn grades(&self) -> impl Iterator<Item = Grade> + '_ {
-        (0..=self.dimensions()).into_iter().map(|i| self.grade(i))
+    pub fn grades(self) -> impl Iterator<Item = Grade> {
+        (0..=self.dimensions())
+            .into_iter()
+            .map(move |i| self.grade(i))
     }
 
-    pub fn pseudoscalar(&self) -> Blade {
+    pub fn pseudoscalar(self) -> Blade {
         let mut set = BladeSet(0);
         for i in 1..=self.dimensions() {
             set.insert(i);
@@ -68,56 +72,50 @@ impl Algebra {
         self.blade(set)
     }
 
-    pub fn scalar(&self) -> Blade {
+    pub fn scalar(self) -> Blade {
         self.blade(BladeSet::default())
     }
 
-    pub fn grade(&self, grade: u8) -> Grade {
+    pub fn grade(self, grade: u8) -> Grade {
         match grade {
-            grade if grade <= self.dimensions() => Grade(grade, *self),
+            grade if grade <= self.dimensions() => Grade(grade, self),
             _ => panic!("invalid grade: {grade}"),
         }
     }
 
-    pub fn blades(&self) -> impl Iterator<Item = Blade> + '_ {
-        self.grades().flat_map(|grade| {
+    pub fn blades(self) -> impl Iterator<Item = Blade> {
+        self.grades().flat_map(move |grade| {
             self.blades_unsorted()
                 .filter(move |blade| blade.grade() == grade)
         })
     }
 
-    pub fn subalgebras(&self) -> impl Iterator<Item = SubAlgebra> + '_ {
-        [SubAlgebra::Even(*self), SubAlgebra::Odd(*self)].into_iter()
+    pub fn subalgebras(self) -> impl Iterator<Item = SubAlgebra> {
+        [SubAlgebra::Even(self), SubAlgebra::Odd(self)].into_iter()
     }
 
-    fn blades_unsorted(&self) -> impl Iterator<Item = Blade> + '_ {
-        (0..=self.pseudoscalar().0 .0)
-            .into_iter()
-            .map(|set| self.blade(BladeSet(set)))
-    }
-
-    fn to_blades_unsorted(self) -> impl Iterator<Item = Blade> + 'static {
+    fn blades_unsorted(self) -> impl Iterator<Item = Blade> {
         (0..=self.pseudoscalar().0 .0)
             .into_iter()
             .map(move |set| self.blade(BladeSet(set)))
     }
 
-    pub fn blade<B: Into<BladeSet>>(&self, set: B) -> Blade {
-        Blade(set.into(), *self)
+    pub fn blade<B: Into<BladeSet>>(self, set: B) -> Blade {
+        Blade(set.into(), self)
     }
 
-    pub fn dimensions(&self) -> u8 {
+    pub fn dimensions(self) -> u8 {
         self.one + self.zero + self.neg_one
     }
 
-    pub fn is_homogenous(&self) -> bool {
+    pub fn is_homogenous(self) -> bool {
         match (self.one, self.neg_one, self.zero) {
             (3, 0, 1) | (2, 0, 1) => true,
             _ => false,
         }
     }
 
-    pub fn null_basis(&self) -> Option<Blade> {
+    pub fn null_basis(self) -> Option<Blade> {
         if self.is_homogenous() {
             Some(self.blade(1 << self.one))
         } else {
@@ -134,7 +132,7 @@ pub enum Product {
 }
 
 impl Product {
-    pub fn with_blade(&self, blade: Blade) -> Self {
+    pub fn with_blade(self, blade: Blade) -> Self {
         match self {
             Product::Pos(_) => Product::Pos(blade),
             Product::Neg(_) => Product::Neg(blade),
@@ -143,11 +141,11 @@ impl Product {
     }
 
     #[allow(dead_code)]
-    pub fn is_pos(&self) -> bool {
+    pub fn is_pos(self) -> bool {
         matches!(self, Product::Pos(_))
     }
 
-    pub fn is_neg(&self) -> bool {
+    pub fn is_neg(self) -> bool {
         matches!(self, Product::Neg(_))
     }
 
@@ -195,23 +193,22 @@ pub struct Basis(pub u8, pub Algebra);
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Grade(pub u8, pub Algebra);
 
-impl ToBlades for Grade {
-    fn blades(&self) -> Box<dyn Iterator<Item = Blade> + '_> {
-        Box::new(self.blades())
+impl IntoIterator for Grade {
+    type Item = Blade;
+    type IntoIter = impl Iterator<Item = Blade>;
+    fn into_iter(self) -> Self::IntoIter {
+        Grade::blades(self)
     }
 }
 
 impl Grade {
-    pub fn blades(&self) -> impl Iterator<Item = Blade> + '_ {
-        self.1.blades_unsorted().filter(|b| b.0.len() == self.0)
-    }
-    pub fn to_blades(self) -> impl Iterator<Item = Blade> + 'static {
+    pub fn blades(self) -> impl Iterator<Item = Blade> {
         self.1
-            .to_blades_unsorted()
+            .blades_unsorted()
             .filter(move |b| b.0.len() == self.0)
     }
 
-    pub fn is_scalar(&self) -> bool {
+    pub fn is_scalar(self) -> bool {
         self.0 == 0
     }
 
@@ -222,21 +219,17 @@ impl Grade {
     pub fn is_odd(self) -> bool {
         self.0 % 2 == 1
     }
-
-    pub fn is_pseudoscalar(&self) -> bool {
-        self.blades().next() == Some(self.1.pseudoscalar())
-    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Blade(pub BladeSet, pub Algebra);
 
 impl Blade {
-    pub fn contains(&self, basis: Basis) -> bool {
+    pub fn contains(self, basis: Basis) -> bool {
         self.1 == basis.1 && self.0.contains(basis.0)
     }
 
-    pub fn grade(&self) -> Grade {
+    pub fn grade(self) -> Grade {
         Grade(self.0.len(), self.1)
     }
 
@@ -297,11 +290,11 @@ impl std::ops::Mul for Blade {
             if rhs.contains(base) {
                 let swaps = ((base.0 + 1)..=self.1.dimensions())
                     .into_iter()
-                    .filter(|&b| self.0.contains(b))
+                    .filter(|b| self.0.contains(*b))
                     .count()
                     + (1..base.0)
                         .into_iter()
-                        .filter(|&b| rhs.0.contains(b))
+                        .filter(|b| rhs.0.contains(*b))
                         .count();
 
                 if swaps % 2 == 1 {
@@ -332,7 +325,7 @@ impl From<u64> for BladeSet {
 }
 
 impl BladeSet {
-    pub fn contains(&self, index: u8) -> bool {
+    pub fn contains(self, index: u8) -> bool {
         let flag = Self::flag(index);
         self.0 & flag == flag
     }
@@ -351,11 +344,11 @@ impl BladeSet {
         1 << (index - 1)
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub fn is_empty(self) -> bool {
         self.0 == 0
     }
 
-    pub fn len(&self) -> u8 {
+    pub fn len(self) -> u8 {
         self.0.count_ones() as u8
     }
 }
@@ -367,7 +360,7 @@ pub enum SubAlgebra {
 }
 
 impl SubAlgebra {
-    pub fn blades(&self) -> impl Iterator<Item = Blade> + '_ {
+    pub fn blades(self) -> impl Iterator<Item = Blade> {
         let algebra = self.algebra();
         let by_grade = match self {
             SubAlgebra::Even(_) => |b: &Blade| b.is_even(),
@@ -376,7 +369,7 @@ impl SubAlgebra {
         algebra.blades().filter(by_grade)
     }
 
-    pub fn algebra(&self) -> &Algebra {
+    pub fn algebra(self) -> Algebra {
         match self {
             SubAlgebra::Even(a) => a,
             SubAlgebra::Odd(a) => a,
@@ -392,21 +385,21 @@ pub enum Type {
 }
 
 impl Type {
-    pub fn algebra(&self) -> Algebra {
+    pub fn algebra(self) -> Algebra {
         match self {
-            Self::Zero(a) => *a,
+            Self::Zero(a) => a,
             Self::Grade(g) => g.1,
-            Self::SubAlgebra(s) => *s.algebra(),
+            Self::SubAlgebra(s) => s.algebra(),
         }
     }
 
-    pub fn iter(alg: &Algebra) -> impl Iterator<Item = Type> + '_ {
-        std::iter::once(Type::Zero(*alg))
+    pub fn iter(alg: Algebra) -> impl Iterator<Item = Type> {
+        std::iter::once(Type::Zero(alg))
             .chain(alg.grades().map(Type::Grade))
             .chain(alg.subalgebras().map(Type::SubAlgebra))
     }
 
-    pub fn blades(&self) -> Box<dyn Iterator<Item = Blade> + '_> {
+    pub fn blades(self) -> Box<dyn Iterator<Item = Blade>> {
         match self {
             Type::Zero(_) => Box::new(std::iter::empty()),
             Type::Grade(grade) => Box::new(grade.blades()),
@@ -450,18 +443,18 @@ impl Type {
         unimplemented!("multi vector")
     }
 
-    pub fn is_zero(&self) -> bool {
+    pub fn is_zero(self) -> bool {
         matches!(self, Type::Zero(_))
     }
 
-    pub fn is_scalar(&self) -> bool {
+    pub fn is_scalar(self) -> bool {
         match self {
             Self::Grade(grade) => grade.is_scalar(),
             _ => false,
         }
     }
 
-    pub fn is_local(&self) -> bool {
+    pub fn is_local(self) -> bool {
         match self {
             Type::Zero(_) => false,
             Type::Grade(g) => !g.is_scalar(),
@@ -477,12 +470,28 @@ pub enum TypeMv {
     Multivector(Multivector),
 }
 
-impl ToBlades for TypeMv {
-    fn blades(&self) -> Box<dyn Iterator<Item = Blade> + '_> {
+impl IntoIterator for TypeMv {
+    type Item = Blade;
+    type IntoIter = Box<dyn Iterator<Item = Blade>>;
+    fn into_iter(self) -> Self::IntoIter {
+        TypeMv::blades(self)
+    }
+}
+
+impl TypeMv {
+    pub fn blades(self) -> Box<dyn Iterator<Item = Blade>> {
         match self {
             Self::Zero(_) => Box::new(std::iter::empty()),
             Self::Grade(g) => Box::new(g.blades()),
-            Self::Multivector(mv) => mv.blades(),
+            Self::Multivector(mv) => Box::new(mv.to_blades()),
+        }
+    }
+
+    pub fn grades(self) -> Box<dyn Iterator<Item = Grade>> {
+        match self {
+            Self::Zero(_) => Box::new(std::iter::empty()),
+            Self::Grade(g) => Box::new(std::iter::once(g)),
+            Self::Multivector(mv) => Box::new(mv.grades()),
         }
     }
 }
@@ -537,15 +546,6 @@ pub enum Generic {
     Output(Ident),
 }
 
-impl Generic {
-    pub fn ident(&self) -> Option<Ident> {
-        match self {
-            Self::Generic(i) | Self::Output(i) => Some(i.clone()),
-            _ => None,
-        }
-    }
-}
-
 // TODO create enum TypeParam { Generic(Ident), TokenStream } with Ord
 #[derive(Default)]
 pub struct Generics {
@@ -597,10 +597,6 @@ impl TypeMv {
         matches!(self, Self::Grade(g) if g.is_scalar())
     }
 
-    pub fn is_zero(&self) -> bool {
-        matches!(self, Self::Zero(_))
-    }
-
     pub fn generics(&self, suffix: &str) -> Generics {
         match self {
             Self::Multivector(mv) => Generics {
@@ -614,13 +610,13 @@ impl TypeMv {
         }
     }
 
-    pub fn iter(algebra: &Algebra) -> impl Iterator<Item = Self> + '_ {
+    pub fn iter(algebra: Algebra) -> impl Iterator<Item = Self> {
         use std::iter::once;
-        once(TypeMv::Zero(*algebra))
+        once(TypeMv::Zero(algebra))
             .chain(algebra.grades().map(Self::Grade))
             .chain(once(TypeMv::Multivector(Multivector(
                 GradeSet::default(),
-                *algebra,
+                algebra,
             ))))
     }
 
@@ -655,6 +651,10 @@ impl Multivector {
         Self(GradeSet::default(), algebra)
     }
 
+    pub fn insert(&mut self, grade: Grade) {
+        self.0.insert(grade);
+    }
+
     pub fn generics(&self, suffix: &str) -> Generics {
         if self.0 == GradeSet::default() {
             Generics {
@@ -681,21 +681,23 @@ impl Multivector {
         }
     }
 
-    pub fn blades(&self) -> Box<dyn Iterator<Item = Blade> + '_> {
-        if self.0 == GradeSet::default() {
-            Box::new(self.1.grades().flat_map(|g| g.to_blades()))
-        } else {
-            Box::new(
-                self.1
-                    .grades()
-                    .filter(|g| self.0.contains(*g))
-                    .flat_map(|g| g.to_blades()),
-            )
-        }
+    pub fn to_blades(self) -> impl Iterator<Item = Blade> + 'static {
+        self.1
+            .grades()
+            .filter(move |g| self.0.contains(*g))
+            .flat_map(|g| g.blades())
     }
 
-    pub fn grades(&self) -> impl Iterator<Item = Grade> + '_ {
-        self.1.grades().filter(|g| self.0.contains(*g))
+    pub fn grades(self) -> impl Iterator<Item = Grade> {
+        self.1.grades().filter(move |g| self.0.contains(*g))
+    }
+}
+
+impl From<Grade> for Multivector {
+    fn from(grade: Grade) -> Self {
+        let mut mv = Multivector::new(grade.1);
+        mv.insert(grade);
+        mv
     }
 }
 
@@ -721,6 +723,13 @@ impl GradeSet {
     }
 }
 
+impl std::ops::BitOr for GradeSet {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum ProductOp {
     Mul,
@@ -729,15 +738,16 @@ pub enum ProductOp {
     Wedge,
 }
 
-pub trait ToBlades {
-    fn blades(&self) -> Box<dyn Iterator<Item = Blade> + '_>;
-}
-
 impl ProductOp {
-    pub fn output_contains(&self, lhs: impl ToBlades, rhs: impl ToBlades, output: Grade) -> bool {
-        lhs.blades()
+    pub fn output_contains(
+        &self,
+        lhs: impl IntoIterator<Item = Blade>,
+        rhs: impl IntoIterator<Item = Blade> + Copy,
+        output: Grade,
+    ) -> bool {
+        lhs.into_iter()
             .flat_map(|lhs| {
-                rhs.blades()
+                rhs.into_iter()
                     .filter_map(move |rhs| self.call(lhs, rhs).blade())
             })
             .any(|g| g.grade() == output)
@@ -756,22 +766,23 @@ impl ProductOp {
         }
     }
 
-    pub fn trait_ty(&self) -> TokenStream {
+    pub fn trait_ty(&self) -> syn::Type {
         match self {
-            ProductOp::Mul => quote! { std::ops::Mul },
-            ProductOp::Geometric => quote! { crate::Geometric },
-            ProductOp::Dot => quote! { crate::Dot },
-            ProductOp::Wedge => quote! { crate::Wedge },
+            ProductOp::Mul => syn::parse_str("std::ops::Mul").unwrap(),
+            ProductOp::Geometric => syn::parse_str("crate::Geometric").unwrap(),
+            ProductOp::Dot => syn::parse_str("crate::Dot").unwrap(),
+            ProductOp::Wedge => syn::parse_str("crate::Wedge").unwrap(),
         }
     }
 
-    pub fn trait_fn(&self) -> TokenStream {
-        match self {
-            ProductOp::Mul => quote! { mul },
-            ProductOp::Geometric => quote! { geo },
-            ProductOp::Dot => quote! { dot },
-            ProductOp::Wedge => quote! { wedge },
-        }
+    pub fn trait_fn(&self) -> Ident {
+        let str = match self {
+            ProductOp::Mul => "mul",
+            ProductOp::Geometric => "geo",
+            ProductOp::Dot => "dot",
+            ProductOp::Wedge => "wedge",
+        };
+        Ident::new(str, Span::mixed_site())
     }
 }
 
