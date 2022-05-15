@@ -58,10 +58,8 @@ impl Algebra {
             .map(move |i| self.basis(i))
     }
 
-    pub fn grades(self) -> impl Iterator<Item = Grade> {
-        (0..=self.dimensions())
-            .into_iter()
-            .map(move |i| self.grade(i))
+    pub fn grades(self) -> Grades {
+        Grades::new(self)
     }
 
     pub fn pseudoscalar(self) -> Blade {
@@ -83,21 +81,20 @@ impl Algebra {
         }
     }
 
-    pub fn blades(self) -> impl Iterator<Item = Blade> {
-        self.grades().flat_map(move |grade| {
-            self.blades_unsorted()
-                .filter(move |blade| blade.grade() == grade)
-        })
+    pub fn blades(self) -> Blades {
+        // self.grades().flat_map(move |grade| {
+        //     self.blades_unsorted()
+        //         .filter(move |blade| blade.grade() == grade)
+        // })
+        Blades::new(self)
     }
 
     pub fn subalgebras(self) -> impl Iterator<Item = SubAlgebra> {
         [SubAlgebra::Even(self), SubAlgebra::Odd(self)].into_iter()
     }
 
-    fn blades_unsorted(self) -> impl Iterator<Item = Blade> {
-        (0..=self.pseudoscalar().0 .0)
-            .into_iter()
-            .map(move |set| self.blade(BladeSet(set)))
+    fn blades_unsorted(self) -> BladesUnsorted {
+        BladesUnsorted::new(self)
     }
 
     pub fn blade<B: Into<BladeSet>>(self, set: B) -> Blade {
@@ -121,6 +118,108 @@ impl Algebra {
         } else {
             None
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct Blades {
+    grades: Grades,
+    blades: Option<GradeBlades>,
+}
+
+impl Blades {
+    pub fn new(algebra: Algebra) -> Self {
+        let grades = algebra.grades();
+        Self {
+            grades: grades,
+            blades: None,
+        }
+    }
+}
+
+impl Iterator for Blades {
+    type Item = Blade;
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(blades) = &mut self.blades {
+                if let Some(blade) = blades.next() {
+                    return Some(blade);
+                }
+            }
+            let grade = self.grades.next()?;
+            self.blades = Some(GradeBlades::new(grade));
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct GradeBlades {
+    grade: Grade,
+    blades_unsorted: BladesUnsorted,
+}
+
+impl GradeBlades {
+    pub fn new(grade: Grade) -> Self {
+        GradeBlades {
+            grade,
+            blades_unsorted: grade.1.blades_unsorted(),
+        }
+    }
+}
+
+impl Iterator for GradeBlades {
+    type Item = Blade;
+    fn next(&mut self) -> Option<Self::Item> {
+        for blade in self.blades_unsorted.by_ref() {
+            if blade.grade() == self.grade {
+                return Some(blade);
+            }
+        }
+        None
+    }
+}
+
+#[derive(Clone)]
+pub struct Grades {
+    range: std::ops::RangeInclusive<u8>,
+    algebra: Algebra,
+}
+
+impl Grades {
+    pub fn new(algebra: Algebra) -> Self {
+        Grades {
+            range: 0..=algebra.dimensions(),
+            algebra,
+        }
+    }
+}
+
+impl Iterator for Grades {
+    type Item = Grade;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.range.next().map(|i| self.algebra.grade(i))
+    }
+}
+
+#[derive(Clone)]
+pub struct BladesUnsorted {
+    range: std::ops::RangeInclusive<u64>,
+    algebra: Algebra,
+}
+
+impl BladesUnsorted {
+    pub fn new(algebra: Algebra) -> Self {
+        BladesUnsorted {
+            range: 0..=(algebra.pseudoscalar().0 .0),
+            algebra,
+        }
+    }
+}
+
+impl Iterator for BladesUnsorted {
+    type Item = Blade;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.range.next().map(|set| self.algebra.blade(set))
     }
 }
 
@@ -202,10 +301,8 @@ impl IntoIterator for Grade {
 }
 
 impl Grade {
-    pub fn blades(self) -> impl Iterator<Item = Blade> {
-        self.1
-            .blades_unsorted()
-            .filter(move |b| b.0.len() == self.0)
+    pub fn blades(self) -> GradeBlades {
+        GradeBlades::new(self)
     }
 
     pub fn is_scalar(self) -> bool {
@@ -483,22 +580,44 @@ impl TypeMv {
         match self {
             Self::Zero(_) => Box::new(std::iter::empty()),
             Self::Grade(g) => Box::new(g.blades()),
-            Self::Multivector(mv) => Box::new(mv.to_blades()),
+            Self::Multivector(mv) => Box::new(mv.blades()),
         }
     }
 
-    pub fn grades(self) -> Box<dyn Iterator<Item = Grade>> {
+    pub fn grades(self) -> TypeMvGrades {
         match self {
-            Self::Zero(_) => Box::new(std::iter::empty()),
-            Self::Grade(g) => Box::new(std::iter::once(g)),
-            Self::Multivector(mv) => Box::new(mv.grades()),
+            Self::Zero(_) => TypeMvGrades::Zero,
+            Self::Grade(g) => TypeMvGrades::Grade(std::iter::once(g)),
+            Self::Multivector(mv) => TypeMvGrades::Multivector(mv.grades()),
+        }
+    }
+
+    pub fn is_mv(self) -> bool {
+        matches!(self, TypeMv::Multivector(_))
+    }
+}
+
+#[derive(Clone)]
+pub enum TypeMvGrades {
+    Zero,
+    Grade(std::iter::Once<Grade>),
+    Multivector(MvGrades),
+}
+
+impl Iterator for TypeMvGrades {
+    type Item = Grade;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Zero => None,
+            Self::Grade(grade) => grade.next(),
+            Self::Multivector(grades) => grades.next(),
         }
     }
 }
 
 #[derive(Default)]
 pub struct WhereClause {
-    pub bounds: Punctuated<Bound, Comma>,
+    pub bounds: Vec<Bound>,
 }
 
 impl ToTokens for WhereClause {
@@ -506,7 +625,7 @@ impl ToTokens for WhereClause {
         let bounds = &self.bounds;
         if !bounds.is_empty() {
             tokens.extend(quote! {
-                where #bounds
+                where #( #bounds ),*
             })
         }
     }
@@ -521,7 +640,7 @@ impl FromIterator<Bound> for WhereClause {
 }
 
 pub struct Bound {
-    pub ty: Box<dyn ToTokens>,
+    pub ty: TokenStream,
     pub trait_ty: TokenStream,
     pub generics: Generics,
 }
@@ -549,7 +668,7 @@ pub enum Generic {
 // TODO create enum TypeParam { Generic(Ident), TokenStream } with Ord
 #[derive(Default)]
 pub struct Generics {
-    pub params: Punctuated<Generic, Comma>,
+    pub params: Vec<Generic>,
 }
 
 impl FromIterator<Generic> for Generics {
@@ -574,13 +693,13 @@ impl ToTokens for Generics {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         if !self.params.is_empty() {
             let params = &self.params;
-            tokens.extend(quote! { <#params> })
+            tokens.extend(quote! { < #( #params ),* > })
         }
     }
 }
 
 impl Generics {
-    pub fn iter(&self) -> syn::punctuated::Iter<Generic> {
+    pub fn iter(&self) -> std::slice::Iter<Generic> {
         self.params.iter()
     }
 }
@@ -681,15 +800,12 @@ impl Multivector {
         }
     }
 
-    pub fn to_blades(self) -> impl Iterator<Item = Blade> + 'static {
-        self.1
-            .grades()
-            .filter(move |g| self.0.contains(*g))
-            .flat_map(|g| g.blades())
+    pub fn blades(self) -> MvBlades {
+        MvBlades::new(self)
     }
 
-    pub fn grades(self) -> impl Iterator<Item = Grade> {
-        self.1.grades().filter(move |g| self.0.contains(*g))
+    pub fn grades(self) -> MvGrades {
+        MvGrades::new(self)
     }
 }
 
@@ -698,6 +814,62 @@ impl From<Grade> for Multivector {
         let mut mv = Multivector::new(grade.1);
         mv.insert(grade);
         mv
+    }
+}
+
+pub struct MvBlades {
+    grades: MvGrades,
+    blades: Option<GradeBlades>,
+}
+
+impl MvBlades {
+    pub fn new(multivector: Multivector) -> Self {
+        Self {
+            grades: multivector.grades(),
+            blades: None,
+        }
+    }
+}
+
+impl Iterator for MvBlades {
+    type Item = Blade;
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(blades) = &mut self.blades {
+                if let Some(blade) = blades.next() {
+                    return Some(blade);
+                }
+            }
+            let grade = self.grades.next()?;
+            self.blades = Some(grade.blades());
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct MvGrades {
+    set: GradeSet,
+    grades: Grades,
+}
+
+impl MvGrades {
+    pub fn new(multivector: Multivector) -> Self {
+        Self {
+            set: multivector.0,
+            grades: multivector.1.grades(),
+        }
+    }
+}
+
+impl Iterator for MvGrades {
+    type Item = Grade;
+    fn next(&mut self) -> Option<Self::Item> {
+        for grade in self.grades.by_ref() {
+            if self.set.contains(grade) {
+                return Some(grade);
+            }
+        }
+        None
     }
 }
 
@@ -730,6 +902,7 @@ impl std::ops::BitOr for GradeSet {
     }
 }
 
+// TODO add grade products
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum ProductOp {
     Mul,
@@ -753,7 +926,7 @@ impl ProductOp {
             .any(|g| g.grade() == output)
     }
 
-    pub fn iter() -> impl Iterator<Item = Self> + 'static {
+    pub fn iter() -> impl Iterator<Item = Self> {
         [Self::Mul, Self::Geometric, Self::Dot, Self::Wedge].into_iter()
     }
 

@@ -57,79 +57,48 @@ impl Algebra {
                 let lhs_generics = lhs.generics("L");
                 let rhs_generics = rhs.generics("R");
 
-                let (mut intermediate_generics, mut where_clause) = match (lhs, rhs) {
-                    (TypeMv::Multivector(l), TypeMv::Grade(g)) => l
-                        .grades()
-                        .filter(|l| ProductOp::Mul.output_contains(*l, g, output))
-                        .enumerate()
-                        .map(|(n, l)| {
-                            let ident = output.generic(&n.to_string());
-                            let generic = Generic::Generic(ident.clone());
-                            let bound = Bound {
-                                ty: Box::new(l.generic("L")),
-                                trait_ty: product_trait.clone().to_token_stream(),
-                                generics: Generics::from_iter([Generic::Concrete(g.type_ident()), Generic::Output(ident)]),
-                            };
-                            (generic, bound)
-                        })
-                        .fold((Generics::default(), WhereClause::default()), |(mut gs, mut wc), (g, b)| {
-                            gs.params.push(g);
-                            wc.bounds.push(b);
-                            (gs, wc)
-                        }),
-                    (TypeMv::Grade(g), TypeMv::Multivector(r)) => r
-                        .grades()
-                        .filter(|r| ProductOp::Mul.output_contains(g, *r, output))
-                        .enumerate()
-                        .map(|(n, r)| {
-                            let ident = output.generic(&n.to_string());
-                            let generic = Generic::Generic(ident.clone());
-                            let bound = Bound {
-                                ty: Box::new(g.type_ident()),
-                                trait_ty: product_trait.clone().to_token_stream(),
-                                generics: Generics::from_iter([Generic::Generic(r.generic("R")), Generic::Output(ident)]), 
-                            };
-                            (generic, bound)
-                        })
-                        .fold((Generics::default(), WhereClause::default()), |(mut gs, mut wc), (g, b)| {
-                            gs.params.push(g);
-                            wc.bounds.push(b);
-                            (gs, wc)
-                        }),
+                let mut intermediate_generics = Generics::default();
+                let mut where_clause = WhereClause::default();
 
-                    (TypeMv::Multivector(l), TypeMv::Multivector(r)) => l
-                        .grades()
-                        .flat_map(|l| r.grades().map(move |r| (l, r)))
+                if lhs.is_mv() || rhs.is_mv() {
+                    for (n, (l, r)) in itertools::iproduct!(lhs.grades(), rhs.grades())
                         .filter(|(l, r)| ProductOp::Mul.output_contains(*l, *r, output))
                         .enumerate()
-                        .map(|(n, (l, r))| {
-                            let ident = output.generic(&n.to_string());
-                            let generic = Generic::Generic(ident.clone());
-                            let bound = Bound {
-                                ty: Box::new(l.generic("L")),
-                                trait_ty: product_trait.clone().to_token_stream(),
-                                generics: Generics::from_iter([Generic::Generic(r.generic("R")), Generic::Output(ident)]),
-                            };
-                            (generic, bound)
-                        })
-                        .fold((Generics::default(), WhereClause::default()), |(mut gs, mut wc), (g, b)| {
-                            gs.params.push(g);
-                            wc.bounds.push(b);
-                            (gs, wc)
-                        }),
+                    {
+                        let ident = output.generic(&n.to_string());
+                        let generic = Generic::Generic(ident.clone());
+                        intermediate_generics.params.push(generic);
 
-                    _ => (Generics::default(), WhereClause::default()),
-                };
+                        let lhs_ty = if lhs.is_mv() {
+                            l.generic("L").to_token_stream()
+                        } else {
+                            l.type_ident().to_token_stream()
+                        };
 
-                let first = intermediate_generics.iter().collect::<Vec<_>>();
-                let next = intermediate_generics.iter().skip(1).collect::<Vec<_>>();
+                        let rhs_ty = if rhs.is_mv() {
+                            Generic::Generic(r.generic("R"))
+                        } else {
+                            Generic::Concrete(r.type_ident())
+                        };
+
+                        let bound = Bound {
+                            ty: lhs_ty,
+                            trait_ty: product_trait.clone().to_token_stream(),
+                            generics: Generics::from_iter([rhs_ty, Generic::Output(ident)])
+                        };
+                        where_clause.bounds.push(bound);
+                    }
+                }
+
+                let first = intermediate_generics.iter();
+                let next = intermediate_generics.iter().skip(1);
                 let len = intermediate_generics.params.len();
                 let mut intermediate_sum = Generics::default();
-                for (i, (first, next)) in first.into_iter().zip(next).enumerate() {
+                for (i, (first, next)) in first.zip(next).enumerate() {
                     let i = len + i;
                     let output = output.generic(&i.to_string());
                     let bound = Bound {
-                        ty: Box::new(intermediate_sum.params.last().cloned().unwrap_or_else(|| first.clone())),
+                        ty: intermediate_sum.params.last().cloned().unwrap_or_else(|| first.clone()).to_token_stream(),
                         trait_ty: quote! { std::ops::Add },
                         generics: Generics::from_iter([next.clone(), Generic::Output(output.clone())])
                     };
@@ -165,7 +134,7 @@ impl Algebra {
 
                 for g in lhs_generics.iter().chain(rhs_generics.iter()) {
                     let bound = Bound {
-                        ty: Box::new(g.to_token_stream()),
+                        ty: g.to_token_stream(),
                         trait_ty: quote! { Copy },
                         generics: Default::default()
                     };

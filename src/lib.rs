@@ -77,17 +77,17 @@ pub mod va_3d_manual;
 #[cfg(feature = "va_3d_mv")]
 pub mod va_3d_mv;
 
-#[cfg(feature = "va_3d")]
-pub mod va_3d;
-
-#[cfg(feature = "pga_3d")]
-pub mod pga_3d;
-
-#[cfg(feature = "cga_2d")]
-pub mod cga_2d;
-
-#[cfg(feature = "cga_3d")]
-pub mod cga_3d;
+// #[cfg(feature = "va_3d")]
+// pub mod va_3d;
+//
+// #[cfg(feature = "pga_3d")]
+// pub mod pga_3d;
+//
+// #[cfg(feature = "cga_2d")]
+// pub mod cga_2d;
+//
+// #[cfg(feature = "cga_3d")]
+// pub mod cga_3d;
 
 pub use proc_macros::clifford;
 
