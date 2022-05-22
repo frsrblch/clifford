@@ -59,7 +59,13 @@ impl Algebra {
         let ops = ProductOp::iter_all(self)
             .flat_map(|op| TypeMv::iter(self).map(move |lhs| (op, lhs)))
             .flat_map(|(op, lhs)| TypeMv::iter(self).map(move |rhs| (op, lhs, rhs)))
-            .map(|(op, lhs, rhs)| impl_item_for_product_op(op, lhs, rhs));
+            .filter_map(|(op, lhs, rhs)| {
+                if op.is_local() || !lhs.is_scalar() || !rhs.is_scalar() {
+                    Some(impl_item_for_product_op(op, lhs, rhs))
+                } else {
+                    None
+                }
+            });
 
         quote! {
             // #traits
@@ -523,6 +529,7 @@ mod tests {
     // fn impl_g3() {
     //     let g3 = Algebra::new(3, 0, 0).define_mv();
     //     write_to_file(&g3);
+    //     panic!();
     // }
 
     fn assert_eq_impl(expected: &ItemImpl, actual: &ItemImpl) {

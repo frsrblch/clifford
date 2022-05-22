@@ -91,10 +91,6 @@ impl Algebra {
     }
 
     pub fn blades(self) -> Blades {
-        // self.grades().flat_map(move |grade| {
-        //     self.blades_unsorted()
-        //         .filter(move |blade| blade.grade() == grade)
-        // })
         Blades::new(self)
     }
 
@@ -610,13 +606,6 @@ impl TypeMv {
         }
     }
 
-    pub fn is_generic(&self) -> bool {
-        match self {
-            TypeMv::Multivector(mv) => mv.is_generic(),
-            _ => false,
-        }
-    }
-
     pub fn algebra(self) -> Algebra {
         match self {
             Self::Zero(a) => a,
@@ -643,6 +632,10 @@ impl TypeMv {
 
     pub fn is_mv(self) -> bool {
         matches!(self, TypeMv::Multivector(_))
+    }
+
+    pub fn is_generic(&self) -> bool {
+        matches!(self, TypeMv::Multivector(mv) if mv.is_generic())
     }
 }
 
