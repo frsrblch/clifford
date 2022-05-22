@@ -75,7 +75,7 @@ pub fn impl_item_for_product_op(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> Item
     let out_suffix = "Out";
 
     let algebra = lhs.algebra();
-    let output = op.output_mv(lhs, rhs, algebra);
+    let output = op.output_mv(lhs, rhs);
     let output_is_generic = lhs.is_generic() || rhs.is_generic();
 
     let mut generics = syn::Generics::default();
@@ -124,47 +124,37 @@ pub fn impl_item_for_product_op(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> Item
         }
     };
 
-    generics.params.extend(
-        lhs.generics(LHS_SUFFIX)
-            .into_iter()
-            .chain(rhs.generics(RHS_SUFFIX))
-            .map::<GenericParam, _>(|ident| parse_quote!(#ident)),
-    );
-    generics.make_where_clause().predicates.extend(
-        lhs.generics(LHS_SUFFIX)
-            .into_iter()
-            .chain(rhs.generics(RHS_SUFFIX))
-            .map::<WherePredicate, _>(|ident| parse_quote!(#ident: Copy)),
-    );
+    for ident in lhs.generics(LHS_SUFFIX).chain(rhs.generics(RHS_SUFFIX)) {
+        generics.params.push(ident.to_());
+        let clause = parse_quote! { #ident: Copy };
+        generics.make_where_clause().predicates.push(clause);
+    }
 
-    if output_is_generic {
-        for (g, n) in grade_counter.iter().enumerate() {
-            let grade = algebra.grade(g as u8);
-            for n in 0..*n {
-                let ident = grade.generic_n(n);
-                generics.params.push(parse_quote!(#ident));
-            }
-        }
+    for ident in algebra
+        .grades()
+        .flat_map(|grade| iter_idents(&grade_counter, grade))
+    {
+        generics.params.push(ident.to_())
+    }
 
-        for (g, n) in grade_counter.clone().into_iter().enumerate() {
-            let grade = algebra.grade(g as u8);
-            let max = n.checked_sub(1).unwrap_or_default();
-            let mut prev = None;
-            for n in 0..max {
-                let ident = prev.unwrap_or_else(|| grade.generic_n(0));
-                let next = grade.generic_n(n + 1);
-                let out = next_ident(&mut grade_counter, grade);
-                prev = Some(out.clone());
+    let existing = grade_counter.clone();
+    for grade in algebra.grades() {
+        let mut prev = None;
+        let idents = iter_idents(&existing, grade);
+        let nexts = iter_idents(&existing, grade).skip(1);
+        for (ident, next) in idents.zip(nexts) {
+            let ident = prev.unwrap_or(ident);
+            let out = next_ident(&mut grade_counter, grade);
+            let clause = parse_quote! { #ident: std::ops::Add<#next, Output = #out> };
 
-                let predicates = &mut generics.make_where_clause().predicates;
-                predicates.push(parse_quote!( #ident: std::ops::Add<#next, Output = #out>));
-                generics.params.push(parse_quote!(#out));
-            }
+            generics.params.push(out.to_());
+            generics.make_where_clause().predicates.push(clause);
+
+            prev = Some(out.clone());
         }
     }
 
     let output_ty: syn::Type = {
-        dbg!(output_is_generic, &grade_counter);
         if output_is_generic {
             match output {
                 TypeMv::Zero(_) => Zero::ty(),
@@ -174,18 +164,9 @@ pub fn impl_item_for_product_op(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> Item
                 }
                 TypeMv::Multivector(mv) => {
                     let ident = Multivector::ident();
-                    let types = grade_counter
-                        .iter()
-                        .enumerate()
-                        .map::<syn::Type, _>(|(g, n)| {
-                            let grade = algebra.grade(g as u8);
-                            n.checked_sub(1)
-                                .map(|n| {
-                                    let ident = grade.generic_n(n);
-                                    parse_quote!(#ident)
-                                })
-                                .unwrap_or_else(Zero::ty)
-                        });
+                    let types = algebra
+                        .grades()
+                        .map(|grade| last_ident(&grade_counter, grade));
                     parse_quote!( #ident <#(#types),*> )
                 }
             }
@@ -193,18 +174,9 @@ pub fn impl_item_for_product_op(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> Item
             match output {
                 TypeMv::Multivector(mv) if mv.is_generic() => {
                     let ident = Multivector::ident();
-                    let types = grade_counter
-                        .iter()
-                        .enumerate()
-                        .map::<syn::Type, _>(|(g, n)| {
-                            let grade = algebra.grade(g as u8);
-                            n.checked_sub(1)
-                                .map(|n| {
-                                    let ident = grade.generic_n(n);
-                                    parse_quote!(#ident)
-                                })
-                                .unwrap_or_else(Zero::ty)
-                        });
+                    let types = algebra
+                        .grades()
+                        .map(|grade| last_ident(&grade_counter, grade));
                     parse_quote!( #ident <#(#types),*> )
                 }
                 _ => output.ty_with_suffix(out_suffix),
@@ -226,6 +198,14 @@ pub fn impl_item_for_product_op(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> Item
     }
 }
 
+pub fn generics(lhs: TypeMv, rhs: TypeMv, op: ProductOp) -> syn::Generics {
+    if lhs.is_generic() || rhs.is_generic() {
+        todo!()
+    } else {
+        Default::default()
+    }
+}
+
 fn next_ident(grade_counter: &mut [usize], grade: Grade) -> Ident {
     let counter = &mut grade_counter[grade.0 as usize];
     let n = *counter;
@@ -240,6 +220,11 @@ fn last_ident(grade_counter: &[usize], grade: Grade) -> Ident {
     } else {
         Zero::ident()
     }
+}
+
+fn iter_idents(grade_counter: &[usize], grade: Grade) -> impl Iterator<Item = Ident> {
+    let n = grade_counter[grade.0 as usize];
+    (0..n).into_iter().map(move |n| grade.generic_n(n))
 }
 
 fn grade_fields_expr(grade: Grade, lhs: TypeMv, rhs: TypeMv, op: ProductOp) -> syn::Expr {
@@ -534,6 +519,12 @@ mod tests {
         std::fs::write(file, contents).unwrap();
     }
 
+    // #[test]
+    // fn impl_g3() {
+    //     let g3 = Algebra::new(3, 0, 0).define_mv();
+    //     write_to_file(&g3);
+    // }
+
     fn assert_eq_impl(expected: &ItemImpl, actual: &ItemImpl) {
         fn assert_eq_ref<T: ToTokens>(expected: &T, actual: &T, message: &str) {
             assert_eq!(
@@ -671,12 +662,6 @@ mod tests {
         };
 
         assert_eq_impl(&expected, &impl_item);
-    }
-
-    #[test]
-    fn impl_g3() {
-        let g3 = Algebra::new(3, 0, 0).define_mv();
-        write_to_file(&g3);
     }
 
     #[test]

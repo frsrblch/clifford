@@ -687,11 +687,11 @@ impl TypeMv {
         matches!(self, Self::Grade(g) if g.is_scalar())
     }
 
-    pub fn generics(&self, suffix: &str) -> Vec<Ident> {
+    pub fn generics(self, suffix: &str) -> Box<dyn Iterator<Item = Ident> + '_> {
         assert!(!suffix.is_empty());
         match self {
-            Self::Multivector(mv) => mv.1.grades().map(|g| g.generic(suffix)).collect(),
-            _ => Vec::default(),
+            Self::Multivector(mv) => Box::new(mv.1.grades().map(|g| g.generic(suffix))),
+            _ => Box::new(std::iter::empty()),
         }
     }
 
@@ -988,7 +988,7 @@ impl ProductOp {
         Ident::new(str, Span::mixed_site())
     }
 
-    pub fn output_mv(self, lhs: TypeMv, rhs: TypeMv, algebra: Algebra) -> TypeMv {
+    pub fn output_mv(self, lhs: TypeMv, rhs: TypeMv) -> TypeMv {
         // if matches!(lhs, TypeMv::Multivector(mv) if mv.is_generic())
         //     || matches!(rhs, TypeMv::Multivector(mv) if mv.is_generic())
         // {
@@ -999,7 +999,7 @@ impl ProductOp {
             .into_iter()
             .flat_map(|lhs| rhs.into_iter().map(move |rhs| (lhs, rhs)))
             .map(|(l, r)| self.call(l, r));
-        TypeMv::from_iter(products, algebra)
+        TypeMv::from_iter(products, lhs.algebra())
     }
 }
 
