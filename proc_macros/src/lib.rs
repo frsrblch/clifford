@@ -1,14 +1,14 @@
-#![feature(type_alias_impl_trait)]
+#![feature(type_alias_impl_trait, fn_traits, unboxed_closures)]
 
 extern crate proc_macro;
 
+mod algebra;
 mod code_gen;
 mod code_gen_mv;
-mod types;
 
+use algebra::Algebra;
 use syn::parse::{Parse, ParseStream};
 use syn::parse_macro_input;
-use types::Algebra;
 
 #[proc_macro]
 pub fn clifford(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -36,7 +36,6 @@ impl Parse for Algebra {
         let one = one.base10_parse()?;
         let neg_one = neg_one.base10_parse()?;
         let zero = zero.base10_parse()?;
-
         Ok(Algebra::new(one, neg_one, zero))
     }
 }

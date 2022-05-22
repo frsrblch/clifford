@@ -1,6 +1,7 @@
-use super::types::*;
+use super::algebra::*;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{quote, ToTokens};
+use syn::parse_quote;
 use syn::punctuated::Punctuated;
 use syn::token::Add;
 
@@ -79,7 +80,7 @@ impl Grade {
         }
     }
 
-    pub fn type_ident(&self) -> syn::Type {
+    pub fn ident(&self) -> Ident {
         let str = match self.0 {
             0 => "f64",
             1 => "Vector",
@@ -91,6 +92,11 @@ impl Grade {
             _ => unimplemented!("not implemented for grade: {}", self.0),
         };
         syn::parse_str(str).unwrap()
+    }
+
+    pub fn ty(&self) -> syn::Type {
+        let ident = self.ident();
+        parse_quote! { #ident }
     }
 }
 
@@ -108,7 +114,7 @@ impl Type {
     pub fn type_ident(&self) -> syn::Type {
         match self {
             Type::Zero(_) => Zero::ty(),
-            Type::Grade(grade) => grade.type_ident(),
+            Type::Grade(grade) => grade.ty(),
             Type::SubAlgebra(sub) => sub.type_ident(),
         }
     }
@@ -344,8 +350,8 @@ impl ToTokens for ImplProductOp {
 
         let ty = self.lhs.type_ident();
         let rhs_ty = self.rhs.type_ident();
-        let trait_ty = self.op.trait_ty();
-        let trait_fn = self.op.trait_fn();
+        let trait_ty = self.op.ty();
+        let trait_fn = self.op.fn_ident();
 
         let output = self.output();
 
