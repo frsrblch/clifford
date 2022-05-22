@@ -59,13 +59,7 @@ impl Algebra {
         let ops = ProductOp::iter_all(self)
             .flat_map(|op| TypeMv::iter(self).map(move |lhs| (op, lhs)))
             .flat_map(|(op, lhs)| TypeMv::iter(self).map(move |rhs| (op, lhs, rhs)))
-            .filter_map(|(op, lhs, rhs)| {
-                if op.is_local() || !lhs.is_scalar() || !rhs.is_scalar() {
-                    Some(impl_item_for_product_op(op, lhs, rhs))
-                } else {
-                    None
-                }
-            });
+            .filter_map(|(op, lhs, rhs)| impl_item_for_product_op(op, lhs, rhs));
 
         quote! {
             // #traits
@@ -77,7 +71,11 @@ impl Algebra {
 }
 
 #[allow(dead_code)]
-pub fn impl_item_for_product_op(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> ItemImpl {
+pub fn impl_item_for_product_op(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> Option<ItemImpl> {
+    if !op.is_local() && lhs.is_scalar() && rhs.is_scalar() {
+        return None;
+    }
+
     let out_suffix = "Out";
 
     let algebra = lhs.algebra();
@@ -191,7 +189,7 @@ pub fn impl_item_for_product_op(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> Item
     };
     let type_output = parse_quote! { type Output = #output_ty; };
 
-    ItemImpl {
+    Some(ItemImpl {
         attrs: vec![],
         defaultness: None,
         unsafety: None,
@@ -201,7 +199,7 @@ pub fn impl_item_for_product_op(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> Item
         self_ty: Box::new(lhs_ty),
         brace_token: Brace::default(),
         items: vec![type_output, trait_fn],
-    }
+    })
 }
 
 pub fn generics(lhs: TypeMv, rhs: TypeMv, op: ProductOp) -> syn::Generics {
@@ -579,7 +577,8 @@ mod tests {
         let algebra = Algebra::new(3, 0, 0);
         let mv = TypeMv::Multivector(Multivector::new(algebra));
 
-        let impl_item = impl_item_for_product_op(ProductOp::Grade(algebra.grade(2)), mv, mv);
+        let impl_item =
+            impl_item_for_product_op(ProductOp::Grade(algebra.grade(2)), mv, mv).unwrap();
         let expected: ItemImpl = parse_quote! {
             impl < G0Lhs , G1Lhs , G2Lhs , G3Lhs , G0Rhs , G1Rhs , G2Rhs , G3Rhs , G2_0 , G2_1 , G2_2 , G2_3 , G2_4 , G2_5 , G2_6 , G2_7 , G2_8 , G2_9 , G2_10 > BivectorProduct < Multivector < G0Rhs , G1Rhs , G2Rhs , G3Rhs > > for Multivector < G0Lhs , G1Lhs , G2Lhs , G3Lhs > where G0Lhs : BivectorProduct < G2Rhs , Output = G2_0 > , G1Lhs : BivectorProduct < G1Rhs , Output = G2_1 > , G1Lhs : BivectorProduct < G3Rhs , Output = G2_2 > , G2Lhs : BivectorProduct < G0Rhs , Output = G2_3 > , G2Lhs : BivectorProduct < G2Rhs , Output = G2_4 > , G3Lhs : BivectorProduct < G1Rhs , Output = G2_5 > , G0Lhs : Copy , G1Lhs : Copy , G2Lhs : Copy , G3Lhs : Copy , G0Rhs : Copy , G1Rhs : Copy , G2Rhs : Copy , G3Rhs : Copy , G2_0 : std :: ops :: Add < G2_1 , Output = G2_6 > , G2_6 : std :: ops :: Add < G2_2 , Output = G2_7 > , G2_7 : std :: ops :: Add < G2_3 , Output = G2_8 > , G2_8 : std :: ops :: Add < G2_4 , Output = G2_9 > , G2_9 : std :: ops :: Add < G2_5 , Output = G2_10 > { type Output = G2_10 ; # [inline] # [allow (unused_variables)] fn bivector_prod (self , rhs : Multivector < G0Rhs , G1Rhs , G2Rhs , G3Rhs >) -> Self :: Output { self . 0 . bivector_prod (rhs . 2) + self . 1 . bivector_prod (rhs . 1) + self . 1 . bivector_prod (rhs . 3) + self . 2 . bivector_prod (rhs . 0) + self . 2 . bivector_prod (rhs . 2) + self . 3 . bivector_prod (rhs . 1) } }
         };
@@ -592,7 +591,7 @@ mod tests {
         let algebra = Algebra::new(2, 0, 0);
         let mv = TypeMv::Multivector(Multivector::new(algebra));
 
-        let impl_item = impl_item_for_product_op(ProductOp::Mul, mv, mv);
+        let impl_item = impl_item_for_product_op(ProductOp::Mul, mv, mv).unwrap();
         let expected = parse_quote! {
             impl < G0Lhs , G1Lhs , G2Lhs , G0Rhs , G1Rhs , G2Rhs , G0_0 , G0_1 , G0_2 , G1_0 , G1_1 , G1_2 , G1_3 , G2_0 , G2_1 , G2_2 , G0_3 , G0_4 , G1_4 , G1_5 , G1_6 , G2_3 , G2_4 > std :: ops :: Mul < Multivector < G0Rhs , G1Rhs , G2Rhs > > for Multivector < G0Lhs , G1Lhs , G2Lhs > where G0Lhs : ScalarProduct < G0Rhs , Output = G0_0 > , G1Lhs : ScalarProduct < G1Rhs , Output = G0_1 > , G2Lhs : ScalarProduct < G2Rhs , Output = G0_2 > , G0Lhs : VectorProduct < G1Rhs , Output = G1_0 > , G1Lhs : VectorProduct < G0Rhs , Output = G1_1 > , G1Lhs : VectorProduct < G2Rhs , Output = G1_2 > , G2Lhs : VectorProduct < G1Rhs , Output = G1_3 > , G0Lhs : BivectorProduct < G2Rhs , Output = G2_0 > , G1Lhs : BivectorProduct < G1Rhs , Output = G2_1 > , G2Lhs : BivectorProduct < G0Rhs , Output = G2_2 > , G0Lhs : Copy , G1Lhs : Copy , G2Lhs : Copy , G0Rhs : Copy , G1Rhs : Copy , G2Rhs : Copy , G0_0 : std :: ops :: Add < G0_1 , Output = G0_3 > , G0_3 : std :: ops :: Add < G0_2 , Output = G0_4 > , G1_0 : std :: ops :: Add < G1_1 , Output = G1_4 > , G1_4 : std :: ops :: Add < G1_2 , Output = G1_5 > , G1_5 : std :: ops :: Add < G1_3 , Output = G1_6 > , G2_0 : std :: ops :: Add < G2_1 , Output = G2_3 > , G2_3 : std :: ops :: Add < G2_2 , Output = G2_4 > { type Output = Multivector < G0_4 , G1_6 , G2_4 > ; # [inline] # [allow (unused_variables)] fn mul (self , rhs : Multivector < G0Rhs , G1Rhs , G2Rhs >) -> Self :: Output { Multivector (self . 0 . scalar_prod (rhs . 0) + self . 1 . scalar_prod (rhs . 1) + self . 2 . scalar_prod (rhs . 2) , self . 0 . vector_prod (rhs . 1) + self . 1 . vector_prod (rhs . 0) + self . 1 . vector_prod (rhs . 2) + self . 2 . vector_prod (rhs . 1) , self . 0 . bivector_prod (rhs . 2) + self . 1 . bivector_prod (rhs . 1) + self . 2 . bivector_prod (rhs . 0)) } }
         };
@@ -607,7 +606,7 @@ mod tests {
 
         // <vector * vector>_1 = 0
         let impl_item =
-            impl_item_for_product_op(ProductOp::Grade(algebra.grade(1)), vector, vector);
+            impl_item_for_product_op(ProductOp::Grade(algebra.grade(1)), vector, vector).unwrap();
         let expected = parse_quote! {
             impl VectorProduct < Vector > for Vector { type Output = Zero ; # [inline] # [allow (unused_variables)] fn vector_prod (self , rhs : Vector) -> Self :: Output { Zero } }
         };
@@ -623,7 +622,7 @@ mod tests {
 
         // <vector * bivector>_1 = vector
         let impl_item =
-            impl_item_for_product_op(ProductOp::Grade(algebra.grade(1)), vector, bivector);
+            impl_item_for_product_op(ProductOp::Grade(algebra.grade(1)), vector, bivector).unwrap();
         let expected = parse_quote! {
             impl VectorProduct < Bivector > for Vector { type Output = Vector ; # [inline] # [allow (unused_variables)] fn vector_prod (self , rhs : Bivector) -> Self :: Output { Vector { e1 : - (self . e2 * rhs . e12) + - (self . e3 * rhs . e13) , e2 : self . e1 * rhs . e12 + - (self . e3 * rhs . e23) , e3 : self . e1 * rhs . e13 + self . e2 * rhs . e23 , } } }
         };
@@ -636,7 +635,7 @@ mod tests {
         let algebra = Algebra::new(3, 0, 0);
         let vector = TypeMv::Grade(algebra.grade(1));
 
-        let impl_item = impl_item_for_product_op(ProductOp::Mul, vector, vector);
+        let impl_item = impl_item_for_product_op(ProductOp::Mul, vector, vector).unwrap();
         let expected = parse_quote! {
             impl std::ops::Mul<Vector> for Vector {
                 type Output = Multivector<f64, Zero, Bivector, Zero>;
@@ -656,7 +655,7 @@ mod tests {
         let algebra = Algebra::new(3, 0, 0);
         let scalar = TypeMv::Grade(algebra.grade(0));
 
-        let impl_item = impl_item_for_product_op(ProductOp::Geometric, scalar, scalar);
+        let impl_item = impl_item_for_product_op(ProductOp::Geometric, scalar, scalar).unwrap();
         let expected = parse_quote! {
             impl crate::Geometric<f64> for f64 {
                 type Output = f64;
@@ -680,7 +679,8 @@ mod tests {
             ProductOp::Grade(scalar),
             TypeMv::Grade(scalar),
             TypeMv::Multivector(g2.mv()),
-        );
+        )
+        .unwrap();
 
         let expected = parse_quote! {
             impl<G0Rhs, G1Rhs, G2Rhs, G0_0> ScalarProduct<Multivector<G0Rhs, G1Rhs, G2Rhs>> for f64
@@ -711,7 +711,8 @@ mod tests {
             ProductOp::Mul,
             TypeMv::Grade(scalar),
             TypeMv::Multivector(algebra.mv()),
-        );
+        )
+        .unwrap();
 
         let expected = parse_quote! {
             impl<G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G2_0, G3_0>
@@ -741,5 +742,12 @@ mod tests {
         };
 
         assert_eq_impl(&expected, &actual);
+    }
+
+    #[test]
+    fn mul_scalars_is_none() {
+        let algebra = Algebra::new(3, 0, 0);
+        let scalar = TypeMv::Grade(algebra.grade(0));
+        assert!(impl_item_for_product_op(ProductOp::Mul, scalar, scalar).is_none());
     }
 }
