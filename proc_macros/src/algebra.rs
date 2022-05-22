@@ -756,6 +756,10 @@ impl Multivector {
         self.0.insert(grade);
     }
 
+    pub fn generic_parameters(&self, suffix: &str) -> Vec<syn::Type> {
+        self.type_generics(suffix)
+    }
+
     pub fn type_parameters(&self, suffix: &str) -> Vec<syn::Type> {
         if self.is_generic() {
             self.type_generics(suffix)
@@ -895,6 +899,13 @@ pub enum ProductOp {
 }
 
 impl ProductOp {
+    pub fn is_local(self) -> bool {
+        match self {
+            Self::Mul => false,
+            Self::Geometric | Self::Dot | Self::Wedge | Self::Grade(_) => true,
+        }
+    }
+
     pub fn output_contains(
         self,
         lhs: impl IntoIterator<Item = Blade>,
@@ -908,6 +919,10 @@ impl ProductOp {
 
     pub fn iter() -> impl Iterator<Item = Self> {
         [Self::Mul, Self::Geometric, Self::Dot, Self::Wedge].into_iter()
+    }
+
+    pub fn iter_all(algebra: Algebra) -> impl Iterator<Item = Self> {
+        Self::iter().chain(algebra.grades().map(ProductOp::Grade))
     }
 
     pub fn call(self, lhs: Blade, rhs: Blade) -> Product {
@@ -974,11 +989,11 @@ impl ProductOp {
     }
 
     pub fn output_mv(self, lhs: TypeMv, rhs: TypeMv, algebra: Algebra) -> TypeMv {
-        if matches!(lhs, TypeMv::Multivector(mv) if mv.is_generic())
-            || matches!(rhs, TypeMv::Multivector(mv) if mv.is_generic())
-        {
-            return TypeMv::Multivector(Multivector::new(algebra));
-        };
+        // if matches!(lhs, TypeMv::Multivector(mv) if mv.is_generic())
+        //     || matches!(rhs, TypeMv::Multivector(mv) if mv.is_generic())
+        // {
+        //     return TypeMv::Multivector(Multivector::new(algebra));
+        // };
 
         let products = lhs
             .into_iter()

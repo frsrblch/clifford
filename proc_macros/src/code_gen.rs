@@ -80,7 +80,7 @@ impl Grade {
         }
     }
 
-    pub fn ident(&self) -> Ident {
+    pub fn ty(&self) -> syn::Type {
         let str = match self.0 {
             0 => "f64",
             1 => "Vector",
@@ -94,9 +94,8 @@ impl Grade {
         syn::parse_str(str).unwrap()
     }
 
-    pub fn ty(&self) -> syn::Type {
-        let ident = self.ident();
-        parse_quote! { #ident }
+    pub fn fn_ident(&self) -> Ident {
+        syn::parse_str(&self.name().to_lowercase()).unwrap()
     }
 }
 

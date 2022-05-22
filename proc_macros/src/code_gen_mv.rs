@@ -2,8 +2,20 @@ use super::algebra::*;
 use itertools::iproduct;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{quote, ToTokens};
+use syn::parse_quote::ParseQuote;
 use syn::token::{Brace, For, Impl};
-use syn::{parse_quote, GenericParam, ItemImpl, WherePredicate};
+use syn::{parse_quote, Expr, GenericParam, Generics, ItemImpl, WherePredicate};
+
+trait To_ {
+    fn to_<U: syn::parse::Parse>(&self) -> U;
+}
+
+impl<T: ToTokens> To_ for T {
+    fn to_<U: syn::parse::Parse>(&self) -> U {
+        let tokens = self.to_token_stream();
+        parse_quote!(#tokens)
+    }
+}
 
 impl Algebra {
     pub fn define_mv(self) -> TokenStream {
@@ -44,218 +56,34 @@ impl Algebra {
 
         let types = TypeMv::iter(self).map(TypeMv::define);
 
-        //         let impl_grade_products = self
-        //             .grades()
-        //             .flat_map(|a| TypeMv::iter(self).map(move |lhs| (a, lhs)))
-        //             .flat_map(|(a, b)| TypeMv::iter(self).map(move |rhs| (a, b, rhs)))
-        //             .map(|(output, lhs, rhs)| {
-        //                 let op = ProductOp::Grade(output);
-        //
-        //                 let output1 = op.output_mv(lhs, rhs, self);
-        //
-        //                 let product_trait = op.trait_ty();
-        //                 let product_fn = op.trait_fn();
-        //
-        //                 let lhs_ty = lhs.ty_with_suffix("L");
-        //                 let rhs_ty = rhs.ty_with_suffix("R");
-        //
-        //                 let lhs_generics = lhs.generics("L");
-        //                 let rhs_generics = rhs.generics("R");
-        //
-        //                 let mut intermediate_generics = Generics::default();
-        //                 let mut where_clause = WhereClause::default();
-        //
-        //                 if lhs.is_mv() || rhs.is_mv() {
-        //                     for (n, (l, r)) in iproduct!(lhs.grades(), rhs.grades())
-        //                         .filter(|(l, r)| {
-        //                             cartesian_product(*l, *r, op).any(|(l, r, p)| output1.contains(p))
-        //                         })
-        //                         .enumerate()
-        //                     {
-        //                         let ident = output.generic(&n.to_string());
-        //                         let generic = Generic::Generic(ident.clone());
-        //                         intermediate_generics.params.push(generic);
-        //
-        //                         let lhs_ty = if lhs.is_mv() {
-        //                             Generic::Generic(l.generic("L"))
-        //                         } else {
-        //                             Generic::Concrete(l.ty())
-        //                         };
-        //
-        //                         let rhs_ty = if rhs.is_mv() {
-        //                             Generic::Generic(r.generic("R"))
-        //                         } else {
-        //                             Generic::Concrete(r.ty())
-        //                         };
-        //
-        //                         let bound = Bound {
-        //                             ty: lhs_ty,
-        //                             trait_ty: product_trait.clone().to_token_stream(),
-        //                             generics: Generics::from_iter([rhs_ty, Generic::Output(ident)]),
-        //                         };
-        //                         where_clause.bounds.push(bound);
-        //                     }
-        //                 }
-        //
-        //                 let first = intermediate_generics.iter();
-        //                 let next = intermediate_generics.iter().skip(1);
-        //                 let len = intermediate_generics.params.len();
-        //                 let mut intermediate_sum = Generics::default();
-        //                 for (i, (first, next)) in first.zip(next).enumerate() {
-        //                     let i = len + i;
-        //                     let output = output.generic(&i.to_string());
-        //                     let bound = Bound {
-        //                         ty: intermediate_sum
-        //                             .params
-        //                             .last()
-        //                             .unwrap_or_else(|| first)
-        //                             .clone(),
-        //                         trait_ty: quote! { std::ops::Add },
-        //                         generics: Generics::from_iter([
-        //                             next.clone(),
-        //                             Generic::Output(output.clone()),
-        //                         ]),
-        //                     };
-        //                     intermediate_sum.params.push(Generic::Generic(output));
-        //                     where_clause.bounds.push(bound);
-        //                 }
-        //
-        //                 let output_is_zero = !ProductOp::Mul.output_contains(lhs, rhs, output);
-        //
-        //                 let output_ty = if output_is_zero {
-        //                     Zero::ty().to_token_stream()
-        //                 } else {
-        //                     match (lhs, rhs) {
-        //                         (TypeMv::Zero(_), _) | (_, TypeMv::Zero(_)) => Zero::ty().to_token_stream(),
-        //                         (TypeMv::Grade(_), TypeMv::Grade(_)) => {
-        //                             output.type_ident().to_token_stream()
-        //                         }
-        //                         _ => intermediate_generics
-        //                             .iter()
-        //                             .chain(intermediate_sum.iter())
-        //                             .last()
-        //                             .unwrap()
-        //                             .to_token_stream(),
-        //                     }
-        //                 };
-        //
-        //                 let generics = lhs_generics
-        //                     .iter()
-        //                     .chain(rhs_generics.iter())
-        //                     .chain(intermediate_generics.iter())
-        //                     .chain(intermediate_sum.iter())
-        //                     .cloned()
-        //                     .collect::<Generics>();
-        //
-        //                 let copy_bounds = lhs_generics
-        //                     .iter()
-        //                     .chain(rhs_generics.iter())
-        //                     .map(|g| Bound {
-        //                         ty: Generic::Generic(g.clone()),
-        //                         trait_ty: quote! { Copy },
-        //                         generics: Default::default(),
-        //                     });
-        //                 where_clause.bounds.extend(copy_bounds);
-        //
-        //                 let expr = if output_is_zero {
-        //                     OutputExpr::Zero
-        //                 } else {
-        //                     match (lhs, rhs) {
-        //                         (TypeMv::Zero(_), _) | (_, TypeMv::Zero(_)) => OutputExpr::Zero,
-        //                         (TypeMv::Grade(_), TypeMv::Grade(_)) => {
-        //                             let blades = output
-        //                                 .blades()
-        //                                 .map(|blade| {
-        //                                     let products = lhs
-        //                                         .blades()
-        //                                         .flat_map(|lhs| rhs.blades().map(move |rhs| (lhs, rhs)))
-        //                                         .filter_map(|(lhs_b, rhs_b)| {
-        //                                             let product = lhs_b * rhs_b;
-        //                                             let out = product.blade()?;
-        //
-        //                                             if out != blade {
-        //                                                 return None;
-        //                                             }
-        //
-        //                                             let l = access_field(lhs, lhs_b, quote!(self));
-        //                                             let r = access_field(rhs, rhs_b, quote!(rhs));
-        //
-        //                                             if product.is_pos() {
-        //                                                 Some(parse_quote! { #l * #r })
-        //                                             } else {
-        //                                                 Some(parse_quote! { -(#l * #r) })
-        //                                             }
-        //                                         })
-        //                                         .collect();
-        //
-        //                                     (blade, products)
-        //                                 })
-        //                                 .collect();
-        //                             OutputExpr::GradeFields(output, blades)
-        //                         }
-        //                         _ => {
-        //                             let sum = lhs
-        //                                 .grades()
-        //                                 .flat_map(|l| rhs.grades().map(move |r| (l, r)))
-        //                                 .filter(|(l, r)| ProductOp::Mul.output_contains(*l, *r, output))
-        //                                 .map(|(l, r)| {
-        //                                     let lg = access_grade(lhs, l, quote!(self));
-        //                                     let rg = access_grade(rhs, r, quote!(rhs));
-        //                                     parse_quote! { #lg.#product_fn(#rg) }
-        //                                 })
-        //                                 .collect();
-        //                             OutputExpr::GradeSum(sum)
-        //                         }
-        //                     }
-        //                 };
-        //
-        //                 let rhs_ident = if output_is_zero {
-        //                     quote! {_}
-        //                 } else {
-        //                     quote! {rhs}
-        //                 };
-        //
-        //                 quote! {
-        //                     impl #generics #product_trait<#rhs_ty> for #lhs_ty #where_clause {
-        //                         type Output = #output_ty;
-        //                         fn #product_fn(self, #rhs_ident: #rhs_ty) -> Self::Output {
-        //                             #expr
-        //                         }
-        //                     }
-        //                 }
-        //             });
+        let ops = ProductOp::iter_all(self)
+            .flat_map(|op| TypeMv::iter(self).map(move |lhs| (op, lhs)))
+            .flat_map(|(op, lhs)| TypeMv::iter(self).map(move |rhs| (op, lhs, rhs)))
+            .map(|(op, lhs, rhs)| impl_item_for_product_op(op, lhs, rhs));
 
         quote! {
             // #traits
             #grade_products
             #(#types)*
-            // #(#impl_grade_products)*
+            #(#ops)*
         }
     }
 }
 
 #[allow(dead_code)]
 pub fn impl_item_for_product_op(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> ItemImpl {
-    let lhs_suffix = "Lhs";
-    let rhs_suffix = "Rhs";
     let out_suffix = "Out";
 
     let algebra = lhs.algebra();
     let output = op.output_mv(lhs, rhs, algebra);
+    let output_is_generic = lhs.is_generic() || rhs.is_generic();
 
     let mut generics = syn::Generics::default();
     let mut grade_counter = vec![0usize; algebra.grades().count()];
 
-    fn next_ident(grade_counter: &mut [usize], grade: Grade) -> Ident {
-        let counter = &mut grade_counter[grade.0 as usize];
-        let n = *counter;
-        *counter += 1;
-        grade.generic_n(n)
-    }
-
     let trait_ = op.ty();
-    let lhs_ty = lhs.ty_with_suffix(lhs_suffix);
-    let rhs_ty = rhs.ty_with_suffix(rhs_suffix);
+    let lhs_ty = lhs.ty_with_suffix(LHS_SUFFIX);
+    let rhs_ty = rhs.ty_with_suffix(RHS_SUFFIX);
     let trait_ = Some((None, parse_quote!(#trait_<#rhs_ty>), For::default()));
 
     let op_fn = op.fn_ident();
@@ -263,87 +91,29 @@ pub fn impl_item_for_product_op(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> Item
     let output_expr = match output {
         TypeMv::Zero(_) => Zero::expr(),
         TypeMv::Grade(grade) => {
-            let fields = grade
-                .blades()
-                .map(|blade| {
-                    let sum = iproduct!(lhs.blades(), rhs.blades())
-                        .filter_map(|(lhs_blade, rhs_blade)| {
-                            op.expr(lhs, lhs_blade, rhs, rhs_blade, blade)
-                        })
-                        .collect();
-                    (blade, sum)
-                })
-                .collect();
-            OutputExpr::GradeFields(grade, fields).expr()
-        }
-        TypeMv::Multivector(mv) => {
-            let grades = algebra
-                .grades()
-                .map(|grade| {
-                    let op_fn = ProductOp::Grade(grade).fn_ident();
-                    let op_trait = ProductOp::Grade(grade).ty();
-                    let sum = iproduct!(lhs.grades(), rhs.grades())
-                        .filter_map(|(lhs_grade, rhs_grade)| {
-                            if op.output_contains(lhs_grade, rhs_grade, grade) {
-                                if output.is_generic() {
-                                    generics.make_where_clause().predicates.push({
-                                        let lhs = lhs_grade.generic(lhs_suffix);
-                                        let rhs = rhs_grade.generic(rhs_suffix);
-                                        let out = next_ident(&mut grade_counter, grade);
-                                        parse_quote!( #lhs: #op_trait<#rhs, Output = #out> )
-                                    });
-                                }
+            let op_trait = ProductOp::Grade(grade).ty();
+            let op_fn = ProductOp::Grade(grade).fn_ident();
 
-                                let lhs = access_grade(lhs, lhs_grade, quote!(self));
-                                let rhs = access_grade(rhs, rhs_grade, quote!(rhs));
-                                Some(parse_quote!( #lhs.#op_fn(#rhs) ))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-                    (grade, sum)
-                })
-                .collect();
-            OutputExpr::Multivector(grades).expr()
-
-            // let ident = Multivector::ident();
-            // let fields = algebra.grades().map(|grade| {
-            //     let eq_grade = |g: Grade| g == grade;
-            //     if mv.grades().any(eq_grade) {
-            //         let op_fn = ProductOp::Grade(grade).fn_ident();
-            //         let op_trait = ProductOp::Grade(grade).ty();
-            //         let sum = iproduct!(lhs.grades(), rhs.grades()).filter_map::<syn::Expr, _>(
-            //             |(lhs_grade, rhs_grade)| {
-            //                 if op.output_contains(lhs_grade, rhs_grade, grade) {
-            //                     if output.is_generic() {
-            //                         generics.make_where_clause().predicates.push({
-            //                             let lhs = lhs_grade.generic(lhs_suffix);
-            //                             let rhs = rhs_grade.generic(rhs_suffix);
-            //                             let out = next_ident(&mut grade_counter, grade);
-            //                             parse_quote!( #lhs: #op_trait<#rhs, Output = #out> )
-            //                         });
-            //                     }
-            //
-            //                     let lhs = access_grade(lhs, lhs_grade, quote!(self));
-            //                     let rhs = access_grade(rhs, rhs_grade, quote!(rhs));
-            //                     Some(parse_quote!( #lhs.#op_fn(#rhs) ))
-            //                 } else {
-            //                     None
-            //                 }
-            //             },
-            //         );
-            //
-            //         parse_quote!( #(#sum)+* )
-            //     } else {
-            //         Zero::expr()
-            //     }
-            // });
-            //
-            // parse_quote! {
-            //     #ident ( #(#fields),* )
-            // }
+            if output_is_generic {
+                let products = iproduct!(lhs.grades(), rhs.grades()).filter_map::<Expr, _>(
+                    |(lhs_grade, rhs_grade)| {
+                        if op.output_contains(lhs_grade, rhs_grade, grade) {
+                            generics.make_where_clause().predicates.push({
+                                let lhs = grade_type(lhs, lhs_grade, LHS_SUFFIX);
+                                let rhs = grade_type(rhs, rhs_grade, RHS_SUFFIX);
+                                let out = next_ident(&mut grade_counter, grade);
+                                parse_quote!( #lhs: #op_trait<#rhs, Output = #out> )
+                            });
+                        }
+                        grade_product_expr(grade, lhs, lhs_grade, rhs, rhs_grade, op)
+                    },
+                );
+                parse_quote! { #(#products)+* }
+            } else {
+                grade_fields_expr(grade, lhs, rhs, op)
+            }
         }
+        TypeMv::Multivector(mv) => mv_expr(mv, lhs, rhs, op, &mut grade_counter, &mut generics),
     };
 
     let trait_fn = parse_quote! {
@@ -355,19 +125,19 @@ pub fn impl_item_for_product_op(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> Item
     };
 
     generics.params.extend(
-        lhs.generics(lhs_suffix)
+        lhs.generics(LHS_SUFFIX)
             .into_iter()
-            .chain(rhs.generics(rhs_suffix))
+            .chain(rhs.generics(RHS_SUFFIX))
             .map::<GenericParam, _>(|ident| parse_quote!(#ident)),
     );
     generics.make_where_clause().predicates.extend(
-        lhs.generics(lhs_suffix)
+        lhs.generics(LHS_SUFFIX)
             .into_iter()
-            .chain(rhs.generics(rhs_suffix))
+            .chain(rhs.generics(RHS_SUFFIX))
             .map::<WherePredicate, _>(|ident| parse_quote!(#ident: Copy)),
     );
 
-    if output.is_generic() {
+    if output_is_generic {
         for (g, n) in grade_counter.iter().enumerate() {
             let grade = algebra.grade(g as u8);
             for n in 0..*n {
@@ -394,24 +164,51 @@ pub fn impl_item_for_product_op(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> Item
     }
 
     let output_ty: syn::Type = {
-        match output {
-            TypeMv::Multivector(mv) if mv.is_generic() => {
-                let ident = Multivector::ident();
-                let types = grade_counter
-                    .iter()
-                    .enumerate()
-                    .map::<syn::Type, _>(|(g, n)| {
-                        let grade = algebra.grade(g as u8);
-                        n.checked_sub(1)
-                            .map(|n| {
-                                let ident = grade.generic_n(n);
-                                parse_quote!(#ident)
-                            })
-                            .unwrap_or_else(Zero::ty)
-                    });
-                parse_quote!( #ident <#(#types),*> )
+        dbg!(output_is_generic, &grade_counter);
+        if output_is_generic {
+            match output {
+                TypeMv::Zero(_) => Zero::ty(),
+                TypeMv::Grade(grade) => {
+                    let ident = last_ident(&grade_counter, grade);
+                    parse_quote!(#ident)
+                }
+                TypeMv::Multivector(mv) => {
+                    let ident = Multivector::ident();
+                    let types = grade_counter
+                        .iter()
+                        .enumerate()
+                        .map::<syn::Type, _>(|(g, n)| {
+                            let grade = algebra.grade(g as u8);
+                            n.checked_sub(1)
+                                .map(|n| {
+                                    let ident = grade.generic_n(n);
+                                    parse_quote!(#ident)
+                                })
+                                .unwrap_or_else(Zero::ty)
+                        });
+                    parse_quote!( #ident <#(#types),*> )
+                }
             }
-            _ => output.ty_with_suffix(out_suffix),
+        } else {
+            match output {
+                TypeMv::Multivector(mv) if mv.is_generic() => {
+                    let ident = Multivector::ident();
+                    let types = grade_counter
+                        .iter()
+                        .enumerate()
+                        .map::<syn::Type, _>(|(g, n)| {
+                            let grade = algebra.grade(g as u8);
+                            n.checked_sub(1)
+                                .map(|n| {
+                                    let ident = grade.generic_n(n);
+                                    parse_quote!(#ident)
+                                })
+                                .unwrap_or_else(Zero::ty)
+                        });
+                    parse_quote!( #ident <#(#types),*> )
+                }
+                _ => output.ty_with_suffix(out_suffix),
+            }
         }
     };
     let type_output = parse_quote! { type Output = #output_ty; };
@@ -429,41 +226,120 @@ pub fn impl_item_for_product_op(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> Item
     }
 }
 
+fn next_ident(grade_counter: &mut [usize], grade: Grade) -> Ident {
+    let counter = &mut grade_counter[grade.0 as usize];
+    let n = *counter;
+    *counter += 1;
+    grade.generic_n(n)
+}
+
+fn last_ident(grade_counter: &[usize], grade: Grade) -> Ident {
+    let n = grade_counter[grade.0 as usize];
+    if let Some(n) = n.checked_sub(1) {
+        grade.generic_n(n)
+    } else {
+        Zero::ident()
+    }
+}
+
+fn grade_fields_expr(grade: Grade, lhs: TypeMv, rhs: TypeMv, op: ProductOp) -> syn::Expr {
+    let fields = grade.blades().map(|blade| {
+        let sum = cartesian_product(lhs, rhs, op)
+            .filter_map(|(lhs_blade, rhs_blade, product)| {
+                op.expr(lhs, lhs_blade, rhs, rhs_blade, blade)
+            })
+            .collect();
+        assign_field(TypeMv::Grade(grade), blade, &sum)
+    });
+
+    if grade.is_scalar() {
+        parse_quote! { #(#fields)+* }
+    } else {
+        let ty = grade.ty();
+        parse_quote! {
+            #ty {
+                #( #fields, )*
+            }
+        }
+    }
+}
+
+const LHS_SUFFIX: &'static str = "Lhs";
+const RHS_SUFFIX: &'static str = "Rhs";
+
+pub fn mv_expr(
+    mv: Multivector,
+    lhs: TypeMv,
+    rhs: TypeMv,
+    op: ProductOp,
+    grade_counter: &mut [usize],
+    generics: &mut Generics,
+) -> Expr {
+    let is_generic = lhs.is_generic() || rhs.is_generic();
+    let algebra = mv.1;
+    let grades = algebra
+        .grades()
+        .map(|grade| {
+            let op_trait = ProductOp::Grade(grade).ty();
+            let op_fn = ProductOp::Grade(grade).fn_ident();
+            let sum = iproduct!(lhs.grades(), rhs.grades())
+                .filter_map(|(lhs_grade, rhs_grade)| {
+                    if op.output_contains(lhs_grade, rhs_grade, grade) {
+                        // TODO refactor generics into separate fn
+                        if is_generic {
+                            generics.make_where_clause().predicates.push({
+                                let lhs = grade_type(lhs, lhs_grade, LHS_SUFFIX);
+                                let rhs = grade_type(rhs, rhs_grade, RHS_SUFFIX);
+                                let out = next_ident(grade_counter, grade);
+                                parse_quote!( #lhs: #op_trait<#rhs, Output = #out> )
+                            });
+                        }
+
+                        grade_product_expr(grade, lhs, lhs_grade, rhs, rhs_grade, op)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            (grade, sum)
+        })
+        .collect();
+    OutputExpr::Multivector(grades).expr()
+}
+
+fn grade_type(ty: TypeMv, grade: Grade, suffix: &str) -> syn::Type {
+    if ty.is_generic() {
+        grade.generic(suffix).to_()
+    } else {
+        grade.ty()
+    }
+}
+
+pub fn grade_product_expr(
+    grade: Grade,
+    lhs: TypeMv,
+    lhs_grade: Grade,
+    rhs: TypeMv,
+    rhs_grade: Grade,
+    op: ProductOp,
+) -> Option<Expr> {
+    if op.output_contains(lhs_grade, rhs_grade, grade) {
+        let op_fn = ProductOp::Grade(grade).fn_ident();
+        let lhs = access_grade(lhs, lhs_grade, quote!(self));
+        let rhs = access_grade(rhs, rhs_grade, quote!(rhs));
+        Some(parse_quote! { #lhs.#op_fn(#rhs) })
+    } else {
+        None
+    }
+}
+
 pub enum OutputExpr {
-    Zero,
-    GradeFields(Grade, Vec<(Blade, Vec<syn::Expr>)>),
-    GradeSum(Vec<syn::Expr>),
     Multivector(Vec<(Grade, Vec<syn::Expr>)>),
 }
 
 impl OutputExpr {
     pub fn expr(&self) -> syn::Expr {
         match self {
-            Self::Zero => {
-                let ty = Zero::ty();
-                parse_quote! { #ty }
-            }
-            Self::GradeFields(grade, blades) => {
-                if grade.is_scalar() {
-                    let expr = assign_field(TypeMv::Grade(*grade), blades[0].0, &blades[0].1);
-                    parse_quote!(#expr)
-                } else {
-                    let ty = grade.ident();
-                    let fields = blades
-                        .iter()
-                        .map(|(blade, ts)| assign_field(TypeMv::Grade(*grade), *blade, ts));
-                    parse_quote! {
-                        #ty {
-                            #( #fields, )*
-                        }
-                    }
-                }
-            }
-            Self::GradeSum(sum) => {
-                parse_quote! {
-                    #(#sum)+*
-                }
-            }
             Self::Multivector(grades) => {
                 let ident = Multivector::ident();
                 let algebra = grades.iter().next().unwrap().0 .1;
@@ -551,7 +427,7 @@ impl ToTokens for GradeTypes {
                 continue;
             }
 
-            let ty = grade.ident();
+            let ty = grade.ty();
 
             let fields = grade.blades().map(|blade| {
                 let f = blade.field();
@@ -579,7 +455,7 @@ impl TypeMv {
                 quote! {}
             }
             Self::Grade(grade) => {
-                let ty = grade.ident();
+                let ty = grade.ty();
                 let fields = grade.blades().map(|blade| {
                     let f = blade.field();
                     quote! { pub #f: f64, }
@@ -602,7 +478,7 @@ impl TypeMv {
 
                 quote! {
                     #[derive(Debug, Default, Copy, Clone, PartialEq)]
-                    pub struct Multivector #(#generics),* ( #(#fields)* );
+                    pub struct Multivector < #(#generics),* > ( #(#fields)* );
                 }
             }
         }
@@ -651,20 +527,66 @@ impl Grade {
 mod tests {
     use super::*;
 
+    #[allow(dead_code)]
     fn write_to_file(tokens: &impl ToTokens) {
         let contents = tokens.to_token_stream().to_string();
         let file = "../output.rs";
         std::fs::write(file, contents).unwrap();
     }
 
+    fn assert_eq_impl(expected: &ItemImpl, actual: &ItemImpl) {
+        fn assert_eq_ref<T: ToTokens>(expected: &T, actual: &T, message: &str) {
+            assert_eq!(
+                expected.to_token_stream().to_string(),
+                actual.to_token_stream().to_string(),
+                "{}",
+                message
+            );
+        }
+        fn assert_eq_slice<T: ToTokens>(expected: &[T], actual: &[T], message: &str) {
+            for (expected, actual) in expected.iter().zip(actual) {
+                assert_eq!(
+                    expected.to_token_stream().to_string(),
+                    actual.to_token_stream().to_string(),
+                    "{}",
+                    message
+                );
+            }
+        }
+
+        assert_eq_slice(&expected.attrs, &actual.attrs, "attrs");
+        assert_eq_ref(&expected.defaultness, &actual.defaultness, "default");
+        assert_eq_ref(&expected.unsafety, &actual.unsafety, "unsafety");
+        assert_eq_ref(&expected.impl_token, &actual.impl_token, "impl_token");
+
+        match (&expected.trait_, &actual.trait_) {
+            (Some(te), Some(ta)) => {
+                assert_eq_ref(&te.1, &ta.1, "trait");
+            }
+            (None, None) => {}
+            _ => panic!("ItemImpl.trait_ are not eq"),
+        }
+
+        assert_eq_slice(&expected.items, &actual.items, "items");
+
+        let (ea, eb, ec) = expected.generics.split_for_impl();
+        let (aa, ab, ac) = actual.generics.split_for_impl();
+        assert_eq_ref(&ea, &aa, "impl generics");
+        assert_eq_ref(&eb, &ab, "type generics");
+        assert_eq_ref(&ec, &ac, "where clause");
+    }
+
     #[test]
-    fn print_to_file() {
-        let algebra = Algebra::new(4, 1, 0);
+    fn mv_mv_bivector_product() {
+        let algebra = Algebra::new(3, 0, 0);
         let mv = TypeMv::Multivector(Multivector::new(algebra));
 
-        let impl_item = impl_item_for_product_op(ProductOp::Mul, mv, mv);
+        let impl_item = impl_item_for_product_op(ProductOp::Grade(algebra.grade(2)), mv, mv);
+        let expected: ItemImpl = parse_quote! {
+            impl < G0Lhs , G1Lhs , G2Lhs , G3Lhs , G0Rhs , G1Rhs , G2Rhs , G3Rhs , G2_0 , G2_1 , G2_2 , G2_3 , G2_4 , G2_5 , G2_6 , G2_7 , G2_8 , G2_9 , G2_10 > BivectorProduct < Multivector < G0Rhs , G1Rhs , G2Rhs , G3Rhs > > for Multivector < G0Lhs , G1Lhs , G2Lhs , G3Lhs > where G0Lhs : BivectorProduct < G2Rhs , Output = G2_0 > , G1Lhs : BivectorProduct < G1Rhs , Output = G2_1 > , G1Lhs : BivectorProduct < G3Rhs , Output = G2_2 > , G2Lhs : BivectorProduct < G0Rhs , Output = G2_3 > , G2Lhs : BivectorProduct < G2Rhs , Output = G2_4 > , G3Lhs : BivectorProduct < G1Rhs , Output = G2_5 > , G0Lhs : Copy , G1Lhs : Copy , G2Lhs : Copy , G3Lhs : Copy , G0Rhs : Copy , G1Rhs : Copy , G2Rhs : Copy , G3Rhs : Copy , G2_0 : std :: ops :: Add < G2_1 , Output = G2_6 > , G2_6 : std :: ops :: Add < G2_2 , Output = G2_7 > , G2_7 : std :: ops :: Add < G2_3 , Output = G2_8 > , G2_8 : std :: ops :: Add < G2_4 , Output = G2_9 > , G2_9 : std :: ops :: Add < G2_5 , Output = G2_10 > { type Output = G2_10 ; # [inline] # [allow (unused_variables)] fn bivector_prod (self , rhs : Multivector < G0Rhs , G1Rhs , G2Rhs , G3Rhs >) -> Self :: Output { self . 0 . bivector_prod (rhs . 2) + self . 1 . bivector_prod (rhs . 1) + self . 1 . bivector_prod (rhs . 3) + self . 2 . bivector_prod (rhs . 0) + self . 2 . bivector_prod (rhs . 2) + self . 3 . bivector_prod (rhs . 1) } }
+        };
 
-        write_to_file(&impl_item);
+        assert_eq_impl(&expected, &impl_item);
     }
 
     #[test]
@@ -673,14 +595,11 @@ mod tests {
         let mv = TypeMv::Multivector(Multivector::new(algebra));
 
         let impl_item = impl_item_for_product_op(ProductOp::Mul, mv, mv);
-
-        assert_eq!(
-            impl_item.to_token_stream().to_string(),
-            quote! {
+        let expected = parse_quote! {
             impl < G0Lhs , G1Lhs , G2Lhs , G0Rhs , G1Rhs , G2Rhs , G0_0 , G0_1 , G0_2 , G1_0 , G1_1 , G1_2 , G1_3 , G2_0 , G2_1 , G2_2 , G0_3 , G0_4 , G1_4 , G1_5 , G1_6 , G2_3 , G2_4 > std :: ops :: Mul < Multivector < G0Rhs , G1Rhs , G2Rhs > > for Multivector < G0Lhs , G1Lhs , G2Lhs > where G0Lhs : ScalarProduct < G0Rhs , Output = G0_0 > , G1Lhs : ScalarProduct < G1Rhs , Output = G0_1 > , G2Lhs : ScalarProduct < G2Rhs , Output = G0_2 > , G0Lhs : VectorProduct < G1Rhs , Output = G1_0 > , G1Lhs : VectorProduct < G0Rhs , Output = G1_1 > , G1Lhs : VectorProduct < G2Rhs , Output = G1_2 > , G2Lhs : VectorProduct < G1Rhs , Output = G1_3 > , G0Lhs : BivectorProduct < G2Rhs , Output = G2_0 > , G1Lhs : BivectorProduct < G1Rhs , Output = G2_1 > , G2Lhs : BivectorProduct < G0Rhs , Output = G2_2 > , G0Lhs : Copy , G1Lhs : Copy , G2Lhs : Copy , G0Rhs : Copy , G1Rhs : Copy , G2Rhs : Copy , G0_0 : std :: ops :: Add < G0_1 , Output = G0_3 > , G0_3 : std :: ops :: Add < G0_2 , Output = G0_4 > , G1_0 : std :: ops :: Add < G1_1 , Output = G1_4 > , G1_4 : std :: ops :: Add < G1_2 , Output = G1_5 > , G1_5 : std :: ops :: Add < G1_3 , Output = G1_6 > , G2_0 : std :: ops :: Add < G2_1 , Output = G2_3 > , G2_3 : std :: ops :: Add < G2_2 , Output = G2_4 > { type Output = Multivector < G0_4 , G1_6 , G2_4 > ; # [inline] # [allow (unused_variables)] fn mul (self , rhs : Multivector < G0Rhs , G1Rhs , G2Rhs >) -> Self :: Output { Multivector (self . 0 . scalar_prod (rhs . 0) + self . 1 . scalar_prod (rhs . 1) + self . 2 . scalar_prod (rhs . 2) , self . 0 . vector_prod (rhs . 1) + self . 1 . vector_prod (rhs . 0) + self . 1 . vector_prod (rhs . 2) + self . 2 . vector_prod (rhs . 1) , self . 0 . bivector_prod (rhs . 2) + self . 1 . bivector_prod (rhs . 1) + self . 2 . bivector_prod (rhs . 0)) } }
-        }
-                .to_string()
-        );
+        };
+
+        assert_eq_impl(&expected, &impl_item);
     }
 
     #[test]
@@ -691,13 +610,11 @@ mod tests {
         // <vector * vector>_1 = 0
         let impl_item =
             impl_item_for_product_op(ProductOp::Grade(algebra.grade(1)), vector, vector);
-
-        assert_eq!(
-            impl_item.to_token_stream().to_string(),
-            quote! {
+        let expected = parse_quote! {
             impl VectorProduct < Vector > for Vector { type Output = Zero ; # [inline] # [allow (unused_variables)] fn vector_prod (self , rhs : Vector) -> Self :: Output { Zero } }
-        }.to_string()
-        );
+        };
+
+        assert_eq_impl(&expected, &impl_item);
     }
 
     #[test]
@@ -709,13 +626,11 @@ mod tests {
         // <vector * bivector>_1 = vector
         let impl_item =
             impl_item_for_product_op(ProductOp::Grade(algebra.grade(1)), vector, bivector);
-
-        assert_eq!(
-            impl_item.to_token_stream().to_string(),
-            quote! {
+        let expected = parse_quote! {
             impl VectorProduct < Bivector > for Vector { type Output = Vector ; # [inline] # [allow (unused_variables)] fn vector_prod (self , rhs : Bivector) -> Self :: Output { Vector { e1 : - (self . e2 * rhs . e12) + - (self . e3 * rhs . e13) , e2 : self . e1 * rhs . e12 + - (self . e3 * rhs . e23) , e3 : self . e1 * rhs . e13 + self . e2 * rhs . e23 , } } }
-        }.to_string()
-        );
+        };
+
+        assert_eq_impl(&expected, &impl_item);
     }
 
     #[test]
@@ -724,22 +639,115 @@ mod tests {
         let vector = TypeMv::Grade(algebra.grade(1));
 
         let impl_item = impl_item_for_product_op(ProductOp::Mul, vector, vector);
-
-        // write_to_file(&impl_item);
-
-        assert_eq!(
-            impl_item.to_token_stream().to_string(),
-            quote! {
-                impl std::ops::Mul<Vector> for Vector {
-                    type Output = Multivector<f64, Zero, Bivector, Zero>;
-                    #[inline]
-                    #[allow(unused_variables)]
-                    fn mul(self, rhs: Vector) -> Self::Output {
-                        Multivector(self.scalar_prod(rhs), Zero, self.bivector_prod(rhs), Zero)
-                    }
+        let expected = parse_quote! {
+            impl std::ops::Mul<Vector> for Vector {
+                type Output = Multivector<f64, Zero, Bivector, Zero>;
+                #[inline]
+                #[allow(unused_variables)]
+                fn mul(self, rhs: Vector) -> Self::Output {
+                    Multivector(self.scalar_prod(rhs), Zero, self.bivector_prod(rhs), Zero)
                 }
             }
-            .to_string()
+        };
+
+        assert_eq_impl(&expected, &impl_item);
+    }
+
+    #[test]
+    fn scalar_scalar_geo() {
+        let algebra = Algebra::new(3, 0, 0);
+        let scalar = TypeMv::Grade(algebra.grade(0));
+
+        let impl_item = impl_item_for_product_op(ProductOp::Geometric, scalar, scalar);
+        let expected = parse_quote! {
+            impl crate::Geometric<f64> for f64 {
+                type Output = f64;
+                #[inline]
+                #[allow(unused_variables)]
+                fn geo(self, rhs: f64) -> Self::Output {
+                    self * rhs
+                }
+            }
+        };
+
+        assert_eq_impl(&expected, &impl_item);
+    }
+
+    #[test]
+    fn impl_g3() {
+        let g3 = Algebra::new(3, 0, 0).define_mv();
+        write_to_file(&g3);
+    }
+
+    #[test]
+    pub fn scalar_mv_scalar_product() {
+        let g2 = Algebra::new(2, 0, 0);
+        let scalar = g2.grade(0);
+
+        let actual = impl_item_for_product_op(
+            ProductOp::Grade(scalar),
+            TypeMv::Grade(scalar),
+            TypeMv::Multivector(g2.mv()),
         );
+
+        let expected = parse_quote! {
+            impl<G0Rhs, G1Rhs, G2Rhs, G0_0> ScalarProduct<Multivector<G0Rhs, G1Rhs, G2Rhs>> for f64
+            where
+                f64: ScalarProduct<G0Rhs, Output = G0_0>,
+                G0Rhs: Copy,
+                G1Rhs: Copy,
+                G2Rhs: Copy
+            {
+                type Output = G0_0;
+                #[inline]
+                #[allow(unused_variables)]
+                fn scalar_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs>) -> Self::Output {
+                    self.scalar_prod(rhs.0)
+                }
+            }
+        };
+
+        assert_eq_impl(&expected, &actual);
+    }
+
+    #[test]
+    pub fn scalar_mv_mul() {
+        let algebra = Algebra::new(3, 0, 0);
+        let scalar = algebra.grade(0);
+
+        let actual = impl_item_for_product_op(
+            ProductOp::Mul,
+            TypeMv::Grade(scalar),
+            TypeMv::Multivector(algebra.mv()),
+        );
+
+        let expected = parse_quote! {
+            impl<G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G2_0, G3_0>
+                std::ops::Mul<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for f64
+            where
+                f64: ScalarProduct<G0Rhs, Output = G0_0>,
+                f64: VectorProduct<G1Rhs, Output = G1_0>,
+                f64: BivectorProduct<G2Rhs, Output = G2_0>,
+                f64: TrivectorProduct<G3Rhs, Output = G3_0>,
+                G0Rhs: Copy,
+                G1Rhs: Copy,
+                G2Rhs: Copy,
+                G3Rhs: Copy
+            {
+                type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
+                #[inline]
+                #[allow(unused_variables)]
+                fn mul(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
+                    Multivector(
+                        self.scalar_prod(rhs.0),
+                        self.vector_prod(rhs.1),
+                        self.bivector_prod(rhs.2),
+                        self.trivector_prod(rhs.3)
+                    )
+                }
+            }
+        };
+
+        assert_eq_impl(&expected, &actual);
     }
 }
