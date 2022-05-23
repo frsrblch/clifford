@@ -56,7 +56,7 @@ impl Algebra {
 
         let types = TypeMv::iter(self).map(TypeMv::define);
 
-        let ops = ProductOp::iter_all(self)
+        let product_ops = ProductOp::iter_all(self)
             .flat_map(|op| TypeMv::iter(self).map(move |lhs| (op, lhs)))
             .flat_map(|(op, lhs)| TypeMv::iter(self).map(move |rhs| (op, lhs, rhs)))
             .filter_map(|(op, lhs, rhs)| impl_item_for_product_op(op, lhs, rhs));
@@ -65,7 +65,7 @@ impl Algebra {
             // #traits
             #grade_products
             #(#types)*
-            #(#ops)*
+            #(#product_ops)*
         }
     }
 }
