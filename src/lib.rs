@@ -14,17 +14,17 @@
 //!     - [ ] Meet
 //!     - [ ] Join
 //! - [ ] Homogeneous 3D - points as vectors
-//!     - [x] Antigeometric
-//!     - [x] Antiwedge
-//!     - [x] Antidot
-//!     - [x] Antireverse
-//!     - [x] Meet
-//!     - [x] Join
-//!     - [x] Weight
-//!     - [x] Bulk
-//!     - [x] IsIdeal
-//!     - [x] Projection
-//!     - [x] Antiprojection
+//!     - [ ] Antigeometric
+//!     - [ ] Antiwedge
+//!     - [ ] Antidot
+//!     - [ ] Antireverse
+//!     - [ ] Meet
+//!     - [ ] Join
+//!     - [ ] Weight
+//!     - [ ] Bulk
+//!     - [ ] IsIdeal
+//!     - [ ] Projection
+//!     - [ ] Antiprojection
 //! - [ ] Conformal
 //!     - [ ] Meet
 //!     - [ ] Join
@@ -34,10 +34,9 @@
 //! - [ ] Minkowski
 //!
 //! Types:
+//! - [x] Zero
 //! - [x] Grades
-//! - [x] Even subalgebra
-//! - [x] Odd subalgebra
-//! - [ ] Multivector
+//! - [x] Multivector
 //!
 //! Main products:
 //! - [x] Mul
@@ -54,14 +53,14 @@
 //! - [x] Wedge
 //!
 //! Sum products:
-//! - [x] Addition
-//! - [x] Subtraction
+//! - [ ] Addition
+//! - [ ] Subtraction
 //!
 //! Unary operations:
-//! - [x] Neg
-//! - [x] Left complement
-//! - [x] Right complement
-//! - [x] Reverse
+//! - [ ] Neg
+//! - [ ] Left complement
+//! - [ ] Right complement
+//! - [ ] Reverse
 //!
 //! Norm-based operations:
 //! - [ ] Inverse
