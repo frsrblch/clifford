@@ -876,10 +876,10 @@ pub enum ProductOp {
 }
 
 impl ProductOp {
-    pub fn is_local(self) -> bool {
+    pub fn is_std(self) -> bool {
         match self {
-            Self::Mul => false,
-            Self::Geometric | Self::Dot | Self::Wedge | Self::Grade(_) => true,
+            Self::Mul => true,
+            Self::Geometric | Self::Dot | Self::Wedge | Self::Grade(_) => false,
         }
     }
 
@@ -966,12 +966,6 @@ impl ProductOp {
     }
 
     pub fn output_mv(self, lhs: TypeMv, rhs: TypeMv) -> TypeMv {
-        // if matches!(lhs, TypeMv::Multivector(mv) if mv.is_generic())
-        //     || matches!(rhs, TypeMv::Multivector(mv) if mv.is_generic())
-        // {
-        //     return TypeMv::Multivector(Multivector::new(algebra));
-        // };
-
         let products = lhs
             .into_iter()
             .flat_map(|lhs| rhs.into_iter().map(move |rhs| (lhs, rhs)))
