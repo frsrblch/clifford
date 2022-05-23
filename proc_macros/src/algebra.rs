@@ -598,14 +598,6 @@ impl IntoIterator for TypeMv {
 }
 
 impl TypeMv {
-    pub fn contains(&self, product: Product) -> bool {
-        if let Some(blade) = product.blade() {
-            self.blades().any(|b| b == blade)
-        } else {
-            false
-        }
-    }
-
     pub fn algebra(self) -> Algebra {
         match self {
             Self::Zero(a) => a,
@@ -628,10 +620,6 @@ impl TypeMv {
             Self::Grade(g) => TypeMvGrades::Grade(std::iter::once(g)),
             Self::Multivector(mv) => TypeMvGrades::Multivector(mv.grades()),
         }
-    }
-
-    pub fn is_mv(self) -> bool {
-        matches!(self, TypeMv::Multivector(_))
     }
 
     pub fn is_generic(&self) -> bool {
@@ -747,10 +735,6 @@ impl Multivector {
 
     pub fn insert(&mut self, grade: Grade) {
         self.0.insert(grade);
-    }
-
-    pub fn generic_parameters(&self, suffix: &str) -> Vec<syn::Type> {
-        self.type_generics(suffix)
     }
 
     pub fn type_parameters(&self, suffix: &str) -> Vec<syn::Type> {

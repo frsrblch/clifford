@@ -1,7 +1,6 @@
 use super::algebra::*;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{quote, ToTokens};
-use syn::parse_quote;
 use syn::punctuated::Punctuated;
 use syn::token::Add;
 
@@ -92,10 +91,6 @@ impl Grade {
             _ => unimplemented!("not implemented for grade: {}", self.0),
         };
         syn::parse_str(str).unwrap()
-    }
-
-    pub fn fn_ident(&self) -> Ident {
-        syn::parse_str(&self.name().to_lowercase()).unwrap()
     }
 }
 
