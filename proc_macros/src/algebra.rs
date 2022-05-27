@@ -598,6 +598,18 @@ impl IntoIterator for TypeMv {
 }
 
 impl TypeMv {
+    pub fn is_zero(self) -> bool {
+        matches!(self, TypeMv::Zero(_))
+    }
+
+    pub fn contains(self, grade: Grade) -> bool {
+        match self {
+            TypeMv::Zero(_) => false,
+            TypeMv::Grade(g) => g == grade,
+            TypeMv::Multivector(mv) => mv.0.contains(grade),
+        }
+    }
+
     pub fn algebra(self) -> Algebra {
         match self {
             Self::Zero(a) => a,
@@ -664,12 +676,15 @@ impl Iterator for TypeMvBlades {
 }
 
 impl TypeMv {
-    pub fn is_scalar(&self) -> bool {
+    pub fn is_scalar(self) -> bool {
         matches!(self, Self::Grade(g) if g.is_scalar())
     }
 
+    pub fn is_mv(self) -> bool {
+        matches!(self, Self::Multivector(_))
+    }
+
     pub fn generics(self, suffix: &str) -> Box<dyn Iterator<Item = Ident> + '_> {
-        assert!(!suffix.is_empty());
         match self {
             Self::Multivector(mv) => Box::new(mv.1.grades().map(|g| g.generic(suffix))),
             _ => Box::new(std::iter::empty()),
@@ -704,15 +719,14 @@ impl TypeMv {
     }
 }
 
-pub fn cartesian_product<Lhs, Rhs, F>(
+pub fn cartesian_product<Lhs, Rhs>(
     lhs: Lhs,
     rhs: Rhs,
-    op: F,
+    op: ProductOp,
 ) -> impl Iterator<Item = (Blade, Blade, Product)>
 where
     Lhs: IntoIterator<Item = Blade>,
     Rhs: IntoIterator<Item = Blade> + Clone,
-    F: Fn(Blade, Blade) -> Product + Copy,
 {
     lhs.into_iter().flat_map(move |lhs| {
         rhs.clone()
@@ -915,7 +929,7 @@ impl ProductOp {
         }
     }
 
-    pub fn expr(
+    pub fn product_expr(
         self,
         lhs: TypeMv,
         lhs_blade: Blade,
@@ -940,32 +954,31 @@ impl ProductOp {
         }
     }
 
-    pub fn ty(&self) -> syn::Type {
+    pub fn trait_ty(&self) -> syn::Type {
         match self {
-            ProductOp::Mul => syn::parse_str("std::ops::Mul").unwrap(),
-            ProductOp::Geometric => syn::parse_str("crate::Geometric").unwrap(),
-            ProductOp::Dot => syn::parse_str("crate::Dot").unwrap(),
-            ProductOp::Wedge => syn::parse_str("crate::Wedge").unwrap(),
+            ProductOp::Mul => parse_quote!(std::ops::Mul),
+            ProductOp::Geometric => parse_quote!(crate::Geometric),
+            ProductOp::Dot => parse_quote!(crate::Dot),
+            ProductOp::Wedge => parse_quote!(crate::Wedge),
             ProductOp::Grade(grade) => syn::parse_str(&format!("{}Product", grade.name())).unwrap(),
         }
     }
 
-    pub fn fn_ident(&self) -> Ident {
-        let str = match self {
-            ProductOp::Mul => "mul",
-            ProductOp::Geometric => "geo",
-            ProductOp::Dot => "dot",
-            ProductOp::Wedge => "wedge",
+    pub fn trait_fn(&self) -> Ident {
+        match self {
+            ProductOp::Mul => parse_quote!(mul),
+            ProductOp::Geometric => parse_quote!(geo),
+            ProductOp::Dot => parse_quote!(dot),
+            ProductOp::Wedge => parse_quote!(wedge),
             ProductOp::Grade(grade) => {
                 let name = grade.name().to_lowercase();
                 let str = &format!("{name}_prod");
-                return Ident::new(str, Span::mixed_site());
+                Ident::new(str, Span::mixed_site())
             }
-        };
-        Ident::new(str, Span::mixed_site())
+        }
     }
 
-    pub fn output_mv(self, lhs: TypeMv, rhs: TypeMv) -> TypeMv {
+    pub fn output(self, lhs: TypeMv, rhs: TypeMv) -> TypeMv {
         let products = lhs
             .into_iter()
             .flat_map(|lhs| rhs.into_iter().map(move |rhs| (lhs, rhs)))
@@ -1008,6 +1021,211 @@ impl FnMut<(Blade, Blade)> for ProductOp {
 impl Fn<(Blade, Blade)> for ProductOp {
     extern "rust-call" fn call(&self, args: (Blade, Blade)) -> Self::Output {
         FnOnce::call_once(*self, args)
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum SumOp {
+    Add,
+    Sub,
+    GradeAdd,
+    GradeSub,
+}
+
+impl SumOp {
+    pub fn iter() -> impl Iterator<Item = Self> {
+        [Self::Add, Self::Sub, Self::GradeAdd, Self::GradeSub].into_iter()
+    }
+
+    pub fn is_sub(self) -> bool {
+        matches!(self, Self::Sub | Self::GradeSub)
+    }
+
+    pub fn is_grade_op(self) -> bool {
+        matches!(self, Self::GradeAdd | Self::GradeSub)
+    }
+
+    pub fn trait_ty(self) -> syn::Type {
+        match self {
+            Self::Add => parse_quote!(std::ops::Add),
+            Self::Sub => parse_quote!(std::ops::Sub),
+            Self::GradeAdd => parse_quote!(GradeAdd),
+            Self::GradeSub => parse_quote!(GradeSub),
+        }
+    }
+
+    pub fn trait_ty_grade(self) -> syn::Type {
+        match self {
+            Self::Add | Self::GradeAdd => parse_quote!(GradeAdd),
+            Self::Sub | Self::GradeSub => parse_quote!(GradeSub),
+        }
+    }
+
+    pub fn trait_ty_std(self) -> syn::Type {
+        match self {
+            Self::Add | Self::GradeAdd => parse_quote!(std::ops::Add),
+            Self::Sub | Self::GradeSub => parse_quote!(std::ops::Sub),
+        }
+    }
+
+    pub fn trait_fn(self) -> Ident {
+        match self {
+            Self::Add | Self::GradeAdd => parse_quote!(add),
+            Self::Sub | Self::GradeSub => parse_quote!(sub),
+        }
+    }
+
+    pub fn trait_fn_grade(self) -> Ident {
+        match self {
+            Self::Add | Self::GradeAdd => parse_quote!(add),
+            Self::Sub | Self::GradeSub => parse_quote!(sub),
+        }
+    }
+
+    pub fn trait_fn_std(self) -> syn::Type {
+        match self {
+            Self::Add | Self::GradeAdd => parse_quote!(add),
+            Self::Sub | Self::GradeSub => parse_quote!(sub),
+        }
+    }
+
+    pub fn blades(self, lhs: TypeMv, rhs: TypeMv) -> Box<dyn Iterator<Item = Product>> {
+        match self {
+            Self::Add => Box::new(
+                lhs.blades()
+                    .map(Product::Pos)
+                    .chain(rhs.blades().map(Product::Pos)),
+            ),
+            Self::Sub => Box::new(
+                lhs.blades()
+                    .map(Product::Pos)
+                    .chain(rhs.blades().map(Product::Neg)),
+            ),
+            Self::GradeAdd => {
+                assert!(
+                    !lhs.is_mv() && !rhs.is_mv(),
+                    "{:?} is not implemented for Multivectors",
+                    self
+                );
+                Box::new(
+                    lhs.blades()
+                        .map(Product::Pos)
+                        .chain(rhs.blades().map(Product::Pos)),
+                )
+            }
+            Self::GradeSub => {
+                assert!(
+                    !lhs.is_mv() && !rhs.is_mv(),
+                    "{:?} is not implemented for Multivectors",
+                    self
+                );
+                Box::new(
+                    lhs.blades()
+                        .map(Product::Pos)
+                        .chain(rhs.blades().map(Product::Neg)),
+                )
+            }
+        }
+    }
+
+    pub fn is_std(self) -> bool {
+        match self {
+            Self::Add | Self::Sub => true,
+            Self::GradeAdd | Self::GradeSub => false,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum UnaryOp {
+    Neg,
+    Reverse,
+    LeftComplement,
+    RightComplement,
+    Bulk,
+    Weight,
+}
+
+impl UnaryOp {
+    pub fn iter() -> impl Iterator<Item = Self> {
+        [
+            Self::Neg,
+            Self::Reverse,
+            Self::LeftComplement,
+            Self::RightComplement,
+            // Self::Bulk,
+            // Self::Weight,
+        ]
+        .into_iter()
+    }
+
+    pub fn is_std(self) -> bool {
+        match self {
+            Self::Neg => true,
+            _ => false,
+        }
+    }
+
+    pub fn trait_ty(&self) -> syn::Type {
+        match self {
+            Self::Neg => parse_quote! { std::ops::Neg },
+            Self::Reverse => parse_quote! { crate::Reverse },
+            Self::LeftComplement => parse_quote! { crate::LeftComplement },
+            Self::RightComplement => parse_quote! { crate::RightComplement },
+            Self::Bulk => parse_quote! { crate::Bulk },
+            Self::Weight => parse_quote! { crate::Weight },
+        }
+    }
+
+    pub fn trait_fn(&self) -> syn::Ident {
+        match self {
+            Self::Neg => parse_quote! { neg },
+            Self::Reverse => parse_quote! { rev },
+            Self::LeftComplement => parse_quote! { left_comp },
+            Self::RightComplement => parse_quote! { right_comp },
+            Self::Bulk => parse_quote! { bulk },
+            Self::Weight => parse_quote! { weight },
+        }
+    }
+
+    pub fn call(&self, blade: Blade) -> Product {
+        match self {
+            Self::Neg => Product::Neg(blade),
+            Self::Reverse => {
+                let grade = blade.grade().0;
+                if (grade / 2) % 2 == 0 {
+                    Product::Pos(blade)
+                } else {
+                    Product::Neg(blade)
+                }
+            }
+            Self::LeftComplement => {
+                let antiscalar = blade.1.pseudoscalar();
+                let set = antiscalar.0 .0 ^ blade.0 .0;
+                let complement = blade.1.blade(set);
+                (complement * blade).with_blade(complement)
+            }
+            Self::RightComplement => {
+                let antiscalar = blade.1.pseudoscalar();
+                let set = antiscalar.0 .0 ^ blade.0 .0;
+                let complement = blade.1.blade(set);
+                (blade * complement).with_blade(complement)
+            }
+            Self::Bulk => {
+                let null_blade = blade.1.null_basis().unwrap();
+                match blade.wedge(null_blade) {
+                    Product::Zero => Product::Zero,
+                    _ => Product::Pos(blade),
+                }
+            }
+            Self::Weight => {
+                let null_blade = blade.1.null_basis().unwrap();
+                match blade.wedge(null_blade) {
+                    Product::Zero => Product::Pos(blade),
+                    _ => Product::Zero,
+                }
+            }
+        }
     }
 }
 

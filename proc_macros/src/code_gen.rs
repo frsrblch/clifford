@@ -344,8 +344,8 @@ impl ToTokens for ImplProductOp {
 
         let ty = self.lhs.type_ident();
         let rhs_ty = self.rhs.type_ident();
-        let trait_ty = self.op.ty();
-        let trait_fn = self.op.fn_ident();
+        let trait_ty = self.op.trait_ty();
+        let trait_fn = self.op.trait_fn();
 
         let output = self.output();
 
