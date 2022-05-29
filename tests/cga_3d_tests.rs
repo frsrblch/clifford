@@ -17,7 +17,7 @@ fn bases() {
     assert_eq!(-1., N.dot(N_BAR));
 
     assert_eq!(e_neg - e_pos, N_BAR); // 13.5
-    assert_eq!(0.5 * (e_neg + e_pos), N); // 13.5
+    assert_eq!((e_neg + e_pos) / 2., N); // 13.5
     assert_eq!(e_pos, N - 0.5 * N_BAR); // 13.6
     assert_eq!(e_neg, N + 0.5 * N_BAR); // 13.6
 }
@@ -27,7 +27,7 @@ fn point_distance() {
     let a = N;
     let b = point(3., 4., 0.);
 
-    assert_eq!(-0.5 * 25., a.dot(b)); // 13.4
+    assert_eq!(-12.5, a.dot(b)); // 13.4
     assert_eq!(0., b.dot(b));
 }
 

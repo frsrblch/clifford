@@ -40,6 +40,7 @@
 //!
 //! Main products:
 //! - [x] Mul
+//! - [x] Div
 //! - [x] Geometric
 //! - [ ] Commutator
 //! - [ ] Sandwich

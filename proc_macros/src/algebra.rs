@@ -603,6 +603,7 @@ impl IntoIterator for TypeMv {
 }
 
 impl TypeMv {
+    #[allow(dead_code)]
     pub fn is_zero(self) -> bool {
         matches!(self, TypeMv::Zero(_))
     }
@@ -892,12 +893,13 @@ pub enum ProductOp {
     Dot,
     Wedge,
     Grade(Grade),
+    Div,
 }
 
 impl ProductOp {
     pub fn is_std(self) -> bool {
         match self {
-            Self::Mul => true,
+            Self::Mul | Self::Div => true,
             Self::Geometric | Self::Dot | Self::Wedge | Self::Grade(_) => false,
         }
     }
@@ -914,7 +916,14 @@ impl ProductOp {
     }
 
     pub fn iter() -> impl Iterator<Item = Self> {
-        [Self::Mul, Self::Geometric, Self::Dot, Self::Wedge].into_iter()
+        [
+            Self::Mul,
+            Self::Geometric,
+            Self::Dot,
+            Self::Wedge,
+            Self::Div,
+        ]
+        .into_iter()
     }
 
     pub fn iter_all(algebra: Algebra) -> impl Iterator<Item = Self> {
@@ -930,6 +939,10 @@ impl ProductOp {
             ProductOp::Grade(grade) => {
                 let product = lhs * rhs;
                 product.filter(|b| b.grade() == grade)
+            }
+            ProductOp::Div => {
+                // debug_assert!(rhs.grade().is_scalar());
+                Product::Pos(lhs)
             }
         }
     }
@@ -948,14 +961,19 @@ impl ProductOp {
             return None;
         }
 
+        let s = match self {
+            Self::Div => quote!(/),
+            _ => quote!(*),
+        };
+
         if product.is_pos() {
             let lhs = access_field(lhs, lhs_blade, quote!(self));
             let rhs = access_field(rhs, rhs_blade, quote!(rhs));
-            Some(parse_quote! { #lhs * #rhs })
+            Some(parse_quote! { #lhs #s #rhs })
         } else {
             let lhs = access_field(lhs, lhs_blade, quote!(self));
             let rhs = access_field(rhs, rhs_blade, quote!(rhs));
-            Some(parse_quote! { -(#lhs * #rhs) })
+            Some(parse_quote! { -(#lhs #s #rhs) })
         }
     }
 
@@ -966,6 +984,7 @@ impl ProductOp {
             ProductOp::Dot => parse_quote!(crate::Dot),
             ProductOp::Wedge => parse_quote!(crate::Wedge),
             ProductOp::Grade(grade) => syn::parse_str(&format!("{}Product", grade.name())).unwrap(),
+            ProductOp::Div => parse_quote!(std::ops::Div),
         }
     }
 
@@ -980,6 +999,7 @@ impl ProductOp {
                 let str = &format!("{name}_prod");
                 Ident::new(str, Span::mixed_site())
             }
+            ProductOp::Div => parse_quote!(div),
         }
     }
 

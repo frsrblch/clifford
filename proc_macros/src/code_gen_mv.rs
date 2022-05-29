@@ -100,15 +100,6 @@ impl UnaryOp {
             return None;
         }
 
-        let trait_ty = self.trait_ty();
-        let trait_fn = self.trait_fn();
-        let ty = type_mv.ty_with_suffix("");
-        let output = self.output(type_mv);
-        let output_ty = output.ty_with_suffix(OUT_SUFFIX);
-
-        let generics = self.generics(type_mv);
-        let expr = self.expr(type_mv);
-
         Some(ItemImpl {
             attrs: vec![],
             defaultness: None,
@@ -190,7 +181,6 @@ impl UnaryOp {
 
     fn expr(self, ty: TypeMv) -> Expr {
         let output = self.output(ty);
-        let output_ty = output.ty_with_suffix(OUT_SUFFIX);
         let trait_ty = self.trait_ty();
         let trait_fn = self.trait_fn();
         match output {
@@ -284,8 +274,6 @@ fn impl_item_for_sum_op(op: SumOp, lhs: TypeMv, rhs: TypeMv) -> Option<ItemImpl>
 fn sum_generics(op: SumOp, lhs: TypeMv, rhs: TypeMv) -> Generics {
     let trait_ty = op.trait_ty_grade();
 
-    let output = op.output(lhs, rhs);
-
     let mut generics = Generics::default();
 
     if lhs.is_generic() {
@@ -341,6 +329,10 @@ impl SumOp {
 
 fn impl_item_for_product_op(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> Option<ItemImpl> {
     if op.is_std() && lhs.is_scalar() && rhs.is_scalar() {
+        return None;
+    }
+
+    if matches!(op, ProductOp::Div) && !rhs.is_scalar() {
         return None;
     }
 
@@ -1356,18 +1348,18 @@ mod tests {
             impl<G0Lhs, G1Lhs, G2Lhs, G0Rhs, G1Rhs, G2Rhs, G0Out, G1Out, G2Out> std::ops::Add<Multivector<G0Rhs, G1Rhs, G2Rhs>>
             for Multivector<G0Lhs, G1Lhs, G2Lhs>
             where
-                G0Lhs: GradeAdd<G0Rhs, Output = G0Out>,
-                G1Lhs: GradeAdd<G1Rhs, Output = G1Out>,
-                G2Lhs: GradeAdd<G2Rhs, Output = G2Out>
+                G0Lhs: crate::GradeAdd<G0Rhs, Output = G0Out>,
+                G1Lhs: crate::GradeAdd<G1Rhs, Output = G1Out>,
+                G2Lhs: crate::GradeAdd<G2Rhs, Output = G2Out>
             {
                 type Output = Multivector<G0Out, G1Out, G2Out>;
                 #[inline]
                 #[allow(unused_variables)]
                 fn add(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs>) -> Self::Output {
                     Multivector(
-                        GradeAdd::add(self.0, rhs.0),
-                        GradeAdd::add(self.1, rhs.1),
-                        GradeAdd::add(self.2, rhs.2)
+                        crate::GradeAdd::add(self.0, rhs.0),
+                        crate::GradeAdd::add(self.1, rhs.1),
+                        crate::GradeAdd::add(self.2, rhs.2)
                     )
                 }
             }
@@ -1387,7 +1379,7 @@ mod tests {
             impl<G0Lhs, G1Lhs, G2Lhs, G1Out> std::ops::Add<Vector>
             for Multivector<G0Lhs, G1Lhs, G2Lhs>
             where
-                G1Lhs: GradeAdd<Vector, Output = G1Out>
+                G1Lhs: crate::GradeAdd<Vector, Output = G1Out>
             {
                 type Output = Multivector<G0Lhs, G1Out, G2Lhs>;
                 #[inline]
@@ -1395,7 +1387,7 @@ mod tests {
                 fn add(self, rhs: Vector) -> Self::Output {
                     Multivector(
                         self.0,
-                        GradeAdd::add(self.1, rhs),
+                        crate::GradeAdd::add(self.1, rhs),
                         self.2
                     )
                 }
@@ -1425,7 +1417,7 @@ mod tests {
         let actual = impl_item_for_sum_op(SumOp::GradeAdd, vector, vector).unwrap();
 
         let expected = parse_quote! {
-            impl GradeAdd<Vector> for Vector {
+            impl crate::GradeAdd<Vector> for Vector {
                 type Output = Vector;
                 #[inline]
                 #[allow(unused_variables)]
@@ -1472,7 +1464,7 @@ mod tests {
         let actual = impl_item_for_sum_op(SumOp::GradeSub, zero, vector).unwrap();
 
         let expected = parse_quote! {
-            impl GradeSub<Vector> for Zero {
+            impl crate::GradeSub<Vector> for Zero {
                 type Output = Vector;
                 #[inline]
                 #[allow(unused_variables)]
@@ -1579,7 +1571,7 @@ mod tests {
         let expected = parse_quote! {
             impl<G0Rhs, G1Rhs, G2Rhs, G0Out, G1Out, G2Out> std::ops::Sub<Multivector<G0Rhs, G1Rhs, G2Rhs>> for f64
             where
-                f64: GradeSub<G0Rhs, Output = G0Out>,
+                f64: crate::GradeSub<G0Rhs, Output = G0Out>,
                 G1Rhs: std::ops::Neg<Output = G1Out>,
                 G2Rhs: std::ops::Neg<Output = G2Out>
             {
@@ -1587,7 +1579,7 @@ mod tests {
                 #[inline]
                 #[allow(unused_variables)]
                 fn sub(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs>) -> Self::Output {
-                    Multivector(GradeSub::sub(self, rhs.0), -rhs.1, -rhs.2)
+                    Multivector(crate::GradeSub::sub(self, rhs.0), -rhs.1, -rhs.2)
                 }
             }
         };
