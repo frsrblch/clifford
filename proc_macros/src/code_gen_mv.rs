@@ -6,20 +6,33 @@ use std::iter::once;
 use syn::token::{Brace, For, Impl};
 use syn::{parse_quote, Expr, GenericParam, Generics, ImplItem, ItemImpl, WherePredicate};
 
-trait To_ {
-    fn to_<U: syn::parse::Parse>(&self) -> U;
+// TODO refactor
+// TODO fn Grade::new
+// TODO Multivector::grade(self) -> Grade for
+// TODO sandwich product that returns identical grades (this is challenging for multivectors)
+//          perhaps the individual grade products should be a generic GradeProduct<Rhs, Grade> trate
+//          e.g.:
+//              Zero: GradeProduct<Vector, Vector, Output = Zero>
+//              f64: GradeProduct<Vector, Vector, Output = Vector>
+//              Bivector: GradeProduct<Vector, Vector, Output = Vector>
+//          perhaps have a GradeFilter<Input>
+//              Zero: GradeFilter<_, Output = Zero>,
+//              Vector: GradeFilter<Vector, Output = Vector>,
+//              allows the compiler to eliminate calculations that are filtered out
+
+trait Convert {
+    fn convert<U: syn::parse::Parse>(&self) -> U;
 }
 
-impl<T: ToTokens> To_ for T {
-    fn to_<U: syn::parse::Parse>(&self) -> U {
-        let tokens = self.to_token_stream();
-        parse_quote!(#tokens)
+impl<T: ToTokens> Convert for T {
+    fn convert<U: syn::parse::Parse>(&self) -> U {
+        syn::parse2(self.to_token_stream()).unwrap()
     }
 }
 
 impl Algebra {
     pub fn define_mv(self) -> TokenStream {
-        let _traits = if self.is_homogenous() {
+        let traits = if self.is_homogenous() {
             quote! {
                 pub use crate::{
                     Dot,
@@ -71,7 +84,7 @@ impl Algebra {
             .filter_map(|(op, ty)| op.impl_item(ty));
 
         quote! {
-            // #traits
+            #traits
             #grade_products
             #(#types)*
             #(#sum_ops)*
@@ -102,7 +115,7 @@ impl UnaryOp {
             unsafety: None,
             impl_token: Impl::default(),
             generics: self.generics(type_mv),
-            trait_: Some((None, self.trait_ty().to_(), For::default())),
+            trait_: Some((None, self.trait_ty().convert(), For::default())),
             self_ty: Box::new(type_mv.ty_with_suffix("")),
             brace_token: Brace::default(),
             items: {
@@ -130,12 +143,12 @@ impl UnaryOp {
         let mut generics = Generics::default();
         let output = self.output(ty);
 
-        let input_params = ty.generics("").map::<GenericParam, _>(|ty| ty.to_());
+        let input_params = ty.generics("").map::<GenericParam, _>(|ty| ty.convert());
         generics.params.extend(input_params);
 
         let output_params = output
             .generics(OUT_SUFFIX)
-            .map::<GenericParam, _>(|ty| ty.to_());
+            .map::<GenericParam, _>(|ty| ty.convert());
         generics.params.extend(output_params);
 
         let trait_ty = self.trait_ty();
@@ -276,12 +289,16 @@ fn sum_generics(op: SumOp, lhs: TypeMv, rhs: TypeMv) -> Generics {
     let mut generics = Generics::default();
 
     if lhs.is_generic() {
-        let params = lhs.generics(LHS_SUFFIX).map(|i| i.to_::<GenericParam>());
+        let params = lhs
+            .generics(LHS_SUFFIX)
+            .map(|i| i.convert::<GenericParam>());
         generics.params.extend(params);
     }
 
     if rhs.is_generic() {
-        let params = rhs.generics(RHS_SUFFIX).map(|i| i.to_::<GenericParam>());
+        let params = rhs
+            .generics(RHS_SUFFIX)
+            .map(|i| i.convert::<GenericParam>());
         generics.params.extend(params);
     }
 
@@ -289,8 +306,8 @@ fn sum_generics(op: SumOp, lhs: TypeMv, rhs: TypeMv) -> Generics {
         let params = lhs
             .algebra()
             .grades()
-            .filter_map(|grade| dbg!(sum_output_generic_new(op, grade, lhs, rhs)))
-            .map(|i| i.to_::<GenericParam>());
+            .filter_map(|grade| sum_output_generic_new(op, grade, lhs, rhs))
+            .map(|i| i.convert::<GenericParam>());
         generics.params.extend(params);
 
         let predicates = lhs
@@ -361,7 +378,7 @@ pub fn generics(lhs: TypeMv, rhs: TypeMv, op: ProductOp) -> syn::Generics {
     let mut sum_bounds = Vec::<syn::WherePredicate>::default();
 
     for grade in lhs.generics(LHS_SUFFIX).chain(rhs.generics(RHS_SUFFIX)) {
-        generics.params.push(grade.to_());
+        generics.params.push(grade.convert());
         copy_bounds.push(parse_quote! { #grade: Copy });
     }
 
@@ -370,7 +387,7 @@ pub fn generics(lhs: TypeMv, rhs: TypeMv, op: ProductOp) -> syn::Generics {
         let sum = intermediate_and_sum_types(op, lhs, rhs, grade);
 
         for ident in (0..sum).into_iter().map(|n| grade.generic_n(n)) {
-            generics.params.push(ident.to_());
+            generics.params.push(ident.convert());
         }
 
         let op_trait = ProductOp::Grade(grade).trait_ty();
@@ -435,7 +452,7 @@ fn output_type_item(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> ImplItem {
         TypeMv::Zero(_) => Zero::ty(),
         TypeMv::Grade(grade) => {
             if generic {
-                last_generic(op, lhs, rhs, grade).to_()
+                last_generic(op, lhs, rhs, grade).convert()
             } else {
                 grade.ty()
             }
@@ -697,7 +714,7 @@ pub fn mv_expr(mv: Multivector, lhs: TypeMv, rhs: TypeMv, op: ProductOp) -> Expr
 
 fn grade_type(ty: TypeMv, grade: Grade, suffix: &str) -> syn::Type {
     if ty.is_generic() {
-        grade.generic(suffix).to_()
+        grade.generic(suffix).convert()
     } else {
         grade.ty()
     }
@@ -1578,9 +1595,9 @@ mod tests {
         assert_eq_impl(&expected, &actual);
     }
 
-    #[test]
-    fn write_algebra_to_file() {
-        let algebra = Algebra::new(2, 0, 0).define_mv();
-        write_to_file(&algebra);
-    }
+    // #[test]
+    // fn write_algebra_to_file() {
+    //     let algebra = Algebra::new(4, 1, 0).define_mv();
+    //     write_to_file(&algebra);
+    // }
 }

@@ -2,6 +2,11 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 use syn::parse_quote;
 
+// TODO Div<f64>
+// TODO reconfigure to accommodate larger geometries (BladeSet, GradeSet, etc)
+// TODO pass in specialized grade types (e.g., IdealPoints (pga), DualPlanes (cga))
+// TODO pass in alternate blade symbols?
+
 pub struct Zero;
 
 impl Zero {
@@ -1049,15 +1054,15 @@ impl SumOp {
         match self {
             Self::Add => parse_quote!(std::ops::Add),
             Self::Sub => parse_quote!(std::ops::Sub),
-            Self::GradeAdd => parse_quote!(GradeAdd),
-            Self::GradeSub => parse_quote!(GradeSub),
+            Self::GradeAdd => parse_quote!(crate::GradeAdd),
+            Self::GradeSub => parse_quote!(crate::GradeSub),
         }
     }
 
     pub fn trait_ty_grade(self) -> syn::Type {
         match self {
-            Self::Add | Self::GradeAdd => parse_quote!(GradeAdd),
-            Self::Sub | Self::GradeSub => parse_quote!(GradeSub),
+            Self::Add | Self::GradeAdd => parse_quote!(crate::GradeAdd),
+            Self::Sub | Self::GradeSub => parse_quote!(crate::GradeSub),
         }
     }
 
@@ -1142,8 +1147,8 @@ pub enum UnaryOp {
     Reverse,
     LeftComplement,
     RightComplement,
-    Bulk,
-    Weight,
+    // Bulk,
+    // Weight,
 }
 
 impl UnaryOp {
@@ -1172,8 +1177,8 @@ impl UnaryOp {
             Self::Reverse => parse_quote! { crate::Reverse },
             Self::LeftComplement => parse_quote! { crate::LeftComplement },
             Self::RightComplement => parse_quote! { crate::RightComplement },
-            Self::Bulk => parse_quote! { crate::Bulk },
-            Self::Weight => parse_quote! { crate::Weight },
+            // Self::Bulk => parse_quote! { crate::Bulk },
+            // Self::Weight => parse_quote! { crate::Weight },
         }
     }
 
@@ -1183,8 +1188,8 @@ impl UnaryOp {
             Self::Reverse => parse_quote! { rev },
             Self::LeftComplement => parse_quote! { left_comp },
             Self::RightComplement => parse_quote! { right_comp },
-            Self::Bulk => parse_quote! { bulk },
-            Self::Weight => parse_quote! { weight },
+            // Self::Bulk => parse_quote! { bulk },
+            // Self::Weight => parse_quote! { weight },
         }
     }
 
@@ -1210,21 +1215,20 @@ impl UnaryOp {
                 let set = antiscalar.0 .0 ^ blade.0 .0;
                 let complement = blade.1.blade(set);
                 (blade * complement).with_blade(complement)
-            }
-            Self::Bulk => {
-                let null_blade = blade.1.null_basis().unwrap();
-                match blade.wedge(null_blade) {
-                    Product::Zero => Product::Zero,
-                    _ => Product::Pos(blade),
-                }
-            }
-            Self::Weight => {
-                let null_blade = blade.1.null_basis().unwrap();
-                match blade.wedge(null_blade) {
-                    Product::Zero => Product::Pos(blade),
-                    _ => Product::Zero,
-                }
-            }
+            } // Self::Bulk => {
+              //     let null_blade = blade.1.null_basis().unwrap();
+              //     match blade.wedge(null_blade) {
+              //         Product::Zero => Product::Zero,
+              //         _ => Product::Pos(blade),
+              //     }
+              // }
+              // Self::Weight => {
+              //     let null_blade = blade.1.null_basis().unwrap();
+              //     match blade.wedge(null_blade) {
+              //         Product::Zero => Product::Pos(blade),
+              //         _ => Product::Zero,
+              //     }
+              // }
         }
     }
 }

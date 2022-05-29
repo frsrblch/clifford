@@ -1,4 +1,10 @@
-proc_macros::clifford!(4, 1, 0);
+proc_macros::clifford_mv!(4, 1, 0);
+
+impl Vector {
+    pub const fn new(e1: f64, e2: f64, e3: f64, e4: f64, e5: f64) -> Vector {
+        Vector { e1, e2, e3, e4, e5 }
+    }
+}
 
 /// Point at the origin
 pub const N: Vector = Vector::new(0., 0., 0., 0.5, 0.5);
@@ -22,16 +28,16 @@ fn vector_test() {
     assert_eq!(expected, actual);
 }
 
-trait IsFlat {
-    fn is_flat(self) -> bool;
+pub trait IsFlat {
+    fn is_flat(&self) -> bool;
 }
 
 impl<T, U> IsFlat for T
 where
-    T: crate::Wedge<Vector, Output = U>,
+    T: crate::Wedge<Vector, Output = U> + Copy,
     U: Default + PartialEq,
 {
-    fn is_flat(self) -> bool {
+    fn is_flat(&self) -> bool {
         self.wedge(N_BAR) == U::default()
     }
 }

@@ -53,14 +53,14 @@
 //! - [x] Wedge
 //!
 //! Sum products:
-//! - [ ] Addition
-//! - [ ] Subtraction
+//! - [x] Addition
+//! - [x] Subtraction
 //!
 //! Unary operations:
-//! - [ ] Neg
-//! - [ ] Left complement
-//! - [ ] Right complement
-//! - [ ] Reverse
+//! - [x] Neg
+//! - [x] Left complement
+//! - [x] Right complement
+//! - [x] Reverse
 //!
 //! Norm-based operations:
 //! - [ ] Inverse
@@ -71,10 +71,10 @@
 // TODO add efficient implementation for null cone geometries
 // TODO consider grade enum model with dynamic multivectors (e.g., BTreeMap<Grade, f64>)?
 
-pub mod va_3d_manual;
-
-#[cfg(feature = "va_3d_mv")]
-pub mod va_3d_mv;
+// pub mod va_3d_manual;
+//
+// #[cfg(feature = "va_3d_mv")]
+// pub mod va_3d_mv;
 
 // #[cfg(feature = "va_3d")]
 // pub mod va_3d;
@@ -84,60 +84,70 @@ pub mod va_3d_mv;
 //
 // #[cfg(feature = "cga_2d")]
 // pub mod cga_2d;
-//
-// #[cfg(feature = "cga_3d")]
-// pub mod cga_3d;
+
+#[cfg(feature = "cga_3d")]
+pub mod cga_3d;
 
 pub use proc_macros::clifford;
+
+pub trait GradeAdd<Rhs> {
+    type Output;
+    fn add(self, rhs: Rhs) -> Self::Output;
+}
+
+pub trait GradeSub<Rhs> {
+    type Output;
+    fn sub(self, rhs: Rhs) -> Self::Output;
+}
 
 pub trait Geometric<Rhs> {
     type Output;
     fn geo(self, rhs: Rhs) -> Self::Output;
 }
 
-impl Geometric<f64> for f64 {
-    type Output = f64;
-    fn geo(self, rhs: Self) -> Self {
-        self * rhs
-    }
-}
+// impl Geometric<f64> for f64 {
+//     type Output = f64;
+//     fn geo(self, rhs: Self) -> Self {
+//         self * rhs
+//     }
+// }
 
 pub trait Wedge<Rhs> {
     type Output;
     fn wedge(self, rhs: Rhs) -> Self::Output;
 }
 
-impl Wedge<f64> for f64 {
-    type Output = f64;
-    fn wedge(self, rhs: Self) -> Self {
-        self * rhs
-    }
-}
+// impl Wedge<f64> for f64 {
+//     type Output = f64;
+//     fn wedge(self, rhs: Self) -> Self {
+//         self * rhs
+//     }
+// }
 
 pub trait Dot<Rhs> {
     type Output;
     fn dot(self, rhs: Rhs) -> Self::Output;
 }
 
-impl Dot<f64> for f64 {
-    type Output = f64;
-    fn dot(self, rhs: Self) -> Self {
-        self * rhs
-    }
-}
+// impl Dot<f64> for f64 {
+//     type Output = f64;
+//     fn dot(self, rhs: Self) -> Self {
+//         self * rhs
+//     }
+// }
 
 pub trait Sandwich<Rhs> {
     type Output;
     fn sandwich(self, rhs: Rhs) -> Self::Output;
 }
 
-impl Sandwich<f64> for f64 {
-    type Output = f64;
-
-    fn sandwich(self, rhs: f64) -> Self::Output {
-        rhs
-    }
-}
+// impl Sandwich<f64> for f64 {
+//     type Output = f64;
+//
+//     fn sandwich(self, rhs: f64) -> Self::Output {
+//         rhs
+//     }
+// }
 
 pub trait Commutator<Rhs> {
     type Output;
@@ -149,12 +159,12 @@ pub trait Reverse {
     fn rev(self) -> Self::Output;
 }
 
-impl Reverse for f64 {
-    type Output = f64;
-    fn rev(self) -> Self {
-        self
-    }
-}
+// impl Reverse for f64 {
+//     type Output = f64;
+//     fn rev(self) -> Self {
+//         self
+//     }
+// }
 
 pub trait LeftComplement {
     type Output;
@@ -242,7 +252,7 @@ where
 
 pub trait Antidot<Rhs> {
     type Output;
-    fn antiwedge(self, rhs: Rhs) -> Self::Output;
+    fn antidot(self, rhs: Rhs) -> Self::Output;
 }
 
 impl<Lhs, Rhs, LhsComp, RhsComp, OutputComp> Antidot<Rhs> for Lhs
@@ -255,7 +265,7 @@ where
     type Output = OutputComp::Output;
 
     #[inline]
-    fn antiwedge(self, rhs: Rhs) -> Self::Output {
+    fn antidot(self, rhs: Rhs) -> Self::Output {
         let lhs = self.left_comp();
         let rhs = rhs.left_comp();
         let output_complement = lhs.dot(rhs);

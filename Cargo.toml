@@ -8,13 +8,13 @@ edition = "2021"
 [dependencies]
 proc_macros = { path = "./proc_macros" }
 
-#[dev-dependencies]
-#criterion = "0.3.5"
+[dev-dependencies]
+criterion = "0.3.5"
 
-#[[bench]]
-#name = "mul"
-#harness = false
-#required-features = ["pga_3d"]
+[[bench]]
+name = "mul"
+harness = false
+required-features = ["cga_3d"]
 
 [features]
 va_3d = []
