@@ -69,6 +69,8 @@ impl Algebra {
 
         let types = TypeMv::iter(self).map(TypeMv::define);
 
+        let type_impls = TypeMv::iter(self).flat_map(TypeMv::impl_item);
+
         let sum_ops = SumOp::iter()
             .flat_map(|op| TypeMv::iter(self).map(move |lhs| (op, lhs)))
             .flat_map(|(op, lhs)| TypeMv::iter(self).map(move |rhs| (op, lhs, rhs)))
@@ -87,6 +89,7 @@ impl Algebra {
             #traits
             #grade_products
             #(#types)*
+            #(#type_impls)*
             #(#sum_ops)*
             #(#product_ops)*
             #(#unary_ops)*
@@ -894,6 +897,38 @@ impl TypeMv {
             }
         }
     }
+
+    fn impl_item(self) -> Option<ItemImpl> {
+        self.new_fn().map(|item| {
+            let ty = self.ty_with_suffix("");
+            parse_quote!(
+                impl #ty {
+                    #item
+                }
+            )
+        })
+    }
+
+    fn new_fn(self) -> Option<ImplItem> {
+        match self {
+            TypeMv::Grade(grade) if !grade.is_scalar() => {
+                let ty = grade.ty();
+                let fields = grade.blades().map(|b| {
+                    let f = b.field();
+                    quote! { #f: f64 }
+                });
+                let expr_fields = grade.blades().map(|b| b.field());
+                Some(parse_quote! {
+                    pub const fn new(#(#fields),*) -> #ty {
+                        #ty {
+                            #(#expr_fields,)*
+                        }
+                    }
+                })
+            }
+            _ => None,
+        }
+    }
 }
 
 impl Multivector {
@@ -1585,6 +1620,24 @@ mod tests {
         };
 
         assert_eq_impl(&expected, &actual);
+    }
+
+    #[test]
+    fn vector_new() {
+        let algebra = Algebra::new(2, 0, 0);
+        let vector = TypeMv::Grade(algebra.grade(1));
+
+        let actual = vector.new_fn().unwrap();
+        let expected = parse_quote! {
+            pub const fn new(e1: f64, e2: f64) -> Vector {
+                Vector {
+                    e1,
+                    e2,
+                }
+            }
+        };
+
+        assert_eq_ref(&expected, &actual, "new fn");
     }
 
     // #[test]

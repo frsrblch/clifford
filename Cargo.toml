@@ -16,6 +16,10 @@ name = "mul"
 harness = false
 required-features = ["cga_3d"]
 
+[[test]]
+name = "cga_3d_tests"
+required-features = ["cga_3d"]
+
 [features]
 va_3d = []
 pga_3d = []

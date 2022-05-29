@@ -1,11 +1,5 @@
 proc_macros::clifford_mv!(4, 1, 0);
 
-impl Vector {
-    pub const fn new(e1: f64, e2: f64, e3: f64, e4: f64, e5: f64) -> Vector {
-        Vector { e1, e2, e3, e4, e5 }
-    }
-}
-
 /// Point at the origin
 pub const N: Vector = Vector::new(0., 0., 0., 0.5, 0.5);
 
