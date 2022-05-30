@@ -344,6 +344,18 @@ impl Grade {
     pub fn is_odd(self) -> bool {
         self.0 % 2 == 1
     }
+
+    pub fn generic(&self, suffix: &str) -> Ident {
+        Ident::new(&format!("G{}{suffix}", self.0), Span::mixed_site())
+    }
+
+    pub fn generic_n(&self, n: usize) -> Ident {
+        Ident::new(&format!("G{}_{n}", self.0), Span::mixed_site())
+    }
+
+    pub fn mv_field(&self) -> syn::Member {
+        syn::Member::Unnamed(syn::Index::from(self.0 as usize))
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -746,6 +758,10 @@ where
 pub struct Multivector(pub GradeSet, pub Algebra);
 
 impl Multivector {
+    pub fn ident() -> syn::Ident {
+        syn::parse_str("Multivector").unwrap()
+    }
+
     pub fn new(algebra: Algebra) -> Self {
         Self(GradeSet::default(), algebra)
     }

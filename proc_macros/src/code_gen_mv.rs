@@ -4,7 +4,9 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::{quote, ToTokens};
 use std::iter::once;
 use syn::token::{Brace, For, Impl};
-use syn::{parse_quote, Expr, GenericParam, Generics, ImplItem, ItemImpl, WherePredicate};
+use syn::{
+    parse_quote, Expr, GenericParam, Generics, ImplItem, ItemImpl, ItemStruct, WherePredicate,
+};
 
 // TODO refactor
 // TODO fn impl_const(&ItemImpl) -> TokenStream
@@ -66,11 +68,23 @@ impl Algebra {
             }
         };
 
-        let grade_products = GradeProducts(self);
+        let grade_products = self.grades().map(|grade| {
+            let trait_ident = Ident::new(&format!("{}Product", grade.name()), Span::mixed_site());
+            let trait_fn = Ident::new(
+                &format!("{}_prod", grade.name().to_lowercase()),
+                Span::mixed_site(),
+            );
+            quote! {
+                pub trait #trait_ident<Rhs> {
+                    type Output;
+                    fn #trait_fn(self, rhs: Rhs) -> Self::Output;
+                }
+            }
+        });
 
-        let types = TypeMv::iter(self).map(TypeMv::define);
+        let types = TypeMv::iter(self).filter_map(TypeMv::define);
 
-        let type_impls = TypeMv::iter(self).flat_map(TypeMv::impl_item);
+        let type_impls = TypeMv::iter(self).filter_map(TypeMv::impl_item);
 
         let sum_ops = SumOp::iter()
             .flat_map(|op| TypeMv::iter(self).map(move |lhs| (op, lhs)))
@@ -88,7 +102,7 @@ impl Algebra {
 
         quote! {
             #traits
-            #grade_products
+            #(#grade_products)*
             #(#types)*
             #(#type_impls)*
             #(#sum_ops)*
@@ -232,7 +246,6 @@ impl UnaryOp {
                             _ => None,
                         }
                     });
-
                     quote!( #(#exprs)+* )
                 });
                 parse_quote! {
@@ -267,8 +280,8 @@ impl SumOp {
             self_ty: Box::new(lhs.ty_with_suffix(LHS_SUFFIX)),
             brace_token: Brace::default(),
             items: {
-                let output_type = sum_output_type_item(self, lhs, rhs);
-                let trait_fn = sum_trait_fn_item(self, lhs, rhs);
+                let output_type = self.output_type_item(lhs, rhs);
+                let trait_fn = self.fn_item(lhs, rhs);
                 vec![output_type, trait_fn]
             },
         })
@@ -301,7 +314,7 @@ impl SumOp {
             let params = lhs
                 .algebra()
                 .grades()
-                .filter_map(|grade| sum_output_generic_new(self, grade, lhs, rhs))
+                .filter_map(|grade| self.new_output_generic(grade, lhs, rhs))
                 .map(|i| i.convert::<GenericParam>());
             generics.params.extend(params);
 
@@ -311,11 +324,11 @@ impl SumOp {
                 .filter_map::<WherePredicate, _>(|grade| {
                     if self.is_sub() && !lhs.contains(grade) {
                         let neg_ty = UnaryOp::Neg.trait_ty();
-                        let out = sum_output_generic_new(self, grade, lhs, rhs)?;
+                        let out = self.new_output_generic(grade, lhs, rhs)?;
                         let rhs = grade_type(rhs, grade, RHS_SUFFIX);
                         Some(parse_quote!(#rhs: #neg_ty<Output = #out>))
                     } else {
-                        let out = sum_output_generic_new(self, grade, lhs, rhs)?;
+                        let out = self.new_output_generic(grade, lhs, rhs)?;
                         let lhs = grade_type(lhs, grade, LHS_SUFFIX);
                         let rhs = grade_type(rhs, grade, RHS_SUFFIX);
                         Some(parse_quote!(#lhs: #trait_ty<#rhs, Output = #out>))
@@ -326,6 +339,129 @@ impl SumOp {
         }
 
         generics
+    }
+
+    fn output_type_item(self, lhs: TypeMv, rhs: TypeMv) -> ImplItem {
+        let generic = is_generic(lhs, rhs);
+        let output_ty = match self.output(lhs, rhs) {
+            TypeMv::Zero(_) => Zero::ty(),
+            TypeMv::Grade(grade) => {
+                if generic {
+                    unreachable!("mv +/- x != grade")
+                } else {
+                    grade.ty()
+                }
+            }
+            TypeMv::Multivector(mv) => {
+                let ty = Multivector::ident();
+                if generic {
+                    let types = lhs
+                        .algebra()
+                        .grades()
+                        .map(|grade| self.output_generic(grade, lhs, rhs));
+
+                    parse_quote!( #ty <#(#types),*> )
+                } else {
+                    let types = mv.type_parameters("Out");
+                    parse_quote!( #ty <#(#types),*> )
+                }
+            }
+        };
+        parse_quote! { type Output = #output_ty; }
+    }
+
+    fn output_generic(self, grade: Grade, lhs: TypeMv, rhs: TypeMv) -> Ident {
+        match (lhs.contains(grade), rhs.contains(grade)) {
+            (true, true) => grade.generic(OUT_SUFFIX),
+            (true, false) => grade.generic(LHS_SUFFIX),
+            (false, true) => {
+                if self.is_sub() {
+                    grade.generic(OUT_SUFFIX)
+                } else {
+                    grade.generic(RHS_SUFFIX)
+                }
+            }
+            (false, false) => Zero::ident(),
+        }
+    }
+
+    fn new_output_generic(self, grade: Grade, lhs: TypeMv, rhs: TypeMv) -> Option<Ident> {
+        match (lhs.contains(grade), rhs.contains(grade)) {
+            (true, true) => Some(grade.generic(OUT_SUFFIX)),
+            (false, true) if self.is_sub() => Some(grade.generic(OUT_SUFFIX)),
+            _ => None,
+        }
+    }
+
+    fn fn_item(self, lhs: TypeMv, rhs: TypeMv) -> ImplItem {
+        let op_fn = self.trait_fn();
+        let rhs_ty = rhs.ty_with_suffix(RHS_SUFFIX);
+        let output_expr = self.sum_output_expr(lhs, rhs);
+        parse_quote! {
+            #[inline]
+            #[allow(unused_variables)]
+            fn #op_fn(self, rhs: #rhs_ty) -> Self::Output {
+                #output_expr
+            }
+        }
+    }
+
+    fn sum_output_expr(self, lhs: TypeMv, rhs: TypeMv) -> Expr {
+        let output = self.output(lhs, rhs);
+
+        if output.is_zero() {
+            return Zero::expr();
+        }
+
+        if rhs.is_zero() {
+            return parse_quote!(self);
+        }
+
+        if lhs.is_zero() {
+            return match self {
+                SumOp::Add | SumOp::GradeAdd => parse_quote!(rhs),
+                SumOp::Sub | SumOp::GradeSub => parse_quote!(-rhs),
+            };
+        }
+
+        match self.output(lhs, rhs) {
+            TypeMv::Zero(_) => Zero::expr(),
+            TypeMv::Grade(grade) => {
+                if is_generic(lhs, rhs) {
+                    self.sum_grade_sum_expr(lhs, rhs, grade)
+                } else {
+                    sum_grade_fields_expr(self, grade)
+                }
+            }
+            TypeMv::Multivector(_) => {
+                let ty = Multivector::ident();
+                let grades = lhs
+                    .algebra()
+                    .grades()
+                    .map(|grade| self.sum_grade_sum_expr(lhs, rhs, grade));
+                parse_quote! { #ty( #(#grades),* ) }
+            }
+        }
+    }
+
+    fn sum_grade_sum_expr(self, lhs: TypeMv, rhs: TypeMv, grade: Grade) -> Expr {
+        let lhs_expr = access_grade(lhs, grade, quote!(self));
+        let rhs_expr = access_grade(rhs, grade, quote!(rhs));
+
+        let trait_ty = self.trait_ty_grade();
+        let trait_fn = self.trait_fn_grade();
+
+        match (lhs.contains(grade), rhs.contains(grade)) {
+            (true, true) => {
+                parse_quote!(#trait_ty::#trait_fn(#lhs_expr, #rhs_expr))
+            }
+            (false, true) => match self {
+                SumOp::Add | SumOp::GradeAdd => rhs_expr,
+                SumOp::Sub | SumOp::GradeSub => parse_quote!(- #rhs_expr),
+            },
+            (true, false) => lhs_expr,
+            (false, false) => Zero::expr(),
+        }
     }
 }
 
@@ -353,9 +489,9 @@ impl ProductOp {
             self_ty: Box::new(lhs.ty_with_suffix(LHS_SUFFIX)),
             brace_token: Brace::default(),
             items: {
-                let output_type = output_type_item(self, lhs, rhs);
-                let trait_fn = trait_fn_item(self, lhs, rhs);
-                vec![output_type, trait_fn]
+                let output_type_item = self.output_type_item(lhs, rhs);
+                let fn_item = self.fn_item(lhs, rhs);
+                vec![output_type_item, fn_item]
             },
         })
     }
@@ -379,8 +515,8 @@ impl ProductOp {
         }
 
         for grade in algebra.grades() {
-            let int = intermediate_types(self, lhs, rhs, grade);
-            let sum = intermediate_and_sum_types(self, lhs, rhs, grade);
+            let int = self.intermediate_types(lhs, rhs, grade);
+            let sum = self.intermediate_and_sum_types(lhs, rhs, grade);
 
             for ident in (0..sum).into_iter().map(|n| grade.generic_n(n)) {
                 generics.params.push(ident.convert());
@@ -415,253 +551,149 @@ impl ProductOp {
 
         generics
     }
+
+    fn last_generics(self, lhs: TypeMv, rhs: TypeMv) -> impl Iterator<Item = Ident> {
+        lhs.algebra()
+            .grades()
+            .map(move |grade| self.last_generic(lhs, rhs, grade))
+    }
+
+    fn last_generic(self, lhs: TypeMv, rhs: TypeMv, grade: Grade) -> Ident {
+        self.intermediate_and_sum_types(lhs, rhs, grade)
+            .checked_sub(1)
+            .map(|n| grade.generic_n(n))
+            .unwrap_or_else(|| Zero::ident())
+    }
+
+    fn intermediate_and_sum_types(self, lhs: TypeMv, rhs: TypeMv, grade: Grade) -> usize {
+        use std::ops::Mul;
+        self.intermediate_types(lhs, rhs, grade)
+            .mul(2)
+            .checked_sub(1)
+            .unwrap_or_default()
+    }
+
+    fn intermediate_types(self, lhs: TypeMv, rhs: TypeMv, grade: Grade) -> usize {
+        iproduct!(lhs.grades(), rhs.grades())
+            .filter(|(lhs, rhs)| self.output_contains(*lhs, *rhs, grade))
+            .count()
+    }
+
+    fn output_type_item(self, lhs: TypeMv, rhs: TypeMv) -> ImplItem {
+        let is_generic = is_generic(lhs, rhs);
+        let output_ty = match self.output(lhs, rhs) {
+            TypeMv::Zero(_) => Zero::ty(),
+            TypeMv::Grade(grade) => {
+                if is_generic {
+                    self.last_generic(lhs, rhs, grade).convert()
+                } else {
+                    grade.ty()
+                }
+            }
+            TypeMv::Multivector(mv) => {
+                let ty = Multivector::ident();
+                if is_generic {
+                    let types = self.last_generics(lhs, rhs);
+                    parse_quote!( #ty <#(#types),*> )
+                } else {
+                    let types = mv.type_parameters(OUT_SUFFIX);
+                    parse_quote!( #ty <#(#types),*> )
+                }
+            }
+        };
+        parse_quote! { type Output = #output_ty; }
+    }
+
+    fn fn_item(self, lhs: TypeMv, rhs: TypeMv) -> ImplItem {
+        let op_fn = self.trait_fn();
+        let rhs_ty = rhs.ty_with_suffix(RHS_SUFFIX);
+        let output_expr = self.output_expr(lhs, rhs);
+        parse_quote! {
+            #[inline]
+            #[allow(unused_variables)]
+            fn #op_fn(self, rhs: #rhs_ty) -> Self::Output {
+                #output_expr
+            }
+        }
+    }
+
+    fn output_expr(self, lhs: TypeMv, rhs: TypeMv) -> Expr {
+        match self.output(lhs, rhs) {
+            TypeMv::Zero(_) => Zero::expr(),
+            TypeMv::Grade(grade) => {
+                if is_generic(lhs, rhs) {
+                    let products = iproduct!(lhs.grades(), rhs.grades()).filter_map::<Expr, _>(
+                        |(lhs_grade, rhs_grade)| {
+                            self.grade_product_expr(grade, lhs, lhs_grade, rhs, rhs_grade)
+                        },
+                    );
+                    parse_quote! { #(#products)+* }
+                } else {
+                    self.grade_fields_expr(grade, lhs, rhs)
+                }
+            }
+            TypeMv::Multivector(mv) => {
+                let ident = Multivector::ident();
+                let fields = mv.1.grades().map(|grade| {
+                    let sum = iproduct!(lhs.grades(), rhs.grades())
+                        .filter_map(|(lhs_grade, rhs_grade)| {
+                            self.grade_product_expr(grade, lhs, lhs_grade, rhs, rhs_grade)
+                        })
+                        .collect::<Vec<_>>();
+                    if sum.is_empty() {
+                        Zero::expr()
+                    } else {
+                        parse_quote! { #( #sum )+* }
+                    }
+                });
+                parse_quote! { #ident( #(#fields),* ) }
+            }
+        }
+    }
+
+    pub fn grade_product_expr(
+        self,
+        grade: Grade,
+        lhs: TypeMv,
+        lhs_grade: Grade,
+        rhs: TypeMv,
+        rhs_grade: Grade,
+    ) -> Option<Expr> {
+        if self.output_contains(lhs_grade, rhs_grade, grade) {
+            let op_fn = ProductOp::Grade(grade).trait_fn();
+            let lhs = access_grade(lhs, lhs_grade, quote!(self));
+            let rhs = access_grade(rhs, rhs_grade, quote!(rhs));
+            Some(parse_quote! { #lhs.#op_fn(#rhs) })
+        } else {
+            None
+        }
+    }
+
+    fn grade_fields_expr(self, grade: Grade, lhs: TypeMv, rhs: TypeMv) -> syn::Expr {
+        let fields = grade.blades().map(|blade| {
+            let sum = cartesian_product(lhs, rhs, self)
+                .filter_map(|(lhs_blade, rhs_blade, _)| {
+                    self.product_expr(lhs, lhs_blade, rhs, rhs_blade, blade)
+                })
+                .collect();
+            assign_field(TypeMv::Grade(grade), blade, &sum)
+        });
+
+        if grade.is_scalar() {
+            parse_quote! { #(#fields)+* }
+        } else {
+            let ty = grade.ty();
+            parse_quote! {
+                #ty {
+                    #( #fields, )*
+                }
+            }
+        }
+    }
 }
 
 fn is_generic(lhs: TypeMv, rhs: TypeMv) -> bool {
     lhs.is_generic() || rhs.is_generic()
-}
-
-fn last_generics(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> impl Iterator<Item = Ident> {
-    lhs.algebra()
-        .grades()
-        .map(move |grade| last_generic(op, lhs, rhs, grade))
-}
-
-fn last_generic(op: ProductOp, lhs: TypeMv, rhs: TypeMv, grade: Grade) -> Ident {
-    let int = intermediate_and_sum_types(op, lhs, rhs, grade);
-    let last = int.checked_sub(1);
-    last.map(|n| grade.generic_n(n))
-        .unwrap_or_else(|| Zero::ident())
-}
-
-fn intermediate_and_sum_types(op: ProductOp, lhs: TypeMv, rhs: TypeMv, grade: Grade) -> usize {
-    let int = intermediate_types(op, lhs, rhs, grade);
-    (int * 2).checked_sub(1).unwrap_or_default()
-}
-
-fn intermediate_types(op: ProductOp, lhs: TypeMv, rhs: TypeMv, grade: Grade) -> usize {
-    iproduct!(lhs.grades(), rhs.grades())
-        .filter(|(lhs, rhs)| op.output_contains(*lhs, *rhs, grade))
-        .count()
-}
-
-fn output_type_item(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> ImplItem {
-    let is_generic = is_generic(lhs, rhs);
-    let output_ty = match op.output(lhs, rhs) {
-        TypeMv::Zero(_) => Zero::ty(),
-        TypeMv::Grade(grade) => {
-            if is_generic {
-                last_generic(op, lhs, rhs, grade).convert()
-            } else {
-                grade.ty()
-            }
-        }
-        TypeMv::Multivector(mv) => {
-            let ty = Multivector::ident();
-            if is_generic {
-                let types = last_generics(op, lhs, rhs);
-                parse_quote!( #ty <#(#types),*> )
-            } else {
-                let types = mv.type_parameters(OUT_SUFFIX);
-                parse_quote!( #ty <#(#types),*> )
-            }
-        }
-    };
-    parse_quote! { type Output = #output_ty; }
-}
-
-fn sum_output_type_item(op: SumOp, lhs: TypeMv, rhs: TypeMv) -> ImplItem {
-    let generic = is_generic(lhs, rhs);
-    let output_ty = match op.output(lhs, rhs) {
-        TypeMv::Zero(_) => Zero::ty(),
-        TypeMv::Grade(grade) => {
-            if generic {
-                unreachable!("mv +/- x != grade")
-            } else {
-                grade.ty()
-            }
-        }
-        TypeMv::Multivector(mv) => {
-            let ty = Multivector::ident();
-            if generic {
-                let types = lhs
-                    .algebra()
-                    .grades()
-                    .map(|grade| sum_output_generic(op, grade, lhs, rhs));
-
-                parse_quote!( #ty <#(#types),*> )
-            } else {
-                let types = mv.type_parameters("Out");
-                parse_quote!( #ty <#(#types),*> )
-            }
-        }
-    };
-    parse_quote! { type Output = #output_ty; }
-}
-
-fn sum_output_generic(op: SumOp, grade: Grade, lhs: TypeMv, rhs: TypeMv) -> Ident {
-    if op.is_sub() {
-        match (lhs.contains(grade), rhs.contains(grade)) {
-            (_, true) => grade.generic(OUT_SUFFIX),
-            (true, false) => grade.generic(LHS_SUFFIX),
-            (false, false) => Zero::ident(),
-        }
-    } else {
-        match (lhs.contains(grade), rhs.contains(grade)) {
-            (true, true) => grade.generic(OUT_SUFFIX),
-            (true, false) => grade.generic(LHS_SUFFIX),
-            (false, true) => grade.generic(RHS_SUFFIX),
-            (false, false) => Zero::ident(),
-        }
-    }
-}
-
-fn sum_output_generic_new(op: SumOp, grade: Grade, lhs: TypeMv, rhs: TypeMv) -> Option<Ident> {
-    if op.is_sub() {
-        if rhs.contains(grade) {
-            Some(grade.generic(OUT_SUFFIX))
-        } else {
-            None
-        }
-    } else {
-        if lhs.contains(grade) && rhs.contains(grade) {
-            Some(grade.generic(OUT_SUFFIX))
-        } else {
-            None
-        }
-    }
-}
-
-fn sum_trait_fn_item(op: SumOp, lhs: TypeMv, rhs: TypeMv) -> ImplItem {
-    let op_fn = op.trait_fn();
-    let rhs_ty = rhs.ty_with_suffix(RHS_SUFFIX);
-    let output_expr = sum_output_expr(op, lhs, rhs);
-    parse_quote! {
-        #[inline]
-        #[allow(unused_variables)]
-        fn #op_fn(self, rhs: #rhs_ty) -> Self::Output {
-            #output_expr
-        }
-    }
-}
-
-fn sum_output_expr(op: SumOp, lhs: TypeMv, rhs: TypeMv) -> Expr {
-    let output = op.output(lhs, rhs);
-
-    if matches!(output, TypeMv::Zero(_)) {
-        return Zero::expr();
-    }
-
-    if matches!(rhs, TypeMv::Zero(_)) {
-        return parse_quote!(self);
-    }
-
-    if matches!(lhs, TypeMv::Zero(_)) {
-        return match op {
-            SumOp::Add | SumOp::GradeAdd => parse_quote!(rhs),
-            SumOp::Sub | SumOp::GradeSub => parse_quote!(-rhs),
-        };
-    }
-
-    match op.output(lhs, rhs) {
-        TypeMv::Zero(_) => Zero::expr(),
-        TypeMv::Grade(grade) => {
-            if is_generic(lhs, rhs) {
-                sum_grade_sum_expr(op, lhs, rhs, grade)
-            } else {
-                sum_grade_fields_expr(op, grade)
-            }
-        }
-        TypeMv::Multivector(_) => mv_sum_grades(op, lhs, rhs),
-    }
-}
-
-fn mv_sum_grades(op: SumOp, lhs: TypeMv, rhs: TypeMv) -> Expr {
-    let ty = Multivector::ident();
-    let grades = lhs
-        .algebra()
-        .grades()
-        .map(|grade| sum_grade_sum_expr(op, lhs, rhs, grade));
-    parse_quote! {
-        #ty( #(#grades),* )
-    }
-}
-
-fn trait_fn_item(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> ImplItem {
-    let op_fn = op.trait_fn();
-    let rhs_ty = rhs.ty_with_suffix(RHS_SUFFIX);
-    let output_expr = output_expr(op, lhs, rhs);
-    parse_quote! {
-        #[inline]
-        #[allow(unused_variables)]
-        fn #op_fn(self, rhs: #rhs_ty) -> Self::Output {
-            #output_expr
-        }
-    }
-}
-
-fn output_expr(op: ProductOp, lhs: TypeMv, rhs: TypeMv) -> Expr {
-    match op.output(lhs, rhs) {
-        TypeMv::Zero(_) => Zero::expr(),
-        TypeMv::Grade(grade) => {
-            if is_generic(lhs, rhs) {
-                grade_sum_expr(op, lhs, rhs, grade)
-            } else {
-                grade_fields_expr(op, grade, lhs, rhs)
-            }
-        }
-        TypeMv::Multivector(mv) => mv_expr(mv, lhs, rhs, op),
-    }
-}
-
-fn sum_grade_sum_expr(op: SumOp, lhs: TypeMv, rhs: TypeMv, grade: Grade) -> Expr {
-    let lhs_expr = access_grade(lhs, grade, quote!(self));
-    let rhs_expr = access_grade(rhs, grade, quote!(rhs));
-
-    let trait_ty = op.trait_ty_grade();
-    let trait_fn = op.trait_fn_grade();
-
-    match (lhs.contains(grade), rhs.contains(grade)) {
-        (true, true) => {
-            parse_quote!(#trait_ty::#trait_fn(#lhs_expr, #rhs_expr))
-        }
-        (false, true) => match op {
-            SumOp::Add | SumOp::GradeAdd => rhs_expr,
-            SumOp::Sub | SumOp::GradeSub => parse_quote!(- #rhs_expr),
-        },
-        (true, false) => lhs_expr,
-        (false, false) => Zero::expr(),
-    }
-}
-
-fn grade_sum_expr(op: ProductOp, lhs: TypeMv, rhs: TypeMv, grade: Grade) -> Expr {
-    let products =
-        iproduct!(lhs.grades(), rhs.grades()).filter_map::<Expr, _>(|(lhs_grade, rhs_grade)| {
-            grade_product_expr(grade, lhs, lhs_grade, rhs, rhs_grade, op)
-        });
-    parse_quote! { #(#products)+* }
-}
-
-fn grade_fields_expr(op: ProductOp, grade: Grade, lhs: TypeMv, rhs: TypeMv) -> syn::Expr {
-    let fields = grade.blades().map(|blade| {
-        let sum = cartesian_product(lhs, rhs, op)
-            .filter_map(|(lhs_blade, rhs_blade, _)| {
-                op.product_expr(lhs, lhs_blade, rhs, rhs_blade, blade)
-            })
-            .collect();
-        assign_field(TypeMv::Grade(grade), blade, &sum)
-    });
-
-    if grade.is_scalar() {
-        parse_quote! { #(#fields)+* }
-    } else {
-        let ty = grade.ty();
-        parse_quote! {
-            #ty {
-                #( #fields, )*
-            }
-        }
-    }
 }
 
 fn sum_grade_fields_expr(op: SumOp, grade: Grade) -> syn::Expr {
@@ -695,84 +727,11 @@ const LHS_SUFFIX: &'static str = "Lhs";
 const RHS_SUFFIX: &'static str = "Rhs";
 const OUT_SUFFIX: &'static str = "Out";
 
-pub fn mv_expr(mv: Multivector, lhs: TypeMv, rhs: TypeMv, op: ProductOp) -> Expr {
-    let algebra = mv.1;
-    let grades = algebra
-        .grades()
-        .map(|grade| {
-            let sum = iproduct!(lhs.grades(), rhs.grades())
-                .filter_map(|(lhs_grade, rhs_grade)| {
-                    grade_product_expr(grade, lhs, lhs_grade, rhs, rhs_grade, op)
-                })
-                .collect();
-            (grade, sum)
-        })
-        .collect();
-    OutputExpr::Multivector(grades).expr()
-}
-
 fn grade_type(ty: TypeMv, grade: Grade, suffix: &str) -> syn::Type {
     if ty.is_generic() {
         grade.generic(suffix).convert()
     } else {
         grade.ty()
-    }
-}
-
-pub fn grade_product_expr(
-    grade: Grade,
-    lhs: TypeMv,
-    lhs_grade: Grade,
-    rhs: TypeMv,
-    rhs_grade: Grade,
-    op: ProductOp,
-) -> Option<Expr> {
-    if op.output_contains(lhs_grade, rhs_grade, grade) {
-        let op_fn = ProductOp::Grade(grade).trait_fn();
-        let lhs = access_grade(lhs, lhs_grade, quote!(self));
-        let rhs = access_grade(rhs, rhs_grade, quote!(rhs));
-        Some(parse_quote! { #lhs.#op_fn(#rhs) })
-    } else {
-        None
-    }
-}
-
-pub enum OutputExpr {
-    Multivector(Vec<(Grade, Vec<syn::Expr>)>),
-}
-
-impl OutputExpr {
-    pub fn expr(&self) -> syn::Expr {
-        match self {
-            Self::Multivector(grades) => {
-                let ident = Multivector::ident();
-                let algebra = grades.iter().next().unwrap().0 .1;
-                let fields = algebra.grades().map(|grade| {
-                    if let Some((_, sum)) = grades.iter().find(|(g, _)| *g == grade) {
-                        if sum.is_empty() {
-                            Zero::expr()
-                        } else {
-                            parse_quote! {
-                                #( #sum )+*
-                            }
-                        }
-                    } else {
-                        Zero::expr()
-                    }
-                });
-                parse_quote! {
-                    #ident(
-                        #(#fields),*
-                    )
-                }
-            }
-        }
-    }
-}
-
-impl ToTokens for OutputExpr {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        self.expr().to_tokens(tokens);
     }
 }
 
@@ -801,74 +760,28 @@ fn assign_field(output: TypeMv, blade: Blade, sum: &Vec<syn::Expr>) -> TokenStre
     }
 }
 
-pub struct GradeProducts(Algebra);
-
-impl ToTokens for GradeProducts {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        for grade in self.0.grades() {
-            let trait_ident = Ident::new(&format!("{}Product", grade.name()), Span::mixed_site());
-            let trait_fn = Ident::new(
-                &format!("{}_prod", grade.name().to_lowercase()),
-                Span::mixed_site(),
-            );
-
-            tokens.extend(quote! {
-                pub trait #trait_ident<Rhs> {
-                    type Output;
-                    fn #trait_fn(self, rhs: Rhs) -> Self::Output;
-                }
-            });
-        }
-    }
-}
-
-pub struct GradeTypes(Algebra);
-
-impl ToTokens for GradeTypes {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        for grade in self.0.grades() {
-            if grade.is_scalar() {
-                continue;
-            }
-
-            let ty = grade.ty();
-
-            let fields = grade.blades().map(|blade| {
-                let f = blade.field();
-                quote! { pub #f: f64, }
-            });
-
-            tokens.extend(quote! {
-                #[derive(Debug, Default, Copy, Clone, PartialEq)]
-                pub struct #ty {
-                    #(#fields)*
-                }
-            })
-        }
-    }
-}
-
 impl TypeMv {
-    fn define(self) -> TokenStream {
+    fn define(self) -> Option<ItemStruct> {
         match self {
-            Self::Zero(_) => quote! {
+            Self::Zero(_) => Some(parse_quote! {
                 #[derive(Debug, Default, Copy, Clone, PartialEq)]
                 pub struct Zero;
-            },
-            Self::Grade(g) if g.is_scalar() => {
-                quote! {}
-            }
+            }),
             Self::Grade(grade) => {
-                let ty = grade.ty();
-                let fields = grade.blades().map(|blade| {
-                    let f = blade.field();
-                    quote! { pub #f: f64, }
-                });
-                quote! {
-                    #[derive(Debug, Default, Copy, Clone, PartialEq)]
-                    pub struct #ty {
-                        #(#fields)*
-                    }
+                if grade.is_scalar() {
+                    None
+                } else {
+                    let ty = grade.ty();
+                    let fields = grade.blades().map(|blade| {
+                        let f = blade.field();
+                        quote! { pub #f: f64, }
+                    });
+                    Some(parse_quote! {
+                        #[derive(Debug, Default, Copy, Clone, PartialEq)]
+                        pub struct #ty {
+                            #(#fields)*
+                        }
+                    })
                 }
             }
             Self::Multivector(mv) => {
@@ -880,10 +793,10 @@ impl TypeMv {
                     }
                 });
 
-                quote! {
+                Some(parse_quote! {
                     #[derive(Debug, Default, Copy, Clone, PartialEq)]
                     pub struct Multivector < #(#generics),* > ( #(#fields)* );
-                }
+                })
             }
         }
     }
@@ -903,14 +816,13 @@ impl TypeMv {
     }
 
     fn impl_item(self) -> Option<ItemImpl> {
-        self.new_fn().map(|item| {
-            let ty = self.ty_with_suffix("");
-            parse_quote!(
-                impl #ty {
-                    #item
-                }
-            )
-        })
+        let item = self.new_fn()?;
+        let ty = self.ty_with_suffix("");
+        Some(parse_quote!(
+            impl #ty {
+                #item
+            }
+        ))
     }
 
     fn new_fn(self) -> Option<ImplItem> {
@@ -932,30 +844,6 @@ impl TypeMv {
             }
             _ => None,
         }
-    }
-}
-
-impl Multivector {
-    const NAME: &'static str = "Multivector";
-
-    pub fn ident() -> syn::Ident {
-        syn::parse_str(Self::NAME).unwrap()
-    }
-}
-
-impl Grade {
-    pub fn generic(&self, suffix: &str) -> Ident {
-        let g = self.0;
-        Ident::new(&format!("G{g}{suffix}"), Span::mixed_site())
-    }
-
-    pub fn generic_n(&self, n: usize) -> Ident {
-        let g = self.0;
-        Ident::new(&format!("G{g}_{n}"), Span::mixed_site())
-    }
-
-    pub fn mv_field(&self) -> syn::Member {
-        syn::Member::Unnamed(syn::Index::from(self.0 as usize))
     }
 }
 
@@ -1211,14 +1099,14 @@ mod tests {
         let bivector = algebra.grade(2);
         let trivector = algebra.grade(3);
 
-        assert_eq!(4, intermediate_types(ProductOp::Mul, mv, mv, trivector));
+        assert_eq!(4, ProductOp::Mul.intermediate_types(mv, mv, trivector));
 
         assert_eq!(
             1,
-            intermediate_types(ProductOp::Mul, mv, TypeMv::Grade(bivector), trivector)
+            ProductOp::Mul.intermediate_types(mv, TypeMv::Grade(bivector), trivector)
         );
 
-        assert_eq!(6, intermediate_types(ProductOp::Mul, mv, mv, bivector));
+        assert_eq!(6, ProductOp::Mul.intermediate_types(mv, mv, bivector));
     }
 
     #[test]
@@ -1229,13 +1117,13 @@ mod tests {
 
         assert_eq_ref(
             &bivector.generic_n(10),
-            &last_generic(ProductOp::Mul, mv, mv, bivector),
+            &ProductOp::Mul.last_generic(mv, mv, bivector),
             "ident",
         );
 
         assert_eq_ref(
             &Zero::ident(),
-            &last_generic(ProductOp::Grade(algebra.grade(0)), mv, mv, bivector),
+            &ProductOp::Grade(algebra.grade(0)).last_generic(mv, mv, bivector),
             "ident",
         );
     }
