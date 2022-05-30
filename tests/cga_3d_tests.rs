@@ -180,7 +180,6 @@ fn bivector_test() {
     // let b_ = Bivector::new(2., 3., 0., 0., 0., 0., 0., 0., 0., 0.));
 
     panic!("{:#?}", b * b_);
-    panic!();
 }
 
 // #[test]

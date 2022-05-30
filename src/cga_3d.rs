@@ -1,4 +1,4 @@
-proc_macros::clifford_mv!(4, 1, 0);
+proc_macros::clifford!(4, 1, 0);
 
 /// Point at the origin
 pub const N: Vector = Vector::new(0., 0., 0., 0.5, 0.5);
