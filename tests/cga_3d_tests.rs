@@ -142,12 +142,17 @@ fn dual_real_sphere() {
     // panic!("{:#?}", sphere_dual);
 }
 
+pub fn translator(x: f64, y: f64, z: f64) -> Multivector<f64, Zero, Bivector, Zero, Zero, Zero> {
+    let t = Vector::new(x, y, z, 0., 0.);
+    1. - 0.5 * t * N_BAR
+}
+
 #[test]
 #[allow(non_snake_case)]
 fn translation() {
-    let t = Vector::new(2., 3., 5., 0., 0.);
-    let T = 1. - 0.5 * t * N_BAR;
-    let T_ = 1. + 0.5 * t * N_BAR;
+    let T = translator(2., 3., 5.);
+    let T_ = T.rev();
+    let p = point(1., 2., 3.);
 
     // this works because N_BAR * N_BAR = 0 for any t
     // so the reversed bivector sign is enough to make them cancel out
@@ -155,10 +160,31 @@ fn translation() {
     assert_eq!((T * T_).0, 1.0);
     assert_eq!((T * T_).2, Default::default());
 
-    let expected = point(2., 3., 5.);
-    let actual = (T * N * T_).1;
+    let expected = point(3., 5., 8.);
+    let actual = (T * p * T_).1;
 
     assert_eq!(expected, actual);
 
     // panic!("done");
 }
+
+#[test]
+fn bivector_test() {
+    let b = Bivector::new(2., 3., 5., 7., 11., 13., 17., 19., 23., 29.);
+    dbg!(b);
+    let b_ = Bivector::new(2., 3., 5., 7., 11., 13., 17., 19., 23., 29.);
+    // let b = Bivector::new(2., 3., 0., 0., 0., 0., 0., 0., 0., 0.);
+    // let b_ = Bivector::new(2., 3., 0., 0., 0., 0., 0., 0., 0., 0.));
+    panic!("{:#?}", b * b_);
+    panic!();
+}
+
+// #[test]
+// fn scalar_division_associativity() {
+//     let b = Bivector::new(2., 3., 5., 7., 11., 13., 17., 19., 23., 29.);
+//     assert_eq!(b * (b * 2.), b * b * 2.);
+//     assert_eq!(b * 0.5, b / 2.);
+//     assert_eq!((b * (b / 2.)).2, (b * b / 2.).2);
+//     assert_eq!((b * (b / 2.)).4, (b * b / 2.).4);
+//     assert_eq!((b * (b / 2.)).0, (b * b / 2.).0);
+// }

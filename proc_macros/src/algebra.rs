@@ -1,5 +1,6 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
+use std::fmt::Formatter;
 use syn::parse_quote;
 
 // TODO Div<f64>
@@ -321,7 +322,7 @@ pub struct Grade(pub u8, pub Algebra);
 
 impl IntoIterator for Grade {
     type Item = Blade;
-    type IntoIter = impl Iterator<Item = Blade>;
+    type IntoIter = GradeBlades;
     fn into_iter(self) -> Self::IntoIter {
         Grade::blades(self)
     }
@@ -737,7 +738,7 @@ where
     lhs.into_iter().flat_map(move |lhs| {
         rhs.clone()
             .into_iter()
-            .map(move |rhs| (lhs, rhs, op(lhs, rhs)))
+            .map(move |rhs| (lhs, rhs, op.call(lhs, rhs)))
     })
 }
 
@@ -858,8 +859,16 @@ impl Iterator for MvGrades {
     }
 }
 
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Default, Copy, Clone, Eq, PartialEq)]
 pub struct GradeSet(u64);
+
+impl std::fmt::Debug for GradeSet {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        f.debug_tuple(std::any::type_name::<Self>())
+            .field(&format!("{:b}", self.0))
+            .finish()
+    }
+}
 
 impl GradeSet {
     pub fn contains(&self, grade: Grade) -> bool {
@@ -932,17 +941,13 @@ impl ProductOp {
 
     pub fn call(self, lhs: Blade, rhs: Blade) -> Product {
         match self {
-            ProductOp::Mul => lhs * rhs,
+            ProductOp::Mul | ProductOp::Div => lhs * rhs,
             ProductOp::Geometric => lhs * rhs,
             ProductOp::Dot => lhs.dot(rhs),
             ProductOp::Wedge => lhs.wedge(rhs),
             ProductOp::Grade(grade) => {
                 let product = lhs * rhs;
                 product.filter(|b| b.grade() == grade)
-            }
-            ProductOp::Div => {
-                // debug_assert!(rhs.grade().is_scalar());
-                Product::Pos(lhs)
             }
         }
     }
@@ -1030,25 +1035,6 @@ pub fn access_field(parent: TypeMv, blade: Blade, ident: TokenStream) -> syn::Ex
     }
 }
 
-impl FnOnce<(Blade, Blade)> for ProductOp {
-    type Output = Product;
-    extern "rust-call" fn call_once(self, args: (Blade, Blade)) -> Self::Output {
-        self.call(args.0, args.1)
-    }
-}
-
-impl FnMut<(Blade, Blade)> for ProductOp {
-    extern "rust-call" fn call_mut(&mut self, args: (Blade, Blade)) -> Self::Output {
-        FnOnce::call_once(*self, args)
-    }
-}
-
-impl Fn<(Blade, Blade)> for ProductOp {
-    extern "rust-call" fn call(&self, args: (Blade, Blade)) -> Self::Output {
-        FnOnce::call_once(*self, args)
-    }
-}
-
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum SumOp {
     Add,
@@ -1114,7 +1100,14 @@ impl SumOp {
         }
     }
 
-    pub fn blades(self, lhs: TypeMv, rhs: TypeMv) -> Box<dyn Iterator<Item = Product>> {
+    pub fn products(self, lhs: TypeMv, rhs: TypeMv) -> Box<dyn Iterator<Item = Product>> {
+        let assert_not_mv = |lhs: TypeMv, rhs: TypeMv| {
+            assert!(
+                !lhs.is_mv() && !rhs.is_mv(),
+                "{:?} is not implemented for Multivectors",
+                self
+            );
+        };
         match self {
             Self::Add => Box::new(
                 lhs.blades()
@@ -1127,11 +1120,7 @@ impl SumOp {
                     .chain(rhs.blades().map(Product::Neg)),
             ),
             Self::GradeAdd => {
-                assert!(
-                    !lhs.is_mv() && !rhs.is_mv(),
-                    "{:?} is not implemented for Multivectors",
-                    self
-                );
+                assert_not_mv(lhs, rhs);
                 Box::new(
                     lhs.blades()
                         .map(Product::Pos)
@@ -1139,11 +1128,7 @@ impl SumOp {
                 )
             }
             Self::GradeSub => {
-                assert!(
-                    !lhs.is_mv() && !rhs.is_mv(),
-                    "{:?} is not implemented for Multivectors",
-                    self
-                );
+                assert_not_mv(lhs, rhs);
                 Box::new(
                     lhs.blades()
                         .map(Product::Pos)
@@ -1213,7 +1198,14 @@ impl UnaryOp {
         }
     }
 
-    pub fn call(&self, blade: Blade) -> Product {
+    pub fn products(
+        self,
+        blades: impl IntoIterator<Item = Blade>,
+    ) -> impl Iterator<Item = Product> {
+        blades.into_iter().map(move |b| self.call(b))
+    }
+
+    pub fn call(self, blade: Blade) -> Product {
         match self {
             Self::Neg => Product::Neg(blade),
             Self::Reverse => {

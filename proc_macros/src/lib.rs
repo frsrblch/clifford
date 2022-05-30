@@ -1,5 +1,3 @@
-#![feature(type_alias_impl_trait, fn_traits, unboxed_closures)]
-
 extern crate proc_macro;
 
 mod algebra;
