@@ -4,6 +4,7 @@
     const_default_impls,
     const_convert
 )]
+// TODO add efficient implementation for null cone geometries
 
 //! Proc macros for defining Clifford algebras of arbitrary dimension
 //!
@@ -68,9 +69,6 @@
 //! - [ ] Normalize
 //!
 //! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features.html
-
-// TODO add efficient implementation for null cone geometries
-// TODO consider grade enum model with dynamic multivectors (e.g., BTreeMap<Grade, f64>)?
 
 // pub mod va_3d_manual;
 //

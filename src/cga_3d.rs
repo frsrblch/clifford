@@ -6,6 +6,10 @@ pub const N: Vector = Vector::new(0., 0., 0., 0.5, 0.5);
 /// Point through infinity
 pub const N_BAR: Vector = Vector::new(0., 0., 0., -1., 1.);
 
+pub fn translate(v: Vector, t: Multivector<f64, Zero, Bivector, Zero, Zero, Zero>) -> Vector {
+    (t * v * t.rev()).1
+}
+
 pub const fn point(x: f64, y: f64, z: f64) -> Vector {
     let x2 = x * x + y * y + z * z;
     Vector::new(x, y, z, 0.5 - 0.5 * x2, 0.5 + 0.5 * x2)

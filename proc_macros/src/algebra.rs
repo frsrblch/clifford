@@ -4,17 +4,16 @@ use std::fmt::Formatter;
 use std::iter::{empty, once};
 use syn::{parse_quote, parse_str, Expr, Ident, Type};
 
-// TODO Div<f64>
 // TODO reconfigure to accommodate larger geometries (BladeSet, GradeSet, etc)
 // TODO pass in specialized grade types (e.g., IdealPoints (pga), DualPlanes (cga))
 // TODO pass in alternate blade symbols?
 
-trait Convert {
-    fn convert<U: syn::parse::Parse>(&self) -> U;
+trait Convert<U> {
+    fn convert(&self) -> U;
 }
 
-impl<T: ToTokens> Convert for T {
-    fn convert<U: syn::parse::Parse>(&self) -> U {
+impl<T: ToTokens, U: syn::parse::Parse> Convert<U> for T {
+    fn convert(&self) -> U {
         syn::parse2(self.to_token_stream()).unwrap()
     }
 }
@@ -27,13 +26,11 @@ impl Zero {
     }
 
     pub fn ty() -> Type {
-        let ident = Self::ident();
-        parse_quote! { #ident }
+        Self::ident().convert()
     }
 
     pub fn expr() -> Expr {
-        let ident = Self::ident();
-        parse_quote! { #ident }
+        Self::ident().convert()
     }
 }
 
@@ -326,11 +323,11 @@ impl Grade {
     }
 
     pub fn generic(self, suffix: &str) -> Ident {
-        Ident::new(&format!("G{}{suffix}", self.0), Span::mixed_site())
+        Ident::new(&format!("G{}{}", self.0, suffix), Span::mixed_site())
     }
 
     pub fn generic_n(self, n: usize) -> Ident {
-        Ident::new(&format!("G{}_{n}", self.0), Span::mixed_site())
+        Ident::new(&format!("G{}_{}", self.0, n), Span::mixed_site())
     }
 
     pub fn mv_field(self) -> syn::Member {
