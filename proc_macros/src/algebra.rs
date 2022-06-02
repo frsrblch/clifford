@@ -400,6 +400,40 @@ impl Blade {
 
         Product::Zero
     }
+
+    pub fn left_contraction(self, rhs: Self) -> Product {
+        let multiplier = self * rhs;
+
+        if let Some(blade) = multiplier.blade() {
+            let a = self.0.len();
+            let b = rhs.0.len();
+
+            if let Some(grade) = b.checked_sub(a) {
+                if blade.0.len() == grade {
+                    return multiplier;
+                }
+            }
+        }
+
+        Product::Zero
+    }
+
+    pub fn right_contraction(self, rhs: Self) -> Product {
+        let multiplier = self * rhs;
+
+        if let Some(blade) = multiplier.blade() {
+            let a = self.0.len();
+            let b = rhs.0.len();
+
+            if let Some(grade) = a.checked_sub(b) {
+                if blade.0.len() == grade {
+                    return multiplier;
+                }
+            }
+        }
+
+        Product::Zero
+    }
 }
 
 impl std::ops::Mul for Blade {
@@ -793,13 +827,20 @@ pub enum ProductOp {
     Wedge,
     Grade(Grade),
     Div,
+    LeftContraction,
+    RightContraction,
 }
 
 impl ProductOp {
     pub fn is_std(self) -> bool {
         match self {
             Self::Mul | Self::Div => true,
-            Self::Geometric | Self::Dot | Self::Wedge | Self::Grade(_) => false,
+            Self::Geometric
+            | Self::Dot
+            | Self::Wedge
+            | Self::Grade(_)
+            | Self::LeftContraction
+            | Self::RightContraction => false,
         }
     }
 
@@ -820,6 +861,8 @@ impl ProductOp {
             Self::Geometric,
             Self::Dot,
             Self::Wedge,
+            Self::LeftContraction,
+            Self::RightContraction,
             Self::Div,
         ]
         .into_iter()
@@ -839,6 +882,8 @@ impl ProductOp {
                 let product = lhs * rhs;
                 product.filter(|b| b.grade() == grade)
             }
+            ProductOp::LeftContraction => lhs.left_contraction(rhs),
+            ProductOp::RightContraction => lhs.right_contraction(rhs),
         }
     }
 
@@ -880,6 +925,8 @@ impl ProductOp {
             ProductOp::Wedge => parse_quote!(crate::Wedge),
             ProductOp::Grade(grade) => parse_str(&format!("{}Product", grade.name())).unwrap(),
             ProductOp::Div => parse_quote!(std::ops::Div),
+            ProductOp::LeftContraction => parse_quote!(crate::LeftContraction),
+            ProductOp::RightContraction => parse_quote!(crate::RightContraction),
         }
     }
 
@@ -894,6 +941,8 @@ impl ProductOp {
                 Ident::new(str, Span::mixed_site())
             }
             ProductOp::Div => parse_quote!(div),
+            ProductOp::LeftContraction => parse_quote!(left_contraction),
+            ProductOp::RightContraction => parse_quote!(right_contraction),
         }
     }
 
@@ -903,6 +952,15 @@ impl ProductOp {
             .flat_map(|lhs| rhs.into_iter().map(move |rhs| (lhs, rhs)))
             .map(|(l, r)| self.call(l, r));
         AlgebraType::from_iter(products, lhs.algebra())
+    }
+
+    pub fn grade_op(self, output: Grade) -> Self {
+        match self {
+            ProductOp::LeftContraction => ProductOp::LeftContraction,
+            ProductOp::RightContraction => ProductOp::RightContraction,
+            ProductOp::Div => ProductOp::Div,
+            _ => ProductOp::Grade(output),
+        }
     }
 }
 
@@ -1246,5 +1304,29 @@ mod tests {
         assert_eq!(Product::Zero, e12.wedge(e12));
         assert_eq!(Product::Zero, e12.wedge(e23));
         assert_eq!(Product::Pos(alg.blade(0b_1111)), e12.wedge(e34));
+    }
+
+    #[test]
+    fn blade_left_contraction() {
+        let algebra = Algebra::new(3, 0, 1);
+        let scalar = algebra.scalar();
+        let e1 = algebra.blade(1);
+
+        assert_eq!(Product::Pos(scalar), scalar.left_contraction(scalar));
+        assert_eq!(Product::Zero, e1.left_contraction(scalar));
+        assert_eq!(Product::Pos(e1), scalar.left_contraction(e1));
+        assert_eq!(Product::Pos(scalar), e1.left_contraction(e1));
+    }
+
+    #[test]
+    fn blade_right_contraction() {
+        let algebra = Algebra::new(3, 0, 1);
+        let scalar = algebra.scalar();
+        let e1 = algebra.blade(1);
+
+        assert_eq!(Product::Pos(scalar), scalar.right_contraction(scalar));
+        assert_eq!(Product::Pos(e1), e1.right_contraction(scalar));
+        assert_eq!(Product::Zero, scalar.right_contraction(e1));
+        assert_eq!(Product::Pos(scalar), e1.right_contraction(e1));
     }
 }

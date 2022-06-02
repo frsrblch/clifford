@@ -518,7 +518,9 @@ impl ProductOp {
                 generics.params.push(ident.convert());
             }
 
-            let op_trait = ProductOp::Grade(grade).trait_ty();
+            let inner_op = self.grade_op(grade);
+
+            let op_trait = inner_op.trait_ty();
             for (n, (lhs_grade, rhs_grade)) in iproduct!(lhs.grades(), rhs.grades())
                 .filter(|(lhs, rhs)| self.output_contains(*lhs, *rhs, grade))
                 .enumerate()
@@ -656,7 +658,7 @@ impl ProductOp {
         rhs_grade: Grade,
     ) -> Option<Expr> {
         if self.output_contains(lhs_grade, rhs_grade, grade) {
-            let op_fn = ProductOp::Grade(grade).trait_fn();
+            let op_fn = self.grade_op(grade).trait_fn();
             let lhs = access_grade(lhs, lhs_grade, quote!(self));
             let rhs = access_grade(rhs, rhs_grade, quote!(rhs));
             Some(parse_quote! { #lhs.#op_fn(#rhs) })
@@ -847,12 +849,12 @@ impl AlgebraType {
 mod tests {
     use super::*;
 
-    // #[allow(dead_code)]
-    // fn write_to_file(tokens: &impl ToTokens) {
-    //     let contents = tokens.to_token_stream().to_string();
-    //     let file = "../output.rs";
-    //     std::fs::write(file, contents).unwrap();
-    // }
+    #[allow(dead_code)]
+    fn write_to_file(tokens: &impl ToTokens) {
+        let contents = tokens.to_token_stream().to_string();
+        let file = "../output.rs";
+        std::fs::write(file, contents).unwrap();
+    }
 
     #[track_caller]
     fn assert_eq_impl(expected: &ItemImpl, actual: &ItemImpl) {

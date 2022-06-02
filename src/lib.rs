@@ -48,8 +48,8 @@
 //!
 //! Inner products:
 //! - [x] Dot
-//! - [ ] Left contraction
-//! - [ ] Right contraction
+//! - [x] Left contraction
+//! - [x] Right contraction
 //!
 //! Outer products:
 //! - [x] Wedge
@@ -151,6 +151,16 @@ pub trait Sandwich<Rhs> {
 pub trait Commutator<Rhs> {
     type Output;
     fn commutator(self, rhs: Rhs) -> Self::Output;
+}
+
+pub trait LeftContraction<Rhs> {
+    type Output;
+    fn left_contraction(self, rhs: Rhs) -> Self::Output;
+}
+
+pub trait RightContraction<Rhs> {
+    type Output;
+    fn right_contraction(self, rhs: Rhs) -> Self::Output;
 }
 
 pub trait Reverse {

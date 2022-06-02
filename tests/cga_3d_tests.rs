@@ -172,22 +172,11 @@ fn translation_test() {
 }
 
 #[test]
-fn bivector_test() {
+fn scalar_division_associativity() {
     let b = Bivector::new(2., 3., 5., 7., 11., 13., 17., 19., 23., 29.);
-    dbg!(b);
-    let b_ = Bivector::new(2., 3., 5., 7., 11., 13., 17., 19., 23., 29.);
-    // let b = Bivector::new(2., 3., 0., 0., 0., 0., 0., 0., 0., 0.);
-    // let b_ = Bivector::new(2., 3., 0., 0., 0., 0., 0., 0., 0., 0.));
-
-    panic!("{:#?}", b * b_);
+    assert_eq!(b * (b * 2.), b * b * 2.);
+    assert_eq!(b * 0.5, b / 2.);
+    assert_eq!((b * (b / 2.)).2, (b * b / 2.).2);
+    assert_eq!((b * (b / 2.)).4, (b * b / 2.).4);
+    assert_eq!((b * (b / 2.)).0, (b * b / 2.).0);
 }
-
-// #[test]
-// fn scalar_division_associativity() {
-//     let b = Bivector::new(2., 3., 5., 7., 11., 13., 17., 19., 23., 29.);
-//     assert_eq!(b * (b * 2.), b * b * 2.);
-//     assert_eq!(b * 0.5, b / 2.);
-//     assert_eq!((b * (b / 2.)).2, (b * b / 2.).2);
-//     assert_eq!((b * (b / 2.)).4, (b * b / 2.).4);
-//     assert_eq!((b * (b / 2.)).0, (b * b / 2.).0);
-// }
