@@ -5,10 +5,10 @@ fn vector_autodif_test() {
     let x = Vector::new(1., 2., 3.);
     let v = Vector::new(-5., 7., 11.);
 
-    let ux = x / x.dot(x).sqrt();
-    let uv = v / v.dot(v).sqrt();
+    let ux = x / x.dot(x).value.sqrt();
+    let uv = v / v.dot(v).value.sqrt();
 
-    let p: Even = ux * uv;
+    let p = ux * uv;
     dbg!(p);
 
     // panic!("{:?}", p);
@@ -16,13 +16,13 @@ fn vector_autodif_test() {
 
 #[test]
 fn accel_derivative() {
-    let a = |x: Vector| -x / x.dot(x).powf(1.5);
+    let a = |x: Vector| -x / x.dot(x).value.powf(1.5);
     let x_0 = Vector::new(0., 0., 2.);
 
-    let norm = |v: Vector| v.dot(v).sqrt();
+    let norm = |v: Vector| v.dot(v).value.sqrt();
 
     let da = |x: Vector| {
-        let inv_det = x.dot(x).powf(-2.5);
+        let inv_det = x.dot(x).value.powf(-2.5);
         let Vector {
             e1: x,
             e2: y,

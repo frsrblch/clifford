@@ -87,6 +87,9 @@
 #[cfg(feature = "cga_3d")]
 pub mod cga_3d;
 
+#[cfg(feature = "ga_3d")]
+pub mod ga_3d;
+
 pub use proc_macros::clifford;
 
 pub trait GradeAdd<Rhs> {
@@ -104,49 +107,49 @@ pub trait Geometric<Rhs> {
     fn geo(self, rhs: Rhs) -> Self::Output;
 }
 
-// impl Geometric<f64> for f64 {
-//     type Output = f64;
-//     fn geo(self, rhs: Self) -> Self {
-//         self * rhs
-//     }
-// }
+impl Geometric<f64> for f64 {
+    type Output = f64;
+    fn geo(self, rhs: Self) -> Self {
+        self * rhs
+    }
+}
 
 pub trait Wedge<Rhs> {
     type Output;
     fn wedge(self, rhs: Rhs) -> Self::Output;
 }
 
-// impl Wedge<f64> for f64 {
-//     type Output = f64;
-//     fn wedge(self, rhs: Self) -> Self {
-//         self * rhs
-//     }
-// }
+impl Wedge<f64> for f64 {
+    type Output = f64;
+    fn wedge(self, rhs: Self) -> Self {
+        self * rhs
+    }
+}
 
 pub trait Dot<Rhs> {
     type Output;
     fn dot(self, rhs: Rhs) -> Self::Output;
 }
 
-// impl Dot<f64> for f64 {
-//     type Output = f64;
-//     fn dot(self, rhs: Self) -> Self {
-//         self * rhs
-//     }
-// }
+impl Dot<f64> for f64 {
+    type Output = f64;
+    fn dot(self, rhs: Self) -> Self {
+        self * rhs
+    }
+}
 
 pub trait Sandwich<Rhs> {
     type Output;
     fn sandwich(self, rhs: Rhs) -> Self::Output;
 }
 
-// impl Sandwich<f64> for f64 {
-//     type Output = f64;
-//
-//     fn sandwich(self, rhs: f64) -> Self::Output {
-//         rhs
-//     }
-// }
+impl Sandwich<f64> for f64 {
+    type Output = f64;
+
+    fn sandwich(self, rhs: f64) -> Self::Output {
+        rhs
+    }
+}
 
 pub trait Commutator<Rhs> {
     type Output;
@@ -168,12 +171,12 @@ pub trait Reverse {
     fn rev(self) -> Self::Output;
 }
 
-// impl Reverse for f64 {
-//     type Output = f64;
-//     fn rev(self) -> Self {
-//         self
-//     }
-// }
+impl Reverse for f64 {
+    type Output = f64;
+    fn rev(self) -> Self {
+        self
+    }
+}
 
 pub trait LeftComplement {
     type Output;
@@ -318,21 +321,7 @@ where
     }
 }
 
-#[derive(Debug, Default, Copy, Clone, PartialEq)]
-pub struct Zero;
-
-impl const std::ops::Add for Zero {
-    type Output = Zero;
-    #[inline]
-    fn add(self, _: Self) -> Self {
-        Zero
-    }
-}
-
-impl const std::ops::Sub for Zero {
-    type Output = Zero;
-    #[inline]
-    fn sub(self, _: Self) -> Self {
-        Zero
-    }
+pub trait GradeFilter<T> {
+    type Output;
+    fn filter(value: T) -> Self::Output;
 }

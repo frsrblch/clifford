@@ -20,8 +20,12 @@ required-features = ["cga_3d"]
 name = "cga_3d_tests"
 required-features = ["cga_3d"]
 
+[[test]]
+name = "ga_3d_tests"
+required-features = ["ga_3d"]
+
 [features]
-va_3d = []
+ga_3d = []
 pga_3d = []
 va_3d_mv = []
 cga_2d = []
