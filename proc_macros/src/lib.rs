@@ -12,7 +12,7 @@ use syn::LitInt;
 #[proc_macro]
 pub fn clifford(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let algebra = parse_macro_input!(input as Algebra);
-    algebra.define_mv().into()
+    algebra.define().into()
 }
 
 impl Parse for Algebra {

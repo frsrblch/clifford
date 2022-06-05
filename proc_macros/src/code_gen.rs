@@ -33,7 +33,7 @@ impl<T: ToTokens> Convert for T {
 }
 
 impl Algebra {
-    pub fn define_mv(self) -> TokenStream {
+    pub fn define(self) -> TokenStream {
         let traits = if self.is_homogenous() {
             quote! {
                 pub use crate::{
