@@ -1,252 +1,180 @@
-use crate::Zero;
-use std::ops::{Add, Mul};
-
-#[derive(Debug, Default, Copy, Clone, PartialEq)]
-pub struct Vector {
-    pub e1: f64,
-    pub e2: f64,
-    pub e3: f64,
-}
-
-impl Add<Zero> for Vector {
-    type Output = Vector;
-
-    fn add(self, _: Zero) -> Self::Output {
-        self
-    }
-}
-
-impl Add<Vector> for Zero {
-    type Output = Vector;
-
-    fn add(self, rhs: Vector) -> Self::Output {
-        rhs
-    }
-}
-
-#[derive(Debug, Default, Copy, Clone, PartialEq)]
-pub struct Bivector {
-    pub e12: f64,
-    pub e23: f64,
-    pub e13: f64,
-}
-
-impl Add<Zero> for Bivector {
-    type Output = Bivector;
-
-    fn add(self, _: Zero) -> Self::Output {
-        self
-    }
-}
-
-impl Add<Bivector> for Zero {
-    type Output = Bivector;
-
-    fn add(self, rhs: Bivector) -> Self::Output {
-        rhs
-    }
-}
-
-#[derive(Debug, Default, Copy, Clone, PartialEq, PartialOrd)]
-pub struct Trivector {
-    pub e123: f64,
-}
-
-impl Add<Zero> for Trivector {
-    type Output = Trivector;
-
-    fn add(self, _: Zero) -> Self::Output {
-        self
-    }
-}
-
-impl Add<Trivector> for Zero {
-    type Output = Trivector;
-
-    fn add(self, rhs: Trivector) -> Self::Output {
-        rhs
-    }
-}
-
-#[derive(Debug, Default, Copy, Clone, PartialEq)]
-pub struct Mv<S, V, B, I>(pub S, pub V, pub B, pub I);
-
-impl<SL, VL, BL, TL, SR, VR, BR, TR, SO, TO, SS, VVS, BBS, TT, ST, VBS, BVS, TS>
-    Mul<Mv<SR, VR, BR, TR>> for Mv<SL, VL, BL, TL>
-where
-    SS: Sum4<VVS, BBS, TT, Output = SO>,
-    SL: Mul<SR, Output = SS> + Mul<TR, Output = ST> + Copy,
-    VL: ScalarProduct<VR, Output = VVS> + TrivectorProduct<BR, Output = VBS> + Copy,
-    BL: ScalarProduct<BR, Output = BBS> + TrivectorProduct<VR, Output = BVS> + Copy,
-    TL: Mul<SR, Output = TS> + Mul<TR, Output = TT> + Copy,
-    ST: Sum4<VBS, BVS, TS, Output = TO>,
-    SR: Copy,
-    VR: Copy,
-    BR: Copy,
-    TR: Copy,
-{
-    type Output = Mv<SO, Zero, Zero, TO>;
-
-    fn mul(self, rhs: Mv<SR, VR, BR, TR>) -> Self::Output {
-        // vector: s*v, v*s, v*b, b*v, b*t, t*b
-        // bivect: s*b, v*v, v*t, b*s, b*b, t*v
-
-        Mv(
-            Sum4::sum4(
-                self.0 * rhs.0,
-                self.1.scalar_prod(rhs.1),
-                self.2.scalar_prod(rhs.2),
-                self.3 * rhs.3,
-            ),
-            Zero,
-            Zero,
-            Sum4::sum4(
-                self.0 * rhs.3,
-                self.1.trivector_prod(rhs.2),
-                self.2.trivector_prod(rhs.1),
-                self.3 * rhs.0,
-            ),
-        )
-    }
-}
-
-pub trait Sum4<B, C, D> {
-    type Output;
-    fn sum4(self, b: B, c: C, d: D) -> Self::Output;
-}
-
-impl<T, A, B, C, D, AB, ABC> Sum4<B, C, D> for A
-where
-    A: Add<B, Output = AB>,
-    AB: Add<C, Output = ABC>,
-    ABC: Add<D, Output = T>,
-{
-    type Output = T;
-    fn sum4(self, b: B, c: C, d: D) -> Self::Output {
-        self + b + c + d
-    }
-}
-
-pub trait Sum6<B, C, D, E, F> {
-    type Output;
-    fn sum6(self, b: B, c: C, d: D, e: E, f: F) -> Self::Output;
-}
-
-impl<T, A, B, C, D, E, F, AB, ABC, ABCD, ABCDE> Sum6<B, C, D, E, F> for A
-where
-    A: Add<B, Output = AB>,
-    AB: Add<C, Output = ABC>,
-    ABC: Add<D, Output = ABCD>,
-    ABCD: Add<E, Output = ABCDE>,
-    ABCDE: Add<F, Output = T>,
-{
-    type Output = T;
-
-    fn sum6(self, b: B, c: C, d: D, e: E, f: F) -> Self::Output {
-        self + b + c + d + e + f
-    }
-}
+use std::marker::PhantomData;
+use std::ops::{Add, Mul, Sub};
 
 pub trait ScalarProduct<Rhs> {
     type Output;
-    fn scalar_prod(self, rhs: Rhs) -> Self::Output;
-}
-
-impl<Lhs, Rhs> ScalarProduct<Rhs> for Lhs
-where
-    Lhs: Mul<Rhs, Output = f64>,
-{
-    type Output = f64;
-
-    fn scalar_prod(self, rhs: Rhs) -> Self::Output {
-        self * rhs
-    }
-}
-
-pub trait VectorProduct<Rhs> {
-    type Output;
-    fn vector_prod(self, rhs: Rhs) -> Self::Output;
-}
-
-impl<Lhs, Rhs> VectorProduct<Rhs> for Lhs
-where
-    Lhs: Mul<Rhs, Output = Vector>,
-{
-    type Output = Vector;
-
-    fn vector_prod(self, rhs: Rhs) -> Self::Output {
-        self * rhs
-    }
+    fn sp(self, rhs: Rhs) -> Self::Output;
 }
 
 pub trait BivectorProduct<Rhs> {
     type Output;
-    fn bivector_prod(self, rhs: Rhs) -> Self::Output;
+    fn bp(self, rhs: Rhs) -> Self::Output;
 }
 
-impl<Lhs, Rhs> BivectorProduct<Rhs> for Lhs
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct Zero;
+
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct Scalar<T, U> {
+    pub value: T,
+    marker: PhantomData<U>,
+}
+
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct Vector<T, U> {
+    pub e1: T,
+    pub e2: T,
+    pub e3: T,
+    marker: PhantomData<U>,
+}
+
+impl<T, U> Vector<T, U> {
+    pub fn new(e1: T, e2: T, e3: T) -> Self {
+        Vector {
+            e1,
+            e2,
+            e3,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<U> Vector<f64, U> {
+    pub fn f32(self) -> Vector<f32, U> {
+        Vector {
+            e1: self.e1 as f32,
+            e2: self.e2 as f32,
+            e3: self.e3 as f32,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<U> Vector<f32, U> {
+    pub fn f64(self) -> Vector<f64, U> {
+        Vector {
+            e1: self.e1 as f64,
+            e2: self.e2 as f64,
+            e3: self.e3 as f64,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<T, ULhs, URhs, UOut> ScalarProduct<Vector<T, URhs>> for Vector<T, ULhs>
 where
-    Lhs: Mul<Rhs, Output = Bivector>,
+    T: Mul<Output = T> + Add<Output = T> + Copy,
+    ULhs: Mul<URhs, Output = UOut>,
 {
-    type Output = Bivector;
+    type Output = Scalar<T, UOut>;
 
-    fn bivector_prod(self, rhs: Rhs) -> Self::Output {
-        self * rhs
+    fn sp(self, rhs: Vector<T, URhs>) -> Self::Output {
+        Scalar {
+            value: self.e1 * rhs.e1 + self.e2 * rhs.e2 + self.e3 * rhs.e3,
+            marker: PhantomData,
+        }
     }
 }
 
-pub trait TrivectorProduct<Rhs> {
-    type Output;
-    fn trivector_prod(self, rhs: Rhs) -> Self::Output;
-}
-
-impl<Lhs, Rhs> TrivectorProduct<Rhs> for Lhs
+impl<T, ULhs, URhs, UOut> BivectorProduct<Vector<T, URhs>> for Vector<T, ULhs>
 where
-    Lhs: Mul<Rhs, Output = Trivector>,
+    T: Mul<Output = T> + Sub<Output = T> + Copy,
+    ULhs: Mul<URhs, Output = UOut>,
 {
-    type Output = Trivector;
+    type Output = Bivector<T, UOut>;
 
-    fn trivector_prod(self, rhs: Rhs) -> Self::Output {
-        self * rhs
-    }
-}
-
-impl ScalarProduct<Vector> for Vector {
-    type Output = f64;
-
-    fn scalar_prod(self, rhs: Vector) -> Self::Output {
-        self.e1 * rhs.e1 + self.e2 * rhs.e2 + self.e3 * rhs.e3
-    }
-}
-
-impl BivectorProduct<Vector> for Vector {
-    type Output = Bivector;
-
-    fn bivector_prod(self, rhs: Vector) -> Self::Output {
+    fn bp(self, rhs: Vector<T, URhs>) -> Self::Output {
         Bivector {
             e12: self.e1 * rhs.e2 - self.e2 * rhs.e1,
             e23: self.e2 * rhs.e3 - self.e3 * rhs.e2,
-            e13: self.e1 * rhs.e3 - self.e3 * rhs.e1,
+            e31: self.e3 * rhs.e1 - self.e1 * rhs.e3,
+            marker: PhantomData,
         }
     }
 }
 
-impl ScalarProduct<Bivector> for Bivector {
-    type Output = f64;
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct Bivector<T, U> {
+    pub e12: T,
+    pub e23: T,
+    pub e31: T,
+    marker: PhantomData<U>,
+}
 
-    fn scalar_prod(self, rhs: Bivector) -> Self::Output {
-        -(self.e12 * rhs.e12 + self.e13 * rhs.e13 + self.e13 * rhs.e13)
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct Trivector<T, U> {
+    pub e123: T,
+    marker: PhantomData<U>,
+}
+
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct Multivector<G0, G1, G2, G3>(pub G0, pub G1, pub G2, pub G3);
+
+impl<T, ULhs, URhs, UOut> Mul<Vector<T, URhs>> for Vector<T, ULhs>
+where
+    Vector<T, ULhs>: ScalarProduct<Vector<T, URhs>, Output = Scalar<T, UOut>>
+        + BivectorProduct<Vector<T, URhs>, Output = Bivector<T, UOut>>
+        + Copy,
+    Vector<T, URhs>: Copy,
+    ULhs: Mul<URhs, Output = UOut>,
+{
+    type Output = Multivector<Scalar<T, UOut>, Zero, Bivector<T, UOut>, Zero>;
+
+    fn mul(self, rhs: Vector<T, URhs>) -> Self::Output {
+        Multivector(self.sp(rhs), Zero, self.bp(rhs), Zero)
     }
 }
 
-impl BivectorProduct<Bivector> for Bivector {
-    type Output = Bivector;
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+pub struct Length;
 
-    fn bivector_prod(self, rhs: Bivector) -> Self::Output {
-        Bivector {
-            e12: self.e13 * rhs.e23 - self.e23 * rhs.e12,
-            e23: self.e13 * rhs.e12 - self.e12 * rhs.e13,
-            e13: self.e13 * rhs.e12 - self.e12 * rhs.e13,
-        }
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+pub struct Force;
+
+#[allow(non_camel_case_types)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+pub struct kg_m2_per_s2;
+
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+pub struct KgM2PerS2;
+
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+pub struct KgPerM3;
+
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+pub struct SqrtM;
+
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+pub struct CbrtM2;
+
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+pub struct Energy;
+
+impl Mul<Force> for Length {
+    type Output = Energy;
+    fn mul(self, _: Force) -> Self::Output {
+        Energy
     }
+}
+
+impl Mul<Length> for Force {
+    type Output = Energy;
+    fn mul(self, _: Length) -> Self::Output {
+        Energy
+    }
+}
+
+#[test]
+fn unit_conversion() {
+    let d: Vector<f64, Length> = Vector::new(0., 1., 0.);
+    let f: Vector<f64, Force> = Vector::new(1., 0., 0.);
+
+    let forque = d * f;
+
+    fn name_of<T>(_: &T) -> &'static str {
+        std::any::type_name::<T>()
+    }
+
+    println!("{}", name_of(&forque));
+    // panic!("{:#?}", forque);
 }

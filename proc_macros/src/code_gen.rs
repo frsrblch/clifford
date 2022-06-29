@@ -7,20 +7,13 @@ use syn::{
     parse_quote, Expr, GenericParam, Generics, ImplItem, ItemImpl, ItemStruct, WherePredicate,
 };
 
-// TODO refactor
 // TODO fn impl_const(&ItemImpl) -> TokenStream
-// TODO fn Grade::new
 // TODO Multivector::grade(self) -> Grade for
 // TODO sandwich product that returns identical grades (this is challenging for multivectors)
-//          perhaps the individual grade products should be a generic GradeProduct<Rhs, Grade> trate
-//          e.g.:
-//              Zero: GradeProduct<Vector, Vector, Output = Zero>
-//              f64: GradeProduct<Vector, Vector, Output = Vector>
-//              Bivector: GradeProduct<Vector, Vector, Output = Vector>
-//          perhaps have a GradeFilter<Input>
-//              Zero: GradeFilter<_, Output = Zero>,
-//              Vector: GradeFilter<Vector, Output = Vector>,
-//              allows the compiler to eliminate calculations that are filtered out
+//        perhaps have a GradeFilter<Input>
+//          Zero: GradeFilter<_, Output = Zero>,
+//          Vector: GradeFilter<Vector, Output = Vector>,
+//          allows the compiler to eliminate calculations that are filtered out
 
 trait Convert {
     fn convert<U: syn::parse::Parse>(&self) -> U;
@@ -208,17 +201,17 @@ impl UnaryOp {
                             let product = self.call(b);
                             match product {
                                 Product::Pos(b_out) if b_out == blade => {
-                                    Some(access_field(ty, b, quote!(self)))
+                                    Some(access_blade(ty, b, quote!(self)))
                                 }
                                 Product::Neg(b_out) if b_out == blade => {
-                                    let expr = access_field(ty, b, quote!(self));
+                                    let expr = access_blade(ty, b, quote!(self));
                                     Some(parse_quote! { - #expr })
                                 }
                                 _ => None,
                             }
                         })
                         .collect();
-                    assign_field(blade, &sum)
+                    assign_blade(blade, &sum)
                 });
                 let ty = grade.ident();
                 parse_quote! {
@@ -677,7 +670,7 @@ impl ProductOp {
                     self.product_expr(lhs, lhs_blade, rhs, rhs_blade, blade)
                 })
                 .collect();
-            assign_field(blade, &sum)
+            assign_blade(blade, &sum)
         });
 
         let ty = grade.ident();
@@ -701,8 +694,8 @@ fn sum_grade_fields_expr(op: SumOp, grade: Grade, lhs: AlgebraType, rhs: Algebra
 
     let fields = grade.blades().map(|blade| {
         let field = blade.field();
-        let lhs = access_field(lhs, blade, quote!(self));
-        let rhs = access_field(rhs, blade, quote!(rhs));
+        let lhs = access_blade(lhs, blade, quote!(self));
+        let rhs = access_blade(rhs, blade, quote!(rhs));
         quote!(#field: #trait_ty::#trait_fn(#lhs, #rhs))
     });
 
@@ -738,7 +731,7 @@ fn access_grade(parent: AlgebraType, grade: Grade, ident: TokenStream) -> syn::E
     }
 }
 
-fn assign_field(blade: Blade, sum: &Vec<syn::Expr>) -> TokenStream {
+fn assign_blade(blade: Blade, sum: &Vec<syn::Expr>) -> TokenStream {
     let expr = if sum.is_empty() {
         quote! { 0. }
     } else {

@@ -516,7 +516,6 @@ impl IntoIterator for AlgebraType {
 }
 
 impl AlgebraType {
-    #[allow(dead_code)]
     pub fn is_zero(self) -> bool {
         matches!(self, AlgebraType::Zero(_))
     }
@@ -558,6 +557,7 @@ impl AlgebraType {
     pub fn is_generic(self) -> bool {
         matches!(self, AlgebraType::Multivector(mv) if mv.is_generic())
     }
+
     pub fn is_float(self) -> bool {
         matches!(self, Self::Float(_))
     }
@@ -581,12 +581,12 @@ impl AlgebraType {
     }
 
     pub fn from_iter<I: IntoIterator<Item = Product>>(iter: I, algebra: Algebra) -> Self {
-        let mut grades = std::collections::HashSet::<Grade>::default();
-        for product in iter {
-            if let Some(blade) = product.blade() {
-                grades.insert(blade.grade());
-            }
-        }
+        let grades = iter
+            .into_iter()
+            .filter_map(Product::blade)
+            .map(Blade::grade)
+            .collect::<std::collections::HashSet<_>>();
+
         match grades.len() {
             0 => Self::Zero(algebra),
             1 => Self::Grade(grades.into_iter().next().unwrap()),
@@ -810,6 +810,7 @@ impl std::ops::BitOr for GradeSet {
     }
 }
 
+// TODO MulAssign/DivAssign
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum ProductOp {
     Mul,
@@ -886,12 +887,12 @@ impl ProductOp {
         };
 
         if product.is_pos() {
-            let lhs = access_field(lhs, lhs_blade, quote!(self));
-            let rhs = access_field(rhs, rhs_blade, quote!(rhs));
+            let lhs = access_blade(lhs, lhs_blade, quote!(self));
+            let rhs = access_blade(rhs, rhs_blade, quote!(rhs));
             Some(parse_quote! { #lhs #s #rhs })
         } else {
-            let lhs = access_field(lhs, lhs_blade, quote!(self));
-            let rhs = access_field(rhs, rhs_blade, quote!(rhs));
+            let lhs = access_blade(lhs, lhs_blade, quote!(self));
+            let rhs = access_blade(rhs, rhs_blade, quote!(rhs));
             Some(parse_quote! { -(#lhs #s #rhs) })
         }
     }
@@ -943,7 +944,7 @@ impl ProductOp {
     }
 }
 
-pub fn access_field(parent: AlgebraType, blade: Blade, ident: TokenStream) -> Expr {
+pub fn access_blade(parent: AlgebraType, blade: Blade, ident: TokenStream) -> Expr {
     let member = match parent {
         AlgebraType::Float(_) => return ident.convert(),
         AlgebraType::Grade(_) => syn::Member::Named(blade.field()),
@@ -955,6 +956,7 @@ pub fn access_field(parent: AlgebraType, blade: Blade, ident: TokenStream) -> Ex
     }
 }
 
+// TODO AddAssign/SubAssign
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum SumOp {
     Add,

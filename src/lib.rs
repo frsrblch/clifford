@@ -4,13 +4,15 @@
     const_default_impls,
     const_convert
 )]
-// TODO add efficient implementation for null cone geometries
 
 //! Proc macros for defining Clifford algebras of arbitrary dimension
 //!
 //! [`Feature set`]
 //!
 //! Models of geometry:
+//! - [ ] Generic types
+//!     - [ ] f32/f64 conversions
+//!     - [ ] dimensional analysis
 //! - [ ] Euclidean
 //!     - [ ] Meet
 //!     - [ ] Join
@@ -67,11 +69,15 @@
 //! Norm-based operations:
 //! - [ ] Inverse
 //! - [ ] Normalize
+//! - [ ] NormalizeSquared
 //!
 //! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features.html
 
-// pub mod va_3d_manual;
-//
+pub mod va_3d_manual;
+
+#[cfg(feature = "ga_3d")]
+pub mod ga_3d;
+
 // #[cfg(feature = "va_3d_mv")]
 // pub mod va_3d_mv;
 
@@ -84,11 +90,8 @@
 // #[cfg(feature = "cga_2d")]
 // pub mod cga_2d;
 
-#[cfg(feature = "cga_3d")]
-pub mod cga_3d;
-
-#[cfg(feature = "ga_3d")]
-pub mod ga_3d;
+// #[cfg(feature = "cga_3d")]
+// pub mod cga_3d;
 
 pub use proc_macros::clifford;
 
@@ -304,20 +307,6 @@ where
         let rhs = rhs.left_comp();
         let output_complement = lhs.sandwich(rhs);
         output_complement.right_comp()
-    }
-}
-
-pub trait IsIdeal {
-    fn is_ideal(&self) -> bool;
-}
-
-impl<T> IsIdeal for T
-where
-    T: PartialEq<T::Output> + Bulk + Copy,
-{
-    #[inline]
-    fn is_ideal(&self) -> bool {
-        self.eq(&self.bulk())
     }
 }
 
