@@ -44,7 +44,9 @@ pub fn impl_const(item_impl: &ItemImpl) -> TokenStream {
     let trait_ = quote!(#bang #path #for_);
     quote! {
         #(#attrs)*
-        #defaultness #unsafety #impl_token #impl_generics const #trait_ #self_ty #where_clause {
+        #defaultness #unsafety #impl_token #impl_generics const #trait_ #self_ty
+        #where_clause
+        {
             #(#items)*
         }
     }
