@@ -26,6 +26,30 @@ impl<T: ToTokens> Convert for T {
     }
 }
 
+#[allow(dead_code)]
+pub fn impl_const(item_impl: &ItemImpl) -> TokenStream {
+    let ItemImpl {
+        attrs,
+        defaultness,
+        unsafety,
+        impl_token,
+        generics,
+        trait_,
+        self_ty,
+        brace_token: _,
+        items,
+    } = item_impl;
+    let (impl_generics, _, where_clause) = generics.split_for_impl();
+    let (bang, path, for_) = trait_.as_ref().expect("item must be trait impl");
+    let trait_ = quote!(#bang #path #for_);
+    quote! {
+        #(#attrs)*
+        #defaultness #unsafety #impl_token #impl_generics const #trait_ #self_ty #where_clause {
+            #(#items)*
+        }
+    }
+}
+
 impl Algebra {
     pub fn define(self) -> TokenStream {
         let traits = if self.is_homogenous() {
@@ -180,6 +204,7 @@ impl UnaryOp {
         let trait_fn = self.trait_fn();
         let expr = self.expr(ty);
         parse_quote! {
+            #[inline]
             fn #trait_fn(self) -> Self::Output {
                 #expr
             }
@@ -815,6 +840,7 @@ impl AlgebraType {
                 });
                 let expr_fields = grade.blades().map(|b| b.field());
                 Some(parse_quote! {
+                    #[inline]
                     pub const fn new(#(#fields),*) -> #ty {
                         #ident {
                             #(#expr_fields,)*
@@ -1453,6 +1479,7 @@ mod tests {
                 G2: crate::Reverse<Output = G2Out>
             {
                 type Output = Multivector<G0Out, G1Out, G2Out>;
+                #[inline]
                 fn rev(self) -> Self::Output {
                     Multivector(
                         crate::Reverse::rev(self.0),
@@ -1481,6 +1508,7 @@ mod tests {
                 G2: crate::RightComplement<Output = G0Out>
             {
                 type Output = Multivector<G0Out, G1Out, G2Out>;
+                #[inline]
                 fn right_comp(self) -> Self::Output {
                     Multivector(
                         crate::RightComplement::right_comp(self.2),
@@ -1528,6 +1556,7 @@ mod tests {
 
         let actual = vector.new_fn().unwrap();
         let expected = parse_quote! {
+            #[inline]
             pub const fn new(e1: f64, e2: f64) -> Vector {
                 Vector {
                     e1,
@@ -1607,4 +1636,27 @@ mod tests {
     //     let algebra = Algebra::new(4, 1, 0).define();
     //     write_to_file(&algebra);
     // }
+
+    #[test]
+    fn impl_item_to_const() {
+        let item_impl: ItemImpl = parse_quote! {
+            #[attr]
+            impl<T> Default for A<T> where T: Default {
+                fn default() -> Self {
+                    todo!()
+                }
+            }
+        };
+
+        let expected = quote! {
+            #[attr]
+            impl<T> const Default for A<T> where T: Default {
+                fn default() -> Self {
+                    todo!()
+                }
+            }
+        };
+
+        assert_eq!(expected.to_string(), impl_const(&item_impl).to_string());
+    }
 }
