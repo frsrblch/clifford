@@ -18,22 +18,6 @@ impl<T: ToTokens, U: syn::parse::Parse> Convert<U> for T {
     }
 }
 
-pub struct Zero;
-
-impl Zero {
-    pub fn ident() -> Ident {
-        parse_quote! { Zero }
-    }
-
-    pub fn ty() -> Type {
-        Self::ident().convert()
-    }
-
-    pub fn expr() -> Expr {
-        Self::ident().convert()
-    }
-}
-
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Algebra {
     one: u8,
@@ -127,6 +111,22 @@ impl Algebra {
 
     pub fn mv(self) -> AlgebraType {
         AlgebraType::Multivector(Multivector::new(self))
+    }
+}
+
+pub struct Zero;
+
+impl Zero {
+    pub fn ident() -> Ident {
+        parse_quote! { Zero }
+    }
+
+    pub fn ty() -> Type {
+        Self::ident().convert()
+    }
+
+    pub fn expr() -> Expr {
+        Self::ident().convert()
     }
 }
 
