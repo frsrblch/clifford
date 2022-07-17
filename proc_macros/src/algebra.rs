@@ -2,7 +2,24 @@ use proc_macro2::{Span, TokenStream};
 pub use quote::{quote, ToTokens};
 use std::fmt::Formatter;
 use std::iter::{empty, once};
-use syn::{parse_quote, parse_str, Expr, Ident, Type};
+use syn::{parse_str, Expr, Ident, Type};
+
+// SHOULD TRAITS BE DEFINED FOR EACH ALGEBRA?
+//  - pro: don't require manual implementation for f32/f64
+//  - pro: no dependency on clifford crate, algebra can be defined anywhere
+//  - pro: all traits can have algebra-specific definitions or implementations
+
+macro_rules! parse_quote {
+    ($($tt:tt)*) => {
+        {
+            let tokens = quote::quote!($($tt)*);
+            match std::panic::catch_unwind(|| syn::parse_quote::parse(tokens.clone())) {
+                Ok(tokens) => tokens,
+                Err(_) => panic!("{}", tokens.to_string()),
+            }
+        }
+    };
+}
 
 // TODO reconfigure to accommodate larger geometries (BladeSet, GradeSet, etc)
 // TODO pass in specialized grade types (e.g., IdealPoints (pga), DualPlanes (cga))
@@ -23,16 +40,28 @@ pub struct Algebra {
     one: u8,
     neg_one: u8,
     zero: u8,
+    pub has_scalar_type: bool,
 }
 
 impl Algebra {
+    pub fn new_with_scalar(one: u8, neg_one: u8, zero: u8) -> Self {
+        let mut algebra = Algebra::new(one, neg_one, zero);
+        algebra.has_scalar_type = true;
+        algebra
+    }
+
     pub fn new(one: u8, neg_one: u8, zero: u8) -> Self {
         assert!(
             one + zero + neg_one <= 6,
             "too many bases to define algebra"
         );
 
-        Self { one, zero, neg_one }
+        Self {
+            one,
+            zero,
+            neg_one,
+            has_scalar_type: false,
+        }
     }
 
     pub fn basis(self, index: u8) -> Basis {
@@ -306,12 +335,24 @@ impl Grade {
         }
     }
 
-    pub fn ident(self) -> Ident {
-        parse_str(self.name()).unwrap()
+    pub fn ident(self) -> Option<Ident> {
+        if self.is_scalar() && !self.1.has_scalar_type {
+            None
+        } else {
+            Some(parse_str(self.name()).unwrap())
+        }
     }
 
     pub fn ty(self) -> Type {
-        parse_str(self.name()).unwrap()
+        if self.is_scalar() && !self.1.has_scalar_type {
+            parse_quote!(f64)
+        } else {
+            parse_str(self.name()).unwrap()
+        }
+    }
+
+    pub fn is_scalar(self) -> bool {
+        self.0 == 0
     }
 
     pub fn blades(self) -> GradeBlades {
@@ -335,9 +376,13 @@ impl Grade {
 pub struct Blade(pub BladeSet, pub Algebra);
 
 impl Blade {
-    pub fn field(self) -> Ident {
+    pub fn field(self) -> Option<Ident> {
         if self.is_scalar() {
-            Ident::new("value", Span::mixed_site())
+            if self.1.has_scalar_type {
+                Some(Ident::new("value", Span::mixed_site()))
+            } else {
+                None
+            }
         } else {
             let mut output = "e".to_string();
 
@@ -347,7 +392,7 @@ impl Blade {
                 }
             }
 
-            Ident::new(&output, Span::mixed_site())
+            Some(Ident::new(&output, Span::mixed_site()))
         }
     }
 
@@ -953,7 +998,13 @@ impl ProductOp {
 pub fn access_blade(parent: AlgebraType, blade: Blade, ident: TokenStream) -> Expr {
     let member = match parent {
         AlgebraType::Float(_) => return ident.convert(),
-        AlgebraType::Grade(_) => syn::Member::Named(blade.field()),
+        AlgebraType::Grade(_) => syn::Member::Named({
+            if let Some(field) = blade.field() {
+                field
+            } else {
+                return parse_quote!(#ident);
+            }
+        }),
         AlgebraType::Multivector(_) => blade.grade().mv_field(),
         AlgebraType::Zero(_) => unreachable!("no fields to access"),
     };
@@ -1187,25 +1238,25 @@ mod tests {
     #[test]
     #[should_panic]
     fn no_bases() {
-        Algebra::new(0, 0, 0).square(0);
+        Algebra::new_with_scalar(0, 0, 0).square(0);
     }
 
     #[test]
     #[should_panic]
     fn too_many_bases() {
-        Algebra::new(7, 0, 0);
+        Algebra::new_with_scalar(7, 0, 0);
     }
 
     #[test]
     fn one_d() {
-        let alg = Algebra::new(1, 0, 0);
+        let alg = Algebra::new_with_scalar(1, 0, 0);
         assert!(alg.square(1).is_pos());
         assert!(std::panic::catch_unwind(|| alg.square(2)).is_err());
     }
 
     #[test]
     fn pga() {
-        let alg = Algebra::new(3, 0, 1);
+        let alg = Algebra::new_with_scalar(3, 0, 1);
         assert!(alg.square(3).is_pos());
         assert_eq!(Product::Zero, alg.square(4));
         assert!(std::panic::catch_unwind(|| alg.square(5)).is_err());
@@ -1213,7 +1264,7 @@ mod tests {
 
     #[test]
     fn cga() {
-        let bases = Algebra::new(4, 1, 0);
+        let bases = Algebra::new_with_scalar(4, 1, 0);
         assert!(bases.square(4).is_pos());
         assert!(bases.square(5).is_neg());
         assert!(std::panic::catch_unwind(|| bases.square(6)).is_err());
@@ -1242,14 +1293,14 @@ mod tests {
 
     #[test]
     fn bases_pseudovector() {
-        let alg = Algebra::new(3, 0, 0);
+        let alg = Algebra::new_with_scalar(3, 0, 0);
 
         assert_eq!(alg.blade(0b_0111), alg.pseudoscalar());
     }
 
     #[test]
     fn grade_blades() {
-        let alg = Algebra::new(3, 1, 0);
+        let alg = Algebra::new_with_scalar(3, 1, 0);
 
         assert_eq!(1, alg.grade(0).blades().count());
         assert_eq!(4, alg.grade(1).blades().count());
@@ -1260,7 +1311,7 @@ mod tests {
 
     #[test]
     fn blade_multiplication() {
-        let alg = Algebra::new(3, 1, 1);
+        let alg = Algebra::new_with_scalar(3, 1, 1);
         let e12 = alg.blade(0b_0011);
         let e23 = alg.blade(0b_0110);
         let e24 = alg.blade(0b_1010);
@@ -1275,7 +1326,7 @@ mod tests {
 
     #[test]
     fn blade_dot() {
-        let alg = Algebra::new(3, 1, 0);
+        let alg = Algebra::new_with_scalar(3, 1, 0);
         let e12 = alg.blade(0b_0011);
         let e23 = alg.blade(0b_0110);
         let e34 = alg.blade(0b_1100);
@@ -1287,7 +1338,7 @@ mod tests {
 
     #[test]
     fn blade_wedge() {
-        let alg = Algebra::new(3, 1, 0);
+        let alg = Algebra::new_with_scalar(3, 1, 0);
         let e12 = alg.blade(0b_0011);
         let e23 = alg.blade(0b_0110);
         let e34 = alg.blade(0b_1100);
@@ -1299,7 +1350,7 @@ mod tests {
 
     #[test]
     fn blade_left_contraction() {
-        let algebra = Algebra::new(3, 0, 1);
+        let algebra = Algebra::new_with_scalar(3, 0, 1);
         let scalar = algebra.scalar();
         let e1 = algebra.blade(1);
 
@@ -1311,7 +1362,7 @@ mod tests {
 
     #[test]
     fn blade_right_contraction() {
-        let algebra = Algebra::new(3, 0, 1);
+        let algebra = Algebra::new_with_scalar(3, 0, 1);
         let scalar = algebra.scalar();
         let e1 = algebra.blade(1);
 
@@ -1323,26 +1374,26 @@ mod tests {
 
     #[test]
     fn complement_symmetr_g1() {
-        assert!(Algebra::new(1, 0, 0).symmetrical_complements());
+        assert!(Algebra::new_with_scalar(1, 0, 0).symmetrical_complements());
     }
 
     #[test]
     fn complement_symmetr_g2() {
-        assert!(!Algebra::new(2, 0, 0).symmetrical_complements());
+        assert!(!Algebra::new_with_scalar(2, 0, 0).symmetrical_complements());
     }
 
     #[test]
     fn complement_symmetr_g3() {
-        assert!(Algebra::new(3, 0, 0).symmetrical_complements());
+        assert!(Algebra::new_with_scalar(3, 0, 0).symmetrical_complements());
     }
 
     #[test]
     fn complement_symmetr_g4() {
-        assert!(!Algebra::new(4, 0, 0).symmetrical_complements());
+        assert!(!Algebra::new_with_scalar(4, 0, 0).symmetrical_complements());
     }
 
     #[test]
     fn complement_symmetr_g5() {
-        assert!(Algebra::new(5, 0, 0).symmetrical_complements());
+        assert!(Algebra::new_with_scalar(5, 0, 0).symmetrical_complements());
     }
 }

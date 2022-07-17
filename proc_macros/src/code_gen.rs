@@ -3,9 +3,19 @@ use itertools::iproduct;
 use proc_macro2::{Ident, TokenStream};
 use std::iter::once;
 use syn::token::{Brace, For, Impl};
-use syn::{
-    parse_quote, Expr, GenericParam, Generics, ImplItem, ItemImpl, ItemStruct, WherePredicate,
-};
+use syn::{Expr, GenericParam, Generics, ImplItem, ItemImpl, ItemStruct, WherePredicate};
+
+macro_rules! parse_quote {
+    ($($tt:tt)*) => {
+        {
+            let tokens = quote::quote!($($tt)*);
+            match std::panic::catch_unwind(|| syn::parse_quote::parse(tokens.clone())) {
+                Ok(tokens) => tokens,
+                Err(_) => panic!("{}", tokens.to_string()),
+            }
+        }
+    };
+}
 
 // TODO fn impl_const(&ItemImpl) -> TokenStream
 // TODO Multivector::grade(self) -> Grade for
@@ -239,11 +249,15 @@ impl UnaryOp {
                         .collect();
                     assign_blade(blade, &sum)
                 });
-                let ty = grade.ident();
-                parse_quote! {
-                    #ty {
-                        #( #fields, )*
+
+                if let Some(ident) = grade.ident() {
+                    parse_quote! {
+                        #ident {
+                            #( #fields, )*
+                        }
                     }
+                } else {
+                    parse_quote!(#(#fields)*)
                 }
             }
             AlgebraType::Multivector(mv) => {
@@ -699,11 +713,14 @@ impl ProductOp {
             assign_blade(blade, &sum)
         });
 
-        let ty = grade.ident();
-        parse_quote! {
-            #ty {
-                #( #fields, )*
+        if let Some(ident) = grade.ident() {
+            parse_quote! {
+                #ident {
+                    #( #fields, )*
+                }
             }
+        } else {
+            parse_quote!(#(#fields)*)
         }
     }
 }
@@ -716,22 +733,29 @@ fn sum_grade_fields_expr(op: SumOp, grade: Grade, lhs: AlgebraType, rhs: Algebra
     let trait_ty = op.trait_ty_std();
     let trait_fn = op.trait_fn_std();
 
-    let ty = grade.ident();
-
     let fields = grade.blades().map(|blade| {
-        let field = blade.field();
         let lhs = access_blade(lhs, blade, quote!(self));
         let rhs = access_blade(rhs, blade, quote!(rhs));
-        quote!(#field: #trait_ty::#trait_fn(#lhs, #rhs))
+        quote!(#trait_ty::#trait_fn(#lhs, #rhs))
     });
 
-    parse_quote! {
-        #ty {
-            #(#fields,)*
+    if let Some(ident) = grade.ident() {
+        let idents = grade.blades().map(|blade| {
+            let field = blade.field().unwrap();
+            quote!(#field)
+        });
+
+        parse_quote! {
+            #ident {
+                #(#idents: #fields,)*
+            }
         }
+    } else {
+        parse_quote!(#(#fields)*)
     }
 }
 
+// TODO replace with enum
 const LHS_SUFFIX: &'static str = "Lhs";
 const RHS_SUFFIX: &'static str = "Rhs";
 const OUT_SUFFIX: &'static str = "Out";
@@ -763,8 +787,11 @@ fn assign_blade(blade: Blade, sum: &Vec<syn::Expr>) -> TokenStream {
     } else {
         quote! { #( #sum )+* }
     };
-    let field = blade.field();
-    quote! { #field: #expr }
+    if let Some(field) = blade.field() {
+        quote! { #field: #expr }
+    } else {
+        quote! { #expr }
+    }
 }
 
 impl AlgebraType {
@@ -776,9 +803,9 @@ impl AlgebraType {
             }),
             Self::Float(_) => None,
             Self::Grade(grade) => {
-                let ty = grade.ident();
+                let ty = grade.ident()?;
                 let fields = grade.blades().map(|blade| {
-                    let f = blade.field();
+                    let f = blade.field().unwrap();
                     quote! { pub #f: f64, }
                 });
                 Some(parse_quote! {
@@ -834,12 +861,12 @@ impl AlgebraType {
         match self {
             AlgebraType::Grade(grade) => {
                 let ty = grade.ty();
-                let ident = grade.ident();
+                let ident = grade.ident()?;
                 let fields = grade.blades().map(|b| {
-                    let f = b.field();
+                    let f = b.field().unwrap();
                     quote! { #f: f64 }
                 });
-                let expr_fields = grade.blades().map(|b| b.field());
+                let expr_fields = grade.blades().map(|b| b.field().unwrap());
                 Some(parse_quote! {
                     #[inline]
                     pub const fn new(#(#fields),*) -> #ty {
@@ -925,7 +952,7 @@ mod tests {
 
     #[test]
     fn mv_mv_bivector_product() {
-        let algebra = Algebra::new(3, 0, 0);
+        let algebra = Algebra::new_with_scalar(3, 0, 0);
         let mv = AlgebraType::Multivector(Multivector::new(algebra));
 
         let impl_item = ProductOp::Grade(algebra.grade(2))
@@ -940,7 +967,7 @@ mod tests {
 
     #[test]
     fn mv_mv_product() {
-        let algebra = Algebra::new(2, 0, 0);
+        let algebra = Algebra::new_with_scalar(2, 0, 0);
         let mv = AlgebraType::Multivector(Multivector::new(algebra));
 
         let impl_item = ProductOp::Mul.item_impl(mv, mv).unwrap();
@@ -953,7 +980,7 @@ mod tests {
 
     #[test]
     fn vector_product_of_two_vectors_is_zero() {
-        let algebra = Algebra::new(2, 0, 0);
+        let algebra = Algebra::new_with_scalar(2, 0, 0);
         let vector = AlgebraType::Grade(algebra.grade(1));
 
         // <vector * vector>_1 = 0
@@ -969,7 +996,7 @@ mod tests {
 
     #[test]
     fn vector_product_of_vectors_and_bivector_is_vector() {
-        let algebra = Algebra::new(3, 0, 0);
+        let algebra = Algebra::new_with_scalar(3, 0, 0);
         let vector = AlgebraType::Grade(algebra.grade(1));
         let bivector = AlgebraType::Grade(algebra.grade(2));
 
@@ -986,7 +1013,7 @@ mod tests {
 
     #[test]
     fn vector_vector_product() {
-        let algebra = Algebra::new(3, 0, 0);
+        let algebra = Algebra::new_with_scalar(3, 0, 0);
         let vector = AlgebraType::Grade(algebra.grade(1));
 
         let impl_item = ProductOp::Mul.item_impl(vector, vector).unwrap();
@@ -1006,7 +1033,7 @@ mod tests {
 
     #[test]
     fn scalar_scalar_geo() {
-        let algebra = Algebra::new(3, 0, 0);
+        let algebra = Algebra::new_with_scalar(3, 0, 0);
         let scalar = AlgebraType::Grade(algebra.grade(0));
 
         let impl_item = ProductOp::Geometric.item_impl(scalar, scalar).unwrap();
@@ -1028,7 +1055,7 @@ mod tests {
 
     #[test]
     pub fn scalar_mv_scalar_product() {
-        let g2 = Algebra::new(2, 0, 0);
+        let g2 = Algebra::new_with_scalar(2, 0, 0);
         let scalar = g2.grade(0);
 
         let actual = ProductOp::Grade(scalar)
@@ -1057,7 +1084,7 @@ mod tests {
 
     #[test]
     pub fn scalar_mv_mul() {
-        let algebra = Algebra::new(3, 0, 0);
+        let algebra = Algebra::new_with_scalar(3, 0, 0);
         let scalar = algebra.grade(0);
 
         let actual = ProductOp::Mul
@@ -1096,7 +1123,7 @@ mod tests {
 
     #[test]
     fn mul_scalars_is_none() {
-        let algebra = Algebra::new(3, 0, 0);
+        let algebra = Algebra::new_with_scalar(3, 0, 0);
         let scalar = AlgebraType::Grade(algebra.grade(0));
         let item_impl = ProductOp::Mul.item_impl(scalar, scalar).unwrap();
         let expected = parse_quote! {
@@ -1116,7 +1143,7 @@ mod tests {
 
     #[test]
     fn intermediate_type_test() {
-        let algebra = Algebra::new(3, 0, 0);
+        let algebra = Algebra::new_with_scalar(3, 0, 0);
         let mv = algebra.mv();
         let bivector = algebra.grade(2);
         let trivector = algebra.grade(3);
@@ -1133,7 +1160,7 @@ mod tests {
 
     #[test]
     fn last_type_test() {
-        let algebra = Algebra::new(3, 0, 0);
+        let algebra = Algebra::new_with_scalar(3, 0, 0);
         let mv = algebra.mv();
         let bivector = algebra.grade(2);
 
@@ -1152,7 +1179,7 @@ mod tests {
 
     #[test]
     fn mv_generics_test() {
-        let algebra = Algebra::new(2, 0, 0);
+        let algebra = Algebra::new_with_scalar(2, 0, 0);
         let mv = algebra.mv();
         let op = ProductOp::Mul;
         let item_impl = op.item_impl(mv, mv).unwrap();
@@ -1170,7 +1197,7 @@ mod tests {
 
     #[test]
     fn sum_zeros() {
-        let algebra = Algebra::new(3, 0, 0);
+        let algebra = Algebra::new_with_scalar(3, 0, 0);
         let zero = AlgebraType::Zero(algebra);
 
         let actual = SumOp::Add.item_impl(zero, zero).unwrap();
@@ -1190,7 +1217,7 @@ mod tests {
 
     #[test]
     fn sum_vectors() {
-        let algebra = Algebra::new(3, 0, 0);
+        let algebra = Algebra::new_with_scalar(3, 0, 0);
         let vector = AlgebraType::Grade(algebra.grade(1));
 
         let actual = SumOp::Add.item_impl(vector, vector).unwrap();
@@ -1214,7 +1241,7 @@ mod tests {
 
     #[test]
     fn sub_vectors() {
-        let algebra = Algebra::new(3, 0, 0);
+        let algebra = Algebra::new_with_scalar(3, 0, 0);
         let vector = AlgebraType::Grade(algebra.grade(1));
 
         let actual = SumOp::Sub.item_impl(vector, vector).unwrap();
@@ -1238,7 +1265,7 @@ mod tests {
 
     #[test]
     fn sum_vector_and_zero() {
-        let algebra = Algebra::new(3, 0, 0);
+        let algebra = Algebra::new_with_scalar(3, 0, 0);
         let zero = AlgebraType::Zero(algebra);
         let vector = AlgebraType::Grade(algebra.grade(1));
 
@@ -1259,7 +1286,7 @@ mod tests {
 
     #[test]
     fn sum_zero_and_vector() {
-        let algebra = Algebra::new(3, 0, 0);
+        let algebra = Algebra::new_with_scalar(3, 0, 0);
         let zero = AlgebraType::Zero(algebra);
         let vector = AlgebraType::Grade(algebra.grade(1));
 
@@ -1280,7 +1307,7 @@ mod tests {
 
     #[test]
     fn sum_vector_and_bivector() {
-        let algebra = Algebra::new(3, 0, 0);
+        let algebra = Algebra::new_with_scalar(3, 0, 0);
         let vector = AlgebraType::Grade(algebra.grade(1));
         let bivector = AlgebraType::Grade(algebra.grade(2));
 
@@ -1301,7 +1328,7 @@ mod tests {
 
     #[test]
     fn sum_multivectors() {
-        let algebra = Algebra::new(2, 0, 0);
+        let algebra = Algebra::new_with_scalar(2, 0, 0);
         let mv = algebra.mv();
 
         let actual = SumOp::Add.item_impl(mv, mv).unwrap();
@@ -1331,7 +1358,7 @@ mod tests {
 
     #[test]
     fn sum_multivector_and_vector() {
-        let algebra = Algebra::new(2, 0, 0);
+        let algebra = Algebra::new_with_scalar(2, 0, 0);
         let mv = algebra.mv();
         let vector = AlgebraType::Grade(algebra.grade(1));
 
@@ -1360,7 +1387,7 @@ mod tests {
 
     #[test]
     fn grade_add_sub_for_mv_is_none() {
-        let algebra = Algebra::new(2, 0, 0);
+        let algebra = Algebra::new_with_scalar(2, 0, 0);
         let mv = algebra.mv();
         let vector = AlgebraType::Grade(algebra.grade(1));
 
@@ -1372,7 +1399,7 @@ mod tests {
 
     #[test]
     fn grade_add_vectors() {
-        let algebra = Algebra::new(2, 0, 0);
+        let algebra = Algebra::new_with_scalar(2, 0, 0);
         let vector = AlgebraType::Grade(algebra.grade(1));
 
         let actual = SumOp::GradeAdd.item_impl(vector, vector).unwrap();
@@ -1396,7 +1423,7 @@ mod tests {
 
     #[test]
     fn zero_sub_vector() {
-        let algebra = Algebra::new(2, 0, 0);
+        let algebra = Algebra::new_with_scalar(2, 0, 0);
         let zero = AlgebraType::Zero(algebra);
         let vector = AlgebraType::Grade(algebra.grade(1));
 
@@ -1418,7 +1445,7 @@ mod tests {
 
     #[test]
     fn zero_grade_sub_vector() {
-        let algebra = Algebra::new(2, 0, 0);
+        let algebra = Algebra::new_with_scalar(2, 0, 0);
         let zero = AlgebraType::Zero(algebra);
         let vector = AlgebraType::Grade(algebra.grade(1));
 
@@ -1440,7 +1467,7 @@ mod tests {
 
     #[test]
     fn zero_sub_mv() {
-        let algebra = Algebra::new(2, 0, 0);
+        let algebra = Algebra::new_with_scalar(2, 0, 0);
         let zero = AlgebraType::Zero(algebra);
         let mv = algebra.mv();
 
@@ -1467,7 +1494,7 @@ mod tests {
 
     #[test]
     fn rev_mv() {
-        let algebra = Algebra::new(2, 0, 0);
+        let algebra = Algebra::new_with_scalar(2, 0, 0);
         let mv = algebra.mv();
 
         let actual = UnaryOp::Reverse.impl_item(mv).unwrap();
@@ -1496,7 +1523,7 @@ mod tests {
 
     #[test]
     fn comp_mv() {
-        let algebra = Algebra::new(2, 0, 0);
+        let algebra = Algebra::new_with_scalar(2, 0, 0);
         let mv = algebra.mv();
 
         let actual = UnaryOp::RightComplement.impl_item(mv).unwrap();
@@ -1525,7 +1552,7 @@ mod tests {
 
     #[test]
     fn scalar_sub_mv() {
-        let algebra = Algebra::new(2, 0, 0);
+        let algebra = Algebra::new_with_scalar(2, 0, 0);
         let scalar = AlgebraType::Grade(algebra.grade(0));
         let mv = algebra.mv();
 
@@ -1552,7 +1579,7 @@ mod tests {
 
     #[test]
     fn vector_new() {
-        let algebra = Algebra::new(2, 0, 0);
+        let algebra = Algebra::new_with_scalar(2, 0, 0);
         let vector = AlgebraType::Grade(algebra.grade(1));
 
         let actual = vector.new_fn().unwrap();
@@ -1571,7 +1598,7 @@ mod tests {
 
     #[test]
     fn unary_op_mv_output() {
-        let algebra = Algebra::new(3, 0, 1);
+        let algebra = Algebra::new_with_scalar(3, 0, 1);
 
         // TODO builder pattern for MVs
         let mv = AlgebraType::Multivector({
@@ -1595,7 +1622,7 @@ mod tests {
 
     #[test]
     fn add_zero_and_f64() {
-        let algebra = Algebra::new(3, 0, 0);
+        let algebra = Algebra::new_with_scalar(3, 0, 0);
         let zero = AlgebraType::Zero(algebra);
         let f64 = AlgebraType::Float(algebra);
 
@@ -1604,7 +1631,7 @@ mod tests {
 
     #[test]
     fn add_f64_and_vector() {
-        let algebra = Algebra::new(4, 1, 0);
+        let algebra = Algebra::new_with_scalar(4, 1, 0);
         let f64 = AlgebraType::Float(algebra);
         let vector = AlgebraType::Grade(algebra.grade(1));
 
@@ -1613,7 +1640,7 @@ mod tests {
 
     #[test]
     fn add_scalar_and_vector() {
-        let algebra = Algebra::new(4, 1, 0);
+        let algebra = Algebra::new_with_scalar(4, 1, 0);
         let scalar = AlgebraType::Grade(algebra.grade(0));
         let vector = AlgebraType::Grade(algebra.grade(1));
 
@@ -1653,5 +1680,32 @@ mod tests {
         };
 
         assert_eq!(expected.to_string(), impl_const(&item_impl).to_string());
+    }
+
+    #[test]
+    fn add_scalar_and_vector_without_scalar_type() {
+        let algebra = Algebra::new(4, 1, 0);
+        let scalar = AlgebraType::Grade(algebra.grade(0));
+        let vector = AlgebraType::Grade(algebra.grade(1));
+
+        let actual = SumOp::Add.item_impl(scalar, vector).unwrap();
+        let expected = parse_quote! {
+            impl std::ops::Add<Vector> for f64 {
+                type Output = Multivector<f64, Vector, Zero, Zero, Zero, Zero>;
+                #[inline]
+                #[allow(unused_variables)]
+                fn add(self, rhs: Vector) -> Self::Output {
+                    Multivector(self, rhs, Zero, Zero, Zero, Zero)
+                }
+            }
+        };
+
+        assert_eq_impl(&expected, &actual);
+    }
+
+    #[test]
+    fn write_out_scalarless_algebra() {
+        let algebra = Algebra::new(3, 1, 0);
+        write_to_file(&algebra.define());
     }
 }
