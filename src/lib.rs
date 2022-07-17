@@ -4,6 +4,15 @@
     const_default_impls,
     const_convert
 )]
+// DONE [Left/Right]Comp should be defined for each algebra
+// TODO use complement to find blades that need to be reversed (e.g., e12, e23, e31)?
+//  - is this unique to G{3,0,1} ?
+//  - allow manual blade ordering
+
+// TODO compare plane-based and point-based algebras,
+//  - can objects in one be converted to the other through the dual?
+//      - point-based point: x e1 + y e2 + z e3 + 1 e4
+//      - plane-based plane: x e1 + y e2 + z e3 + δ e4
 
 //! Proc macros for defining Clifford algebras of arbitrary dimension
 //!
@@ -78,20 +87,8 @@ pub mod va_3d_manual;
 #[cfg(feature = "ga_3d")]
 pub mod ga_3d;
 
-// #[cfg(feature = "va_3d_mv")]
-// pub mod va_3d_mv;
-
-// #[cfg(feature = "va_3d")]
-// pub mod va_3d;
-//
-// #[cfg(feature = "pga_3d")]
-// pub mod pga_3d;
-//
-// #[cfg(feature = "cga_2d")]
-// pub mod cga_2d;
-
-// #[cfg(feature = "cga_3d")]
-// pub mod cga_3d;
+#[cfg(feature = "va_3d_mv")]
+pub mod va_3d_mv;
 
 pub use proc_macros::clifford;
 

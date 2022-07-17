@@ -119,6 +119,12 @@ impl Algebra {
         }
     }
 
+    pub fn symmetrical_complements(self) -> bool {
+        self.blades_unsorted().all(|blade| {
+            UnaryOp::LeftComplement.call(blade) == UnaryOp::RightComplement.call(blade)
+        })
+    }
+
     pub fn mv(self) -> AlgebraType {
         AlgebraType::Multivector(Multivector::new(self))
     }
@@ -1067,31 +1073,49 @@ pub enum UnaryOp {
     Reverse,
     LeftComplement,
     RightComplement,
+    Dual,
     // Bulk,
     // Weight,
 }
 
 impl UnaryOp {
-    pub fn iter() -> impl Iterator<Item = Self> {
-        [
-            Self::Neg,
-            Self::Reverse,
-            Self::LeftComplement,
-            Self::RightComplement,
-            // Self::Bulk,
-            // Self::Weight,
-        ]
-        .into_iter()
+    pub fn iter(algebra: Algebra) -> impl Iterator<Item = Self> {
+        if algebra.symmetrical_complements() {
+            vec![Self::Neg, Self::Reverse, Self::Dual].into_iter()
+        } else {
+            vec![
+                Self::Neg,
+                Self::Reverse,
+                Self::LeftComplement,
+                Self::RightComplement,
+            ]
+            .into_iter()
+        }
+    }
+
+    pub fn define(self) -> Option<syn::ItemTrait> {
+        match self {
+            Self::LeftComplement | Self::RightComplement | Self::Dual => {
+                let trait_ = self.trait_ty();
+                let fn_ = self.trait_fn();
+                Some(parse_quote! {
+                    pub trait #trait_ {
+                        type Output;
+                        fn #fn_(self) -> Self::Output;
+                    }
+                })
+            }
+            _ => None,
+        }
     }
 
     pub fn trait_ty(self) -> Type {
         match self {
             Self::Neg => parse_quote! { std::ops::Neg },
             Self::Reverse => parse_quote! { crate::Reverse },
-            Self::LeftComplement => parse_quote! { crate::LeftComplement },
-            Self::RightComplement => parse_quote! { crate::RightComplement },
-            // Self::Bulk => parse_quote! { crate::Bulk },
-            // Self::Weight => parse_quote! { crate::Weight },
+            Self::LeftComplement => parse_quote! { LeftComplement },
+            Self::RightComplement => parse_quote! { RightComplement },
+            Self::Dual => parse_quote! { Dual },
         }
     }
 
@@ -1101,6 +1125,7 @@ impl UnaryOp {
             Self::Reverse => parse_quote! { rev },
             Self::LeftComplement => parse_quote! { left_comp },
             Self::RightComplement => parse_quote! { right_comp },
+            Self::Dual => parse_quote! { dual },
             // Self::Bulk => parse_quote! { bulk },
             // Self::Weight => parse_quote! { weight },
         }
@@ -1135,20 +1160,22 @@ impl UnaryOp {
                 let set = antiscalar.0 .0 ^ blade.0 .0;
                 let complement = blade.1.blade(set);
                 (blade * complement).with_blade(complement)
-            } // Self::Bulk => {
-              //     let null_blade = blade.1.null_basis().unwrap();
-              //     match blade.wedge(null_blade) {
-              //         Product::Zero => Product::Zero,
-              //         _ => Product::Pos(blade),
-              //     }
-              // }
-              // Self::Weight => {
-              //     let null_blade = blade.1.null_basis().unwrap();
-              //     match blade.wedge(null_blade) {
-              //         Product::Zero => Product::Pos(blade),
-              //         _ => Product::Zero,
-              //     }
-              // }
+            }
+            Self::Dual => Self::LeftComplement.call(blade),
+            // Self::Bulk => {
+            //     let null_blade = blade.1.null_basis().unwrap();
+            //     match blade.wedge(null_blade) {
+            //         Product::Zero => Product::Zero,
+            //         _ => Product::Pos(blade),
+            //     }
+            // }
+            // Self::Weight => {
+            //     let null_blade = blade.1.null_basis().unwrap();
+            //     match blade.wedge(null_blade) {
+            //         Product::Zero => Product::Pos(blade),
+            //         _ => Product::Zero,
+            //     }
+            // }
         }
     }
 }
@@ -1292,5 +1319,30 @@ mod tests {
         assert_eq!(Product::Pos(e1), e1.right_contraction(scalar));
         assert_eq!(Product::Zero, scalar.right_contraction(e1));
         assert_eq!(Product::Pos(scalar), e1.right_contraction(e1));
+    }
+
+    #[test]
+    fn complement_symmetr_g1() {
+        assert!(Algebra::new(1, 0, 0).symmetrical_complements());
+    }
+
+    #[test]
+    fn complement_symmetr_g2() {
+        assert!(!Algebra::new(2, 0, 0).symmetrical_complements());
+    }
+
+    #[test]
+    fn complement_symmetr_g3() {
+        assert!(Algebra::new(3, 0, 0).symmetrical_complements());
+    }
+
+    #[test]
+    fn complement_symmetr_g4() {
+        assert!(!Algebra::new(4, 0, 0).symmetrical_complements());
+    }
+
+    #[test]
+    fn complement_symmetr_g5() {
+        assert!(Algebra::new(5, 0, 0).symmetrical_complements());
     }
 }

@@ -54,7 +54,7 @@ pub fn impl_const(item_impl: &ItemImpl) -> TokenStream {
 
 impl Algebra {
     pub fn define(self) -> TokenStream {
-        let traits = if self.is_homogenous() {
+        let use_traits = if self.is_homogenous() {
             quote! {
                 pub use crate::{
                     Dot,
@@ -64,8 +64,6 @@ impl Algebra {
                     Commutator,
                     Geometric,
                     Antigeometric,
-                    LeftComplement,
-                    RightComplement,
                     Reverse,
                     Antireverse,
                     Bulk,
@@ -80,8 +78,6 @@ impl Algebra {
                     Wedge,
                     Commutator,
                     Geometric,
-                    LeftComplement,
-                    RightComplement,
                     Reverse
                 };
             }
@@ -112,18 +108,21 @@ impl Algebra {
             .flat_map(|(op, lhs)| AlgebraType::iter(self).map(move |rhs| (op, lhs, rhs)))
             .filter_map(|(op, lhs, rhs)| op.item_impl(lhs, rhs));
 
-        let unary_ops = UnaryOp::iter()
+        let unary_op_defs = UnaryOp::iter(self).filter_map(|op| op.define());
+
+        let unary_ops = UnaryOp::iter(self)
             .flat_map(|op| AlgebraType::iter(self).map(move |lhs| (op, lhs)))
             .filter_map(|(op, ty)| op.impl_item(ty));
 
         quote! {
-            #traits
+            #use_traits
             #(#grade_products)*
             #(#types)*
             #(#type_impls)*
             #(#sum_ops)*
             #(#product_ops)*
             #(#unary_ops)*
+            #(#unary_op_defs)*
         }
     }
 }
@@ -1503,19 +1502,19 @@ mod tests {
         let actual = UnaryOp::RightComplement.impl_item(mv).unwrap();
 
         let expected = parse_quote! {
-            impl<G0, G1, G2, G0Out, G1Out, G2Out> crate::RightComplement for Multivector<G0, G1, G2>
+            impl<G0, G1, G2, G0Out, G1Out, G2Out> RightComplement for Multivector<G0, G1, G2>
             where
-                G0: crate::RightComplement<Output = G2Out>,
-                G1: crate::RightComplement<Output = G1Out>,
-                G2: crate::RightComplement<Output = G0Out>
+                G0: RightComplement<Output = G2Out>,
+                G1: RightComplement<Output = G1Out>,
+                G2: RightComplement<Output = G0Out>
             {
                 type Output = Multivector<G0Out, G1Out, G2Out>;
                 #[inline]
                 fn right_comp(self) -> Self::Output {
                     Multivector(
-                        crate::RightComplement::right_comp(self.2),
-                        crate::RightComplement::right_comp(self.1),
-                        crate::RightComplement::right_comp(self.0)
+                        RightComplement::right_comp(self.2),
+                        RightComplement::right_comp(self.1),
+                        RightComplement::right_comp(self.0)
                     )
                 }
             }
@@ -1632,12 +1631,6 @@ mod tests {
 
         assert_eq_impl(&expected, &actual);
     }
-
-    // #[test]
-    // fn write_algebra_to_file() {
-    //     let algebra = Algebra::new(4, 1, 0).define();
-    //     write_to_file(&algebra);
-    // }
 
     #[test]
     fn impl_item_to_const() {
