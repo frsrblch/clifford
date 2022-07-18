@@ -65,10 +65,8 @@ impl Algebra {
             ProductOp::iter_all(self).filter_map(|t| t.blanket_impl(self));
 
         let unary_ops_definitions = UnaryOp::iter(self).filter_map(|t| t.define());
-        let unary_ops_blanket_impls = UnaryOp::iter(self).filter_map(|t| t.blanket_impl());
 
         let sum_ops_definitions = SumOp::iter().filter_map(|t| t.define());
-        let sum_ops_blanket_impls = SumOp::iter().filter_map(|t| t.blanket_impl());
 
         let types = AlgebraType::iter(self).filter_map(AlgebraType::define);
 
@@ -92,9 +90,7 @@ impl Algebra {
             #(#product_ops_definitions)*
             #(#product_ops_blanket_impls)*
             #(#unary_ops_definitions)*
-            #(#unary_ops_blanket_impls)*
             #(#sum_ops_definitions)*
-            #(#sum_ops_blanket_impls)*
             #(#types)*
             #(#type_impls)*
             #(#sum_ops)*
@@ -119,10 +115,6 @@ impl UnaryOp {
                 fn #trait_fn(self) -> Self::Output;
             }
         })
-    }
-
-    pub fn blanket_impl(self) -> Option<syn::ItemImpl> {
-        None // TODO
     }
 
     pub fn impl_item(self, type_mv: AlgebraType) -> Vec<ItemImpl> {
@@ -293,10 +285,6 @@ impl SumOp {
                 fn #trait_fn(self, rhs: Rhs) -> Self::Output;
             }
         })
-    }
-
-    pub fn blanket_impl(self) -> Option<ItemImpl> {
-        None
     }
 
     pub fn item_impl(self, lhs: AlgebraType, rhs: AlgebraType) -> Vec<ItemImpl> {
@@ -603,14 +591,17 @@ impl ProductOp {
     }
 
     pub fn item_impl(self, lhs: AlgebraType, rhs: AlgebraType) -> Vec<ItemImpl> {
-        if matches!(self, Self::Antigeometric | Self::Antidot | Self::Antiwedge) {
+        // already covered by blanket impl
+        if self.blanket_impl(lhs.algebra()).is_some() {
             return vec![];
         }
 
+        // f32 and f64 already impl Mul and Div
         if lhs.is_scalar() && rhs.is_scalar() && !self.is_local() {
             return vec![];
         }
 
+        // we'd need LeftDiv and RightDiv to do this properly for anything with grade > 0
         if matches!(self, ProductOp::Div) && !rhs.is_scalar() {
             return vec![];
         }
