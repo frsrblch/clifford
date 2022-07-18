@@ -6,8 +6,8 @@ mod tests {
 
     #[test]
     fn vector_autodif_test() {
-        let x = Vector::new(1., 2., 3.);
-        let v = Vector::new(-5., 7., 11.);
+        let x = Vector::new(1f32, 2., 3.);
+        let v = Vector::new(-5f32, 7., 11.);
 
         let ux = x / x.dot(x).sqrt();
         let uv = v / v.dot(v).sqrt();
@@ -20,12 +20,12 @@ mod tests {
 
     #[test]
     fn accel_derivative() {
-        let a = |x: Vector| -x / x.dot(x).powf(1.5);
-        let x_0 = Vector::new(0., 0., 2.);
+        let a = |x: Vector<f64>| -x / x.dot(x).powf(1.5);
+        let x_0 = Vector::new(0f64, 0., 2.);
 
-        let norm = |v: Vector| v.dot(v).sqrt();
+        let norm = |v: Vector<f64>| v.dot(v).sqrt();
 
-        let da = |x: Vector| {
+        let da = |x: Vector<f64>| {
             let inv_det = x.dot(x).powf(-2.5);
             let Vector {
                 e1: x,
@@ -38,13 +38,13 @@ mod tests {
                 x2 - 2. * y2 + z2 - 3. * y * (x + z),
                 x2 + y2 - 2. * z2 - 3. * z * (x + y),
             ) * inv_det;
-            move |h: Vector| Vector::new(da.e1 * h.e1, da.e2 * h.e2, da.e3 * h.e3) / norm(h)
+            move |h: Vector<f64>| Vector::new(da.e1 * h.e1, da.e2 * h.e2, da.e3 * h.e3) / norm(h)
         };
 
-        let dt = 0.05;
+        let dt = 0.05f64;
         let dt2 = dt * dt;
         let mut x = x_0;
-        let mut v = Vector::new(0., 0.01, 0.02);
+        let mut v = Vector::new(0f64, 0.01, 0.02);
 
         dbg!(x, v);
         for _ in 0..20 {

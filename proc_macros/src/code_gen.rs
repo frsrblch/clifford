@@ -127,7 +127,7 @@ impl UnaryOp {
 
     pub fn impl_item(self, type_mv: AlgebraType) -> Vec<ItemImpl> {
         // cannot have blanket impls for foreign traits
-        if matches!(self, Self::Neg) && type_mv.is_float() {
+        if matches!(self, Self::Neg) && type_mv.is_scalar() {
             return vec![];
         }
 
@@ -138,10 +138,10 @@ impl UnaryOp {
             impl_token: Impl::default(),
             generics: self.generics(type_mv),
             trait_: Some((None, self.trait_ty().convert(), For::default())),
-            self_ty: Box::new(type_mv.ty_with_suffix("")),
+            self_ty: Box::new(type_mv.ty_with_suffix("", None)),
             brace_token: Brace::default(),
             items: {
-                let output_type = self.type_item(type_mv);
+                let output_type = self.type_item(type_mv, None);
                 let trait_fn = self.fn_item(type_mv);
                 vec![output_type, trait_fn]
             },
@@ -159,7 +159,7 @@ impl UnaryOp {
     fn generics(self, ty: AlgebraType) -> syn::Generics {
         let mut generics = Generics::default();
 
-        if ty.has_float_generic() {
+        if ty.has_float_generic(None) {
             generics.params.push(quote!(T).convert());
             generics
                 .make_where_clause()
@@ -200,9 +200,9 @@ impl UnaryOp {
         generics
     }
 
-    fn type_item(self, ty: AlgebraType) -> ImplItem {
+    fn type_item(self, ty: AlgebraType, float: Option<FloatType>) -> ImplItem {
         let output = self.output(ty);
-        let output = output.ty_with_suffix(OUT_SUFFIX);
+        let output = output.ty_with_suffix(OUT_SUFFIX, float);
         parse_quote! {
             type Output = #output;
         }
@@ -225,7 +225,6 @@ impl UnaryOp {
         let trait_fn = self.trait_fn();
         match output {
             AlgebraType::Zero(_) => Zero::expr(),
-            AlgebraType::Float(_) => unreachable!("float expr"),
             AlgebraType::Grade(grade) => {
                 let fields = grade.blades().map(|blade| {
                     let sum = ty
@@ -301,63 +300,69 @@ impl SumOp {
     }
 
     pub fn item_impl(self, lhs: AlgebraType, rhs: AlgebraType) -> Vec<ItemImpl> {
-        // can't assume that f64 == Scalar (e.g., 2.0 kg + 1.0 == ??)
-        if lhs.algebra().has_scalar_type {
-            if lhs.is_float() || rhs.is_float() {
-                return vec![];
-            }
-        } else {
-            if lhs.is_float() && rhs.is_float() && !self.is_grade_op() {
-                return vec![];
-            }
-
-            if let AlgebraType::Float(lhs) = lhs {
-                if lhs.is_generic() {
-                    return vec![];
-                }
-            }
+        if !self.is_local() && lhs.is_scalar() && rhs.is_scalar() {
+            return vec![];
         }
 
         if self.is_grade_op() && (lhs.is_mv() || rhs.is_mv()) {
             return vec![];
         }
 
-        // cannot impl foreign traits for generic type
-        if matches!(self, SumOp::Add | SumOp::Sub) && lhs.is_float() {
-            return vec![];
+        if (!self.is_local() && lhs.is_scalar()) || (lhs.is_zero() && rhs.is_scalar()) {
+            FloatType::iter()
+                .map(|float| ItemImpl {
+                    attrs: vec![],
+                    defaultness: None,
+                    unsafety: None,
+                    impl_token: Impl::default(),
+                    generics: self.generics(lhs, rhs, Some(float)),
+                    trait_: {
+                        let trait_ty = self.trait_ty();
+                        let rhs_ty = rhs.ty_with_suffix(RHS_SUFFIX, Some(float));
+                        Some((None, parse_quote!(#trait_ty<#rhs_ty>), For::default()))
+                    },
+                    self_ty: Box::new(lhs.ty_with_suffix_and_float(LHS_SUFFIX, Some(float))),
+                    brace_token: Brace::default(),
+                    items: {
+                        let output_type = self.output_type_item(lhs, rhs, Some(float));
+                        let trait_fn = self.fn_item(lhs, rhs, Some(float));
+                        vec![output_type, trait_fn]
+                    },
+                })
+                .collect()
+        } else {
+            vec![ItemImpl {
+                attrs: vec![],
+                defaultness: None,
+                unsafety: None,
+                impl_token: Impl::default(),
+                generics: self.generics(lhs, rhs, None),
+                trait_: {
+                    let trait_ty = self.trait_ty();
+                    let rhs_ty = rhs.ty_with_suffix(RHS_SUFFIX, None);
+                    Some((None, parse_quote!(#trait_ty<#rhs_ty>), For::default()))
+                },
+                self_ty: Box::new(lhs.ty_with_suffix(LHS_SUFFIX, None)),
+                brace_token: Brace::default(),
+                items: {
+                    let output_type = self.output_type_item(lhs, rhs, None);
+                    let trait_fn = self.fn_item(lhs, rhs, None);
+                    vec![output_type, trait_fn]
+                },
+            }]
         }
-
-        vec![ItemImpl {
-            attrs: vec![],
-            defaultness: None,
-            unsafety: None,
-            impl_token: Impl::default(),
-            generics: self.generics(lhs, rhs),
-            trait_: {
-                let trait_ty = self.trait_ty();
-                let rhs_ty = rhs.ty_with_suffix(RHS_SUFFIX);
-                Some((None, parse_quote!(#trait_ty<#rhs_ty>), For::default()))
-            },
-            self_ty: Box::new(lhs.ty_with_suffix(LHS_SUFFIX)),
-            brace_token: Brace::default(),
-            items: {
-                let output_type = self.output_type_item(lhs, rhs);
-                let trait_fn = self.fn_item(lhs, rhs);
-                vec![output_type, trait_fn]
-            },
-        }]
     }
 
     fn output(self, lhs: AlgebraType, rhs: AlgebraType) -> AlgebraType {
         AlgebraType::from_iter(self.products(lhs, rhs), lhs.algebra())
     }
 
-    fn generics(self, lhs: AlgebraType, rhs: AlgebraType) -> Generics {
+    fn generics(self, lhs: AlgebraType, rhs: AlgebraType, float: Option<FloatType>) -> Generics {
         let trait_ty = self.trait_ty_grade();
 
         let mut generics = Generics::default();
 
-        if lhs.has_float_generic() || rhs.has_float_generic() {
+        if lhs.has_float_generic(float) || rhs.has_float_generic(float) {
             generics.params.push(quote!(T).convert());
             generics
                 .make_where_clause()
@@ -394,12 +399,12 @@ impl SumOp {
                     if self.is_sub() && !lhs.contains(grade) {
                         let neg_ty = UnaryOp::Neg.trait_ty();
                         let out = self.new_output_generic(grade, lhs, rhs)?;
-                        let rhs = grade_type(rhs, grade, RHS_SUFFIX);
+                        let rhs = grade_type(rhs, grade, RHS_SUFFIX, float);
                         Some(parse_quote!(#rhs: #neg_ty<Output = #out>))
                     } else {
                         let out = self.new_output_generic(grade, lhs, rhs)?;
-                        let lhs = grade_type(lhs, grade, LHS_SUFFIX);
-                        let rhs = grade_type(rhs, grade, RHS_SUFFIX);
+                        let lhs = grade_type(lhs, grade, LHS_SUFFIX, float);
+                        let rhs = grade_type(rhs, grade, RHS_SUFFIX, float);
                         Some(parse_quote!(#lhs: #trait_ty<#rhs, Output = #out>))
                     }
                 });
@@ -410,16 +415,20 @@ impl SumOp {
         generics
     }
 
-    fn output_type_item(self, lhs: AlgebraType, rhs: AlgebraType) -> ImplItem {
+    fn output_type_item(
+        self,
+        lhs: AlgebraType,
+        rhs: AlgebraType,
+        float: Option<FloatType>,
+    ) -> ImplItem {
         let generic = is_generic(lhs, rhs);
         let output_ty = match self.output(lhs, rhs) {
             AlgebraType::Zero(_) => Zero::ty(),
-            AlgebraType::Float(_) => parse_quote!(f64),
             AlgebraType::Grade(grade) => {
                 if generic {
                     unreachable!("mv +/- x != grade")
                 } else {
-                    grade.ty()
+                    grade.ty_with_float(float)
                 }
             }
             AlgebraType::Multivector(mv) => {
@@ -432,7 +441,7 @@ impl SumOp {
 
                     parse_quote!( #ty <#(#types),*> )
                 } else {
-                    let types = mv.type_parameters("Out");
+                    let types = mv.type_parameters("Out", float);
                     parse_quote!( #ty <#(#types),*> )
                 }
             }
@@ -463,9 +472,9 @@ impl SumOp {
         }
     }
 
-    fn fn_item(self, lhs: AlgebraType, rhs: AlgebraType) -> ImplItem {
+    fn fn_item(self, lhs: AlgebraType, rhs: AlgebraType, float: Option<FloatType>) -> ImplItem {
         let op_fn = self.trait_fn();
-        let rhs_ty = rhs.ty_with_suffix(RHS_SUFFIX);
+        let rhs_ty = rhs.ty_with_suffix(RHS_SUFFIX, float);
         let output_expr = self.sum_output_expr(lhs, rhs);
         parse_quote! {
             #[inline]
@@ -511,7 +520,6 @@ impl SumOp {
                     .map(|grade| self.sum_grade_sum_expr(lhs, rhs, grade));
                 parse_quote! { #ty( #(#grades),* ) }
             }
-            AlgebraType::Float(_) => unreachable!("float expr"),
         }
     }
 
@@ -599,44 +607,60 @@ impl ProductOp {
             return vec![];
         }
 
-        if lhs.is_float() && rhs.is_float() {
+        if lhs.is_scalar() && rhs.is_scalar() && !self.is_local() {
             return vec![];
         }
 
-        if matches!(self, ProductOp::Div) && !rhs.is_float() {
+        if matches!(self, ProductOp::Div) && !rhs.is_scalar() {
             return vec![];
         }
 
-        // cannot impl foreign traits for generic type
-        if matches!(self, ProductOp::Mul | ProductOp::Div) && lhs.is_float() {
-            return vec![];
+        if lhs.is_scalar() {
+            FloatType::iter()
+                .map(|float| ItemImpl {
+                    attrs: vec![],
+                    defaultness: None,
+                    unsafety: None,
+                    impl_token: Impl::default(),
+                    generics: self.generics(lhs, rhs, Some(float)),
+                    trait_: {
+                        let trait_ty = self.trait_ty();
+                        let rhs_ty = rhs.ty_with_suffix_and_float(RHS_SUFFIX, Some(float));
+                        Some((None, parse_quote!(#trait_ty<#rhs_ty>), For::default()))
+                    },
+                    self_ty: Box::new(lhs.ty_with_suffix_and_float(LHS_SUFFIX, Some(float))),
+                    brace_token: Brace::default(),
+                    items: {
+                        let output_type_item = self.output_type_item(lhs, rhs, Some(float));
+                        let fn_item = self.fn_item(lhs, rhs, Some(float));
+                        vec![output_type_item, fn_item]
+                    },
+                })
+                .collect()
+        } else {
+            vec![ItemImpl {
+                attrs: vec![],
+                defaultness: None,
+                unsafety: None,
+                impl_token: Impl::default(),
+                generics: self.generics(lhs, rhs, None),
+                trait_: {
+                    let trait_ty = self.trait_ty();
+                    let rhs_ty = rhs.ty_with_suffix(RHS_SUFFIX, None);
+                    Some((None, parse_quote!(#trait_ty<#rhs_ty>), For::default()))
+                },
+                self_ty: Box::new(lhs.ty_with_suffix(LHS_SUFFIX, None)),
+                brace_token: Brace::default(),
+                items: {
+                    let output_type_item = self.output_type_item(lhs, rhs, None);
+                    let fn_item = self.fn_item(lhs, rhs, None);
+                    vec![output_type_item, fn_item]
+                },
+            }]
         }
-        if lhs.is_float() && rhs.is_mv() {
-            return vec![];
-        }
-
-        vec![ItemImpl {
-            attrs: vec![],
-            defaultness: None,
-            unsafety: None,
-            impl_token: Impl::default(),
-            generics: self.generics(lhs, rhs),
-            trait_: {
-                let trait_ty = self.trait_ty();
-                let rhs_ty = rhs.ty_with_suffix(RHS_SUFFIX);
-                Some((None, parse_quote!(#trait_ty<#rhs_ty>), For::default()))
-            },
-            self_ty: Box::new(lhs.ty_with_suffix(LHS_SUFFIX)),
-            brace_token: Brace::default(),
-            items: {
-                let output_type_item = self.output_type_item(lhs, rhs);
-                let fn_item = self.fn_item(lhs, rhs);
-                vec![output_type_item, fn_item]
-            },
-        }]
     }
 
-    fn generics(self, lhs: AlgebraType, rhs: AlgebraType) -> Generics {
+    fn generics(self, lhs: AlgebraType, rhs: AlgebraType, float: Option<FloatType>) -> Generics {
         let algebra = lhs.algebra();
 
         let mut generics = Generics::default();
@@ -644,7 +668,7 @@ impl ProductOp {
         let mut product_predicates = Vec::<WherePredicate>::new();
         let mut sum_predicates = Vec::<WherePredicate>::new();
 
-        if lhs.has_float_generic() || rhs.has_float_generic() {
+        if lhs.has_float_generic(float) || rhs.has_float_generic(float) {
             generics.params.push(parse_quote!(T));
             generics
                 .make_where_clause()
@@ -677,8 +701,8 @@ impl ProductOp {
                 .filter(|(lhs, rhs)| self.output_contains(*lhs, *rhs, grade))
                 .enumerate()
             {
-                let lhs = grade_type(lhs, lhs_grade, LHS_SUFFIX);
-                let rhs = grade_type(rhs, rhs_grade, RHS_SUFFIX);
+                let lhs = grade_type(lhs, lhs_grade, LHS_SUFFIX, float);
+                let rhs = grade_type(rhs, rhs_grade, RHS_SUFFIX, float);
                 let out = grade.generic_n(n);
 
                 let predicate = parse_quote!( #lhs: #op_trait<#rhs, Output = #out> );
@@ -729,16 +753,20 @@ impl ProductOp {
             .count()
     }
 
-    fn output_type_item(self, lhs: AlgebraType, rhs: AlgebraType) -> ImplItem {
+    fn output_type_item(
+        self,
+        lhs: AlgebraType,
+        rhs: AlgebraType,
+        float: Option<FloatType>,
+    ) -> ImplItem {
         let is_generic = is_generic(lhs, rhs);
         let output_ty = match self.output(lhs, rhs) {
             AlgebraType::Zero(_) => Zero::ty(),
-            AlgebraType::Float(_) => parse_quote!(f64),
             AlgebraType::Grade(grade) => {
                 if is_generic {
                     self.last_generic(lhs, rhs, grade).convert()
                 } else {
-                    grade.ty()
+                    grade.ty_with_float(float)
                 }
             }
             AlgebraType::Multivector(mv) => {
@@ -747,7 +775,7 @@ impl ProductOp {
                     let types = self.last_generics(lhs, rhs);
                     parse_quote!( #ty <#(#types),*> )
                 } else {
-                    let types = mv.type_parameters(OUT_SUFFIX);
+                    let types = mv.type_parameters(OUT_SUFFIX, float);
                     parse_quote!( #ty <#(#types),*> )
                 }
             }
@@ -755,9 +783,9 @@ impl ProductOp {
         parse_quote! { type Output = #output_ty; }
     }
 
-    fn fn_item(self, lhs: AlgebraType, rhs: AlgebraType) -> ImplItem {
+    fn fn_item(self, lhs: AlgebraType, rhs: AlgebraType, float: Option<FloatType>) -> ImplItem {
         let op_fn = self.trait_fn();
-        let rhs_ty = rhs.ty_with_suffix(RHS_SUFFIX);
+        let rhs_ty = rhs.ty_with_suffix_and_float(RHS_SUFFIX, float);
         let output_expr = self.output_expr(lhs, rhs);
         parse_quote! {
             #[inline]
@@ -799,7 +827,6 @@ impl ProductOp {
                 });
                 parse_quote! { #ident( #(#fields),* ) }
             }
-            AlgebraType::Float(_) => unimplemented!(),
         }
     }
 
@@ -878,13 +905,13 @@ const LHS_SUFFIX: &'static str = "Lhs";
 const RHS_SUFFIX: &'static str = "Rhs";
 const OUT_SUFFIX: &'static str = "Out";
 
-fn grade_type(ty: AlgebraType, grade: Grade, suffix: &str) -> syn::Type {
+fn grade_type(ty: AlgebraType, grade: Grade, suffix: &str, float: Option<FloatType>) -> syn::Type {
     if ty.is_generic() {
         grade.generic(suffix).convert()
-    } else if ty.is_float() {
-        ty.ty_with_suffix(suffix)
+    } else if ty.is_scalar() {
+        ty.ty_with_suffix_and_float(suffix, float)
     } else {
-        grade.ty()
+        grade.ty_with_float(float)
     }
 }
 
@@ -892,7 +919,7 @@ fn access_grade(parent: AlgebraType, grade: Grade, ident: TokenStream) -> syn::E
     let field = match parent {
         AlgebraType::Multivector(_) => grade.mv_field(),
         AlgebraType::Zero(_) => unreachable!("no grades to access"),
-        AlgebraType::Float(_) | AlgebraType::Grade(_) => return ident.convert(),
+        AlgebraType::Grade(_) => return ident.convert(),
     };
     parse_quote! {
         #ident.#field
@@ -919,7 +946,6 @@ impl AlgebraType {
                 #[derive(Debug, Default, Copy, Clone, PartialEq)]
                 pub struct Zero;
             }),
-            Self::Float(_) => None,
             Self::Grade(grade) => {
                 if grade.ident().is_none() {
                     return None;
@@ -938,7 +964,7 @@ impl AlgebraType {
                 })
             }
             Self::Multivector(mv) => {
-                let generics = mv.type_parameters("");
+                let generics = mv.type_parameters("", None);
 
                 let fields = generics.iter().map(|g| {
                     quote! {
@@ -954,14 +980,27 @@ impl AlgebraType {
         }
     }
 
-    pub fn ty_with_suffix(&self, suffix: &str) -> syn::Type {
+    pub fn ty_with_suffix(&self, suffix: &str, float: Option<FloatType>) -> syn::Type {
         match self {
             Self::Zero(_) => Zero::ty(),
-            Self::Float(float) => float.ty(),
-            Self::Grade(g) => g.ty(),
+            Self::Grade(g) => g.ty_with_float(float),
             Self::Multivector(mv) => {
                 let ty = Multivector::ident();
-                let generics = mv.type_parameters(suffix);
+                let generics = mv.type_parameters(suffix, float);
+                parse_quote! {
+                    #ty < #(#generics),* >
+                }
+            }
+        }
+    }
+
+    pub fn ty_with_suffix_and_float(&self, suffix: &str, float: Option<FloatType>) -> syn::Type {
+        match self {
+            Self::Zero(_) => Zero::ty(),
+            Self::Grade(g) => g.ty_with_float(float),
+            Self::Multivector(mv) => {
+                let ty = Multivector::ident();
+                let generics = mv.type_parameters(suffix, float);
                 parse_quote! {
                     #ty < #(#generics),* >
                 }
@@ -973,7 +1012,7 @@ impl AlgebraType {
         match self {
             Self::Grade(_) => {
                 let item = self.new_fn()?;
-                let ty = self.ty_with_suffix("");
+                let ty = self.ty_with_suffix("", None);
                 Some::<ItemImpl>(parse_quote! {
                     impl<T> #ty {
                         #item
@@ -1064,7 +1103,7 @@ mod tests {
         assert_eq_ref(&ea, &aa, "impl generics");
         assert_eq_ref(&eb, &ab, "type generics");
 
-        assert_eq!(ec.is_some(), ac.is_some());
+        assert_eq!(ec.is_some(), ac.is_some(), "where clause some/none");
         if let (Some(ec), Some(ac)) = (ec, ac) {
             assert_eq!(ec.predicates.len(), ac.predicates.len(), "predicate len");
             for (e, a) in ec.predicates.iter().zip(ac.predicates.iter()) {
@@ -1179,19 +1218,17 @@ mod tests {
 
     #[test]
     fn scalar_scalar_geo() {
-        let algebra = Algebra::new_with_scalar(3, 0, 0);
+        let algebra = Algebra::new(3, 0, 0);
         let scalar = AlgebraType::Grade(algebra.grade(0));
 
         let impl_item = &ProductOp::Geometric.item_impl(scalar, scalar)[0];
         let expected = parse_quote! {
-            impl Geometric<Scalar> for Scalar {
-                type Output = Scalar;
+            impl Geometric<f32> for f32 {
+                type Output = f32;
                 #[inline]
                 #[allow(unused_variables)]
-                fn geo(self, rhs: Scalar) -> Self::Output {
-                    Scalar {
-                        value: self.value * rhs.value,
-                    }
+                fn geo(self, rhs: f32) -> Self::Output {
+                    self * rhs
                 }
             }
         };
@@ -1201,15 +1238,15 @@ mod tests {
 
     #[test]
     pub fn scalar_mv_scalar_product() {
-        let g2 = Algebra::new_with_scalar(2, 0, 0);
+        let g2 = Algebra::new(2, 0, 0);
         let scalar = g2.grade(0);
 
         let actual = &ProductOp::Grade(scalar).item_impl(AlgebraType::Grade(scalar), g2.mv())[0];
 
         let expected = parse_quote! {
-            impl<G0Rhs, G1Rhs, G2Rhs, G0_0> ScalarProduct<Multivector<G0Rhs, G1Rhs, G2Rhs>> for Scalar
+            impl<G0Rhs, G1Rhs, G2Rhs, G0_0> ScalarProduct<Multivector<G0Rhs, G1Rhs, G2Rhs>> for f32
             where
-                Scalar: ScalarProduct<G0Rhs, Output = G0_0>,
+                f32: ScalarProduct<G0Rhs, Output = G0_0>,
                 G0Rhs: Copy,
                 G1Rhs: Copy,
                 G2Rhs: Copy
@@ -1228,19 +1265,22 @@ mod tests {
 
     #[test]
     pub fn scalar_mv_mul() {
-        let algebra = Algebra::new_with_scalar(3, 0, 0);
+        let algebra = Algebra::new(3, 0, 0);
         let scalar = algebra.grade(0);
 
-        let actual = &ProductOp::Mul.item_impl(AlgebraType::Grade(scalar), algebra.mv())[0];
+        let actual = ProductOp::Mul.item_impl(AlgebraType::Grade(scalar), algebra.mv());
+        assert_eq!(2, actual.len());
+
+        let actual = &actual[0];
 
         let expected = parse_quote! {
             impl<G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G2_0, G3_0>
-                std::ops::Mul<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Scalar
+                std::ops::Mul<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for f32
             where
-                Scalar: ScalarProduct<G0Rhs, Output = G0_0>,
-                Scalar: VectorProduct<G1Rhs, Output = G1_0>,
-                Scalar: BivectorProduct<G2Rhs, Output = G2_0>,
-                Scalar: TrivectorProduct<G3Rhs, Output = G3_0>,
+                f32: ScalarProduct<G0Rhs, Output = G0_0>,
+                f32: VectorProduct<G1Rhs, Output = G1_0>,
+                f32: BivectorProduct<G2Rhs, Output = G2_0>,
+                f32: TrivectorProduct<G3Rhs, Output = G3_0>,
                 G0Rhs: Copy,
                 G1Rhs: Copy,
                 G2Rhs: Copy,
@@ -1315,7 +1355,7 @@ mod tests {
         let item_impl = &op.item_impl(mv, mv)[0];
 
         let expected = &item_impl.generics;
-        let actual = op.generics(mv, mv);
+        let actual = op.generics(mv, mv, None);
 
         assert_eq!(
             expected.where_clause.as_ref().unwrap().predicates.len(),
@@ -1707,16 +1747,16 @@ mod tests {
 
     #[test]
     fn scalar_sub_mv() {
-        let algebra = Algebra::new_with_scalar(2, 0, 0);
+        let algebra = Algebra::new(2, 0, 0);
         let scalar = AlgebraType::Grade(algebra.grade(0));
         let mv = algebra.mv();
 
         let actual = &SumOp::Sub.item_impl(scalar, mv)[0];
 
         let expected = parse_quote! {
-            impl<G0Rhs, G1Rhs, G2Rhs, G0Out, G1Out, G2Out> std::ops::Sub<Multivector<G0Rhs, G1Rhs, G2Rhs>> for Scalar
+            impl<G0Rhs, G1Rhs, G2Rhs, G0Out, G1Out, G2Out> std::ops::Sub<Multivector<G0Rhs, G1Rhs, G2Rhs>> for f32
             where
-                Scalar: GradeSub<G0Rhs, Output = G0Out>,
+                f32: GradeSub<G0Rhs, Output = G0Out>,
                 G1Rhs: std::ops::Neg<Output = G1Out>,
                 G2Rhs: std::ops::Neg<Output = G2Out>
             {
@@ -1753,7 +1793,7 @@ mod tests {
 
     #[test]
     fn unary_op_mv_output() {
-        let algebra = Algebra::new_with_scalar(3, 0, 1);
+        let algebra = Algebra::new(3, 0, 1);
 
         let mv = AlgebraType::Multivector({
             let mut mv = Multivector::new(algebra);
@@ -1774,43 +1814,59 @@ mod tests {
         assert_eq!(expected, actual);
     }
 
-    #[test]
-    fn add_zero_and_f64() {
-        let algebra = Algebra::new_with_scalar(3, 0, 0);
-        let zero = AlgebraType::Zero(algebra);
-        let f64 = AlgebraType::Float(Float(Some(FloatType::F64), algebra));
+    // TODO Zero + T = T ?
+    // TODO f32/f64/Vector + Zero?
 
-        assert!(SumOp::Add.item_impl(zero, f64).is_empty());
+    #[test]
+
+    fn add_zero_and_f64() {
+        let algebra = Algebra::new(3, 0, 0);
+        let zero = AlgebraType::Zero(algebra);
+        let scalar = AlgebraType::Grade(algebra.grade(0));
+
+        let actual = SumOp::Add.item_impl(zero, scalar);
+        assert_eq!(2, actual.len());
+
+        let actual = &actual[0];
+
+        println!("{}", actual.to_token_stream().to_string());
+
+        let expected = parse_quote! {
+            impl std::ops::Add<f32> for Zero {
+                type Output = f32;
+                #[inline]
+                #[allow(unused_variables)]
+                fn add(self, rhs: f32) -> Self::Output {
+                    rhs
+                }
+            }
+        };
+
+        assert_eq_impl(&expected, actual)
     }
 
     #[test]
     fn add_f64_and_vector() {
-        let algebra = Algebra::new_with_scalar(4, 1, 0);
-        let f64 = AlgebraType::Float(Float(Some(FloatType::F64), algebra));
-        let vector = AlgebraType::Grade(algebra.grade(1));
-
-        assert!(SumOp::Add.item_impl(f64, vector).is_empty());
-    }
-
-    #[test]
-    fn add_scalar_and_vector() {
-        let algebra = Algebra::new_with_scalar(4, 1, 0);
+        let algebra = Algebra::new(4, 1, 0);
         let scalar = AlgebraType::Grade(algebra.grade(0));
         let vector = AlgebraType::Grade(algebra.grade(1));
 
-        let actual = &SumOp::Add.item_impl(scalar, vector)[0];
+        let actual = SumOp::Add.item_impl(scalar, vector);
+        assert_eq!(2, actual.len());
+
+        let actual = &actual[0];
         let expected = parse_quote! {
-            impl std::ops::Add<Vector> for Scalar {
-                type Output = Multivector<Scalar, Vector, Zero, Zero, Zero, Zero>;
+            impl std::ops::Add<Vector<f32>> for f32 {
+                type Output = Multivector<f32, Vector<f32>, Zero, Zero, Zero, Zero>;
                 #[inline]
                 #[allow(unused_variables)]
-                fn add(self, rhs: Vector) -> Self::Output {
+                fn add(self, rhs: Vector<f32>) -> Self::Output {
                     Multivector(self, rhs, Zero, Zero, Zero, Zero)
                 }
             }
         };
 
-        assert_eq_impl(&expected, actual);
+        assert_eq_impl(&expected, actual)
     }
 
     #[test]
@@ -1861,7 +1917,63 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    fn mul_f64_and_vector() {
+        let algebra = Algebra::new(3, 0, 0);
+        let scalar = AlgebraType::Grade(algebra.grade(0));
+        let vector = AlgebraType::Grade(algebra.grade(1));
+
+        let actual = &ProductOp::Mul.item_impl(scalar, vector)[1];
+        let expected = parse_quote! {
+            impl std::ops::Mul<Vector<f64>> for f64 {
+                type Output = Vector<f64>;
+                #[inline]
+                #[allow(unused_variables)]
+                fn mul(self, rhs: Vector<f64>) -> Self::Output {
+                    Vector {
+                        e1: self * rhs.e1,
+                        e2: self * rhs.e2,
+                        e3: self * rhs.e3,
+                    }
+                }
+            }
+        };
+
+        assert_eq_impl(&expected, actual);
+    }
+
+    #[test]
+    fn add_scalar_and_scalar_is_none() {
+        let algebra = Algebra::new(3, 0, 0);
+        let scalar = AlgebraType::Grade(algebra.grade(0));
+
+        let actual = SumOp::Add.item_impl(scalar, scalar);
+        assert!(actual.is_empty());
+    }
+
+    #[test]
+    fn mul_zero_and_zero() {
+        let algebra = Algebra::new(2, 0, 0);
+        let zero = AlgebraType::Zero(algebra);
+        let actual = ProductOp::Mul.item_impl(zero, zero);
+        assert_eq!(1, actual.len());
+        let actual = &actual[0];
+
+        let expected = parse_quote! {
+            impl std::ops::Mul<Zero> for Zero {
+                type Output = Zero;
+                #[inline]
+                #[allow(unused_variables)]
+                fn mul(self, rhs: Zero) -> Self::Output {
+                    Zero
+                }
+            }
+        };
+
+        assert_eq_impl(&expected, actual);
+    }
+
+    #[test]
+    // #[ignore]
     fn write_out_scalarless_algebra() {
         let algebra = Algebra::new(3, 0, 0);
         write_to_file(&algebra.define());

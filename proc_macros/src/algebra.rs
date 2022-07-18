@@ -35,29 +35,16 @@ pub struct Algebra {
     one: u8,
     neg_one: u8,
     zero: u8,
-    pub has_scalar_type: bool,
 }
 
 impl Algebra {
-    #[cfg(test)]
-    pub fn new_with_scalar(one: u8, neg_one: u8, zero: u8) -> Self {
-        let mut algebra = Algebra::new(one, neg_one, zero);
-        algebra.has_scalar_type = true;
-        algebra
-    }
-
     pub fn new(one: u8, neg_one: u8, zero: u8) -> Self {
         assert!(
             one + zero + neg_one <= 6,
             "too many bases to define algebra"
         );
 
-        Self {
-            one,
-            zero,
-            neg_one,
-            has_scalar_type: false,
-        }
+        Self { one, zero, neg_one }
     }
 
     pub fn basis(self, index: u8) -> Basis {
@@ -353,7 +340,7 @@ impl Grade {
     }
 
     pub fn ident(self) -> Option<Ident> {
-        if self.is_scalar() && !self.1.has_scalar_type {
+        if self.is_scalar() {
             None
         } else {
             Some(parse_str(self.name()).unwrap())
@@ -361,14 +348,15 @@ impl Grade {
     }
 
     pub fn ty(self) -> Type {
-        if self.1.has_scalar_type {
-            parse_str(self.name()).unwrap()
+        self.ty_with_float(None)
+    }
+
+    pub fn ty_with_float(self, float: Option<FloatType>) -> Type {
+        let float = float_ty(float);
+        if let Some(ident) = self.ident() {
+            parse_quote!(#ident<#float>)
         } else {
-            if let Some(ident) = self.ident() {
-                parse_quote!(#ident<T>)
-            } else {
-                parse_quote!(T)
-            }
+            float
         }
     }
 
@@ -399,11 +387,7 @@ pub struct Blade(pub BladeSet, pub Algebra);
 impl Blade {
     pub fn field(self) -> Option<Ident> {
         if self.is_scalar() {
-            if self.1.has_scalar_type {
-                Some(Ident::new("value", Span::mixed_site()))
-            } else {
-                None
-            }
+            None
         } else {
             let mut output = "e".to_string();
 
@@ -579,7 +563,6 @@ impl BladeSet {
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum AlgebraType {
     Zero(Algebra),
-    Float(Float),
     Grade(Grade),
     Multivector(Multivector),
 }
@@ -599,7 +582,7 @@ impl AlgebraType {
 
     pub fn contains(self, grade: Grade) -> bool {
         match self {
-            AlgebraType::Zero(_) | AlgebraType::Float(_) => false,
+            AlgebraType::Zero(_) => false,
             AlgebraType::Grade(g) => g == grade,
             AlgebraType::Multivector(mv) => mv.0.contains(grade),
         }
@@ -608,7 +591,6 @@ impl AlgebraType {
     pub fn algebra(self) -> Algebra {
         match self {
             Self::Zero(a) => a,
-            Self::Float(f) => f.1,
             Self::Grade(g) => g.1,
             Self::Multivector(mv) => mv.1,
         }
@@ -617,7 +599,6 @@ impl AlgebraType {
     pub fn blades(self) -> TypeMvBlades {
         match self {
             Self::Zero(_) => TypeMvBlades::Zero,
-            Self::Float(f) => TypeMvBlades::Grade(f.1.grade(0).blades()),
             Self::Grade(g) => TypeMvBlades::Grade(g.blades()),
             Self::Multivector(mv) => TypeMvBlades::Multivector(mv.blades()),
         }
@@ -626,7 +607,6 @@ impl AlgebraType {
     pub fn grades(self) -> TypeMvGrades {
         match self {
             Self::Zero(_) => TypeMvGrades::Zero,
-            Self::Float(f) => Self::Grade(f.1.grade(0)).grades(),
             Self::Grade(g) => TypeMvGrades::Grade(once(g)),
             Self::Multivector(mv) => TypeMvGrades::Multivector(mv.grades()),
         }
@@ -636,10 +616,9 @@ impl AlgebraType {
         matches!(self, AlgebraType::Multivector(mv) if mv.is_generic())
     }
 
-    pub fn is_float(self) -> bool {
+    pub fn is_scalar(self) -> bool {
         match self {
-            Self::Float(_) => true,
-            Self::Grade(grade) => grade.is_scalar() && !grade.1.has_scalar_type,
+            Self::Grade(grade) => grade.is_scalar(),
             _ => false,
         }
     }
@@ -656,24 +635,11 @@ impl AlgebraType {
     }
 
     pub fn iter(algebra: Algebra) -> Box<dyn Iterator<Item = Self>> {
-        if algebra.has_scalar_type {
-            Box::new(
-                once(AlgebraType::Zero(algebra))
-                    .chain(once(AlgebraType::Float(Float(
-                        Some(FloatType::F64),
-                        algebra,
-                    ))))
-                    .chain(algebra.grades().map(Self::Grade))
-                    .chain(once(algebra.mv())),
-            )
-        } else {
-            Box::new(
-                once(AlgebraType::Zero(algebra))
-                    // .chain(Float::iter(algebra).map(Self::Float))
-                    .chain(algebra.grades().map(Self::Grade))
-                    .chain(once(algebra.mv())),
-            )
-        }
+        Box::new(
+            once(AlgebraType::Zero(algebra))
+                .chain(algebra.grades().map(Self::Grade))
+                .chain(once(algebra.mv())),
+        )
     }
 
     pub fn from_iter<I: IntoIterator<Item = Product>>(iter: I, algebra: Algebra) -> Self {
@@ -696,40 +662,13 @@ impl AlgebraType {
         }
     }
 
-    pub fn has_float_generic(self) -> bool {
-        if self.algebra().has_scalar_type {
-            false
-        } else {
-            match self {
-                AlgebraType::Zero(_) => false,
-                AlgebraType::Float(_) => true,
-                AlgebraType::Grade(_) => true,
-                AlgebraType::Multivector(mv) => !mv.is_generic(),
-            }
+    pub fn has_float_generic(self, float: Option<FloatType>) -> bool {
+        match self {
+            AlgebraType::Zero(_) => false,
+            // AlgebraType::Grade(g) if g.is_scalar() => float.is_none(),
+            AlgebraType::Grade(_) => float.is_none(),
+            AlgebraType::Multivector(mv) => !mv.is_generic(),
         }
-    }
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct Float(pub Option<FloatType>, pub Algebra);
-
-impl Float {
-    pub fn iter(algebra: Algebra) -> impl Iterator<Item = Self> {
-        [None, Some(FloatType::F32), Some(FloatType::F64)]
-            .into_iter()
-            .map(move |f| Float(f, algebra))
-    }
-
-    pub fn ty(self) -> Type {
-        match self.0 {
-            Some(FloatType::F32) => parse_quote!(f32),
-            Some(FloatType::F64) => parse_quote!(f64),
-            None => parse_quote!(T),
-        }
-    }
-
-    pub fn is_generic(self) -> bool {
-        self.0.is_none()
     }
 }
 
@@ -737,6 +676,27 @@ impl Float {
 pub enum FloatType {
     F32,
     F64,
+}
+
+impl FloatType {
+    pub fn iter() -> impl Iterator<Item = Self> {
+        [Self::F32, Self::F64].into_iter()
+    }
+
+    pub fn ty(self) -> Type {
+        match self {
+            FloatType::F32 => parse_quote!(f32),
+            FloatType::F64 => parse_quote!(f64),
+        }
+    }
+}
+
+pub fn float_ty(float: Option<FloatType>) -> Type {
+    if let Some(float) = float {
+        float.ty()
+    } else {
+        parse_quote!(T)
+    }
 }
 
 #[derive(Clone)]
@@ -811,7 +771,7 @@ impl Multivector {
         self.0.insert(grade);
     }
 
-    pub fn type_parameters(self, suffix: &str) -> Vec<Type> {
+    pub fn type_parameters(self, suffix: &str, float: Option<FloatType>) -> Vec<Type> {
         if self.is_generic() {
             self.type_generics(suffix)
         } else {
@@ -819,7 +779,7 @@ impl Multivector {
                 .grades()
                 .map(|g| {
                     if self.0.contains(g) {
-                        g.ty()
+                        g.ty_with_float(float)
                     } else {
                         Zero::ty()
                     }
@@ -952,6 +912,7 @@ impl std::ops::BitOr for GradeSet {
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum ProductOp {
     Mul,
+    Div,
     Geometric,
     Dot,
     Wedge,
@@ -959,12 +920,18 @@ pub enum ProductOp {
     Antidot,
     Antiwedge,
     Grade(Grade),
-    Div,
     LeftContraction,
     RightContraction,
 }
 
 impl ProductOp {
+    pub fn is_local(self) -> bool {
+        match self {
+            Self::Mul | Self::Div => false,
+            _ => true,
+        }
+    }
+
     pub fn output_contains(
         self,
         lhs: impl IntoIterator<Item = Blade>,
@@ -1110,7 +1077,6 @@ impl ProductOp {
 
 pub fn access_blade(parent: AlgebraType, blade: Blade, ident: TokenStream) -> Expr {
     let member = match parent {
-        AlgebraType::Float(_) => return ident.convert(),
         AlgebraType::Grade(_) => syn::Member::Named({
             if let Some(field) = blade.field() {
                 field
@@ -1136,6 +1102,13 @@ pub enum SumOp {
 }
 
 impl SumOp {
+    pub fn is_local(self) -> bool {
+        match self {
+            SumOp::Add | SumOp::Sub => false,
+            SumOp::GradeAdd | SumOp::GradeSub => true,
+        }
+    }
+
     pub fn iter() -> impl Iterator<Item = Self> {
         [Self::Add, Self::Sub, Self::GradeAdd, Self::GradeSub].into_iter()
     }
