@@ -9,15 +9,10 @@ use syn::{parse_str, Expr, Ident, Type};
 //  - pro: no dependency on clifford crate, algebra can be defined anywhere
 //  - pro: all traits can have algebra-specific definitions or implementations
 
+// reimplemented because the syn version doesn't track caller
 macro_rules! parse_quote {
     ($($tt:tt)*) => {
-        {
-            let tokens = quote::quote!($($tt)*);
-            match std::panic::catch_unwind(|| syn::parse_quote::parse(tokens.clone())) {
-                Ok(tokens) => tokens,
-                Err(_) => panic!("{}", tokens.to_string()),
-            }
-        }
+        syn::parse2(quote::quote!($($tt)*)).unwrap()
     };
 }
 
@@ -44,6 +39,7 @@ pub struct Algebra {
 }
 
 impl Algebra {
+    #[cfg(test)]
     pub fn new_with_scalar(one: u8, neg_one: u8, zero: u8) -> Self {
         let mut algebra = Algebra::new(one, neg_one, zero);
         algebra.has_scalar_type = true;
@@ -126,10 +122,7 @@ impl Algebra {
     }
 
     pub fn is_homogenous(self) -> bool {
-        match (self.one, self.neg_one, self.zero) {
-            (3, 0, 1) | (2, 0, 1) => true,
-            _ => false,
-        }
+        self.zero > 0
     }
 
     pub fn symmetrical_complements(self) -> bool {
@@ -140,6 +133,12 @@ impl Algebra {
 
     pub fn mv(self) -> AlgebraType {
         AlgebraType::Multivector(Multivector::new(self))
+    }
+
+    pub fn null_blades(self) -> impl Iterator<Item = Blade> {
+        self.bases()
+            .filter(move |b| self.square(b.0).is_zero())
+            .map(Basis::to_blade)
     }
 }
 
@@ -246,6 +245,14 @@ impl Product {
         }
     }
 
+    pub fn map<F: FnOnce(Blade) -> Product>(self, f: F) -> Self {
+        match self {
+            Product::Pos(blade) => f(blade),
+            Product::Zero => self,
+            Product::Neg(blade) => -f(blade),
+        }
+    }
+
     pub fn filter<F: Fn(Blade) -> bool>(self, f: F) -> Self {
         match self {
             Product::Zero => self,
@@ -267,6 +274,10 @@ impl Product {
     #[allow(dead_code)]
     pub fn is_neg(self) -> bool {
         matches!(self, Product::Neg(_))
+    }
+
+    pub fn is_zero(self) -> bool {
+        matches!(self, Product::Zero)
     }
 
     pub fn blade(self) -> Option<Blade> {
@@ -310,6 +321,12 @@ impl std::ops::MulAssign for Product {
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Basis(pub u8, pub Algebra);
 
+impl Basis {
+    pub fn to_blade(self) -> Blade {
+        Blade(BladeSet::default().with(self.0), self.1)
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Grade(pub u8, pub Algebra);
 
@@ -344,10 +361,14 @@ impl Grade {
     }
 
     pub fn ty(self) -> Type {
-        if self.is_scalar() && !self.1.has_scalar_type {
-            parse_quote!(f64)
-        } else {
+        if self.1.has_scalar_type {
             parse_str(self.name()).unwrap()
+        } else {
+            if let Some(ident) = self.ident() {
+                parse_quote!(#ident<T>)
+            } else {
+                parse_quote!(T)
+            }
         }
     }
 
@@ -522,6 +543,11 @@ impl From<u64> for BladeSet {
 }
 
 impl BladeSet {
+    pub fn with(mut self, index: u8) -> Self {
+        self.insert(index);
+        self
+    }
+
     pub fn contains(self, index: u8) -> bool {
         let flag = Self::flag(index);
         self.0 & flag == flag
@@ -553,7 +579,7 @@ impl BladeSet {
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum AlgebraType {
     Zero(Algebra),
-    Float(Algebra),
+    Float(Float),
     Grade(Grade),
     Multivector(Multivector),
 }
@@ -581,7 +607,8 @@ impl AlgebraType {
 
     pub fn algebra(self) -> Algebra {
         match self {
-            Self::Zero(a) | Self::Float(a) => a,
+            Self::Zero(a) => a,
+            Self::Float(f) => f.1,
             Self::Grade(g) => g.1,
             Self::Multivector(mv) => mv.1,
         }
@@ -590,7 +617,7 @@ impl AlgebraType {
     pub fn blades(self) -> TypeMvBlades {
         match self {
             Self::Zero(_) => TypeMvBlades::Zero,
-            Self::Float(a) => TypeMvBlades::Grade(a.grade(0).blades()),
+            Self::Float(f) => TypeMvBlades::Grade(f.1.grade(0).blades()),
             Self::Grade(g) => TypeMvBlades::Grade(g.blades()),
             Self::Multivector(mv) => TypeMvBlades::Multivector(mv.blades()),
         }
@@ -599,7 +626,7 @@ impl AlgebraType {
     pub fn grades(self) -> TypeMvGrades {
         match self {
             Self::Zero(_) => TypeMvGrades::Zero,
-            Self::Float(a) => Self::Grade(a.grade(0)).grades(),
+            Self::Float(f) => Self::Grade(f.1.grade(0)).grades(),
             Self::Grade(g) => TypeMvGrades::Grade(once(g)),
             Self::Multivector(mv) => TypeMvGrades::Multivector(mv.grades()),
         }
@@ -610,7 +637,11 @@ impl AlgebraType {
     }
 
     pub fn is_float(self) -> bool {
-        matches!(self, Self::Float(_))
+        match self {
+            Self::Float(_) => true,
+            Self::Grade(grade) => grade.is_scalar() && !grade.1.has_scalar_type,
+            _ => false,
+        }
     }
 
     pub fn is_mv(self) -> bool {
@@ -624,11 +655,25 @@ impl AlgebraType {
         }
     }
 
-    pub fn iter(algebra: Algebra) -> impl Iterator<Item = Self> {
-        once(AlgebraType::Zero(algebra))
-            .chain(once(AlgebraType::Float(algebra)))
-            .chain(algebra.grades().map(Self::Grade))
-            .chain(once(algebra.mv()))
+    pub fn iter(algebra: Algebra) -> Box<dyn Iterator<Item = Self>> {
+        if algebra.has_scalar_type {
+            Box::new(
+                once(AlgebraType::Zero(algebra))
+                    .chain(once(AlgebraType::Float(Float(
+                        Some(FloatType::F64),
+                        algebra,
+                    ))))
+                    .chain(algebra.grades().map(Self::Grade))
+                    .chain(once(algebra.mv())),
+            )
+        } else {
+            Box::new(
+                once(AlgebraType::Zero(algebra))
+                    // .chain(Float::iter(algebra).map(Self::Float))
+                    .chain(algebra.grades().map(Self::Grade))
+                    .chain(once(algebra.mv())),
+            )
+        }
     }
 
     pub fn from_iter<I: IntoIterator<Item = Product>>(iter: I, algebra: Algebra) -> Self {
@@ -650,6 +695,48 @@ impl AlgebraType {
             }
         }
     }
+
+    pub fn has_float_generic(self) -> bool {
+        if self.algebra().has_scalar_type {
+            false
+        } else {
+            match self {
+                AlgebraType::Zero(_) => false,
+                AlgebraType::Float(_) => true,
+                AlgebraType::Grade(_) => true,
+                AlgebraType::Multivector(mv) => !mv.is_generic(),
+            }
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct Float(pub Option<FloatType>, pub Algebra);
+
+impl Float {
+    pub fn iter(algebra: Algebra) -> impl Iterator<Item = Self> {
+        [None, Some(FloatType::F32), Some(FloatType::F64)]
+            .into_iter()
+            .map(move |f| Float(f, algebra))
+    }
+
+    pub fn ty(self) -> Type {
+        match self.0 {
+            Some(FloatType::F32) => parse_quote!(f32),
+            Some(FloatType::F64) => parse_quote!(f64),
+            None => parse_quote!(T),
+        }
+    }
+
+    pub fn is_generic(self) -> bool {
+        self.0.is_none()
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum FloatType {
+    F32,
+    F64,
 }
 
 #[derive(Clone)]
@@ -868,6 +955,9 @@ pub enum ProductOp {
     Geometric,
     Dot,
     Wedge,
+    Antigeometric,
+    Antidot,
+    Antiwedge,
     Grade(Grade),
     Div,
     LeftContraction,
@@ -892,6 +982,9 @@ impl ProductOp {
             Self::Geometric,
             Self::Dot,
             Self::Wedge,
+            Self::Antigeometric,
+            Self::Antidot,
+            Self::Antiwedge,
             Self::LeftContraction,
             Self::RightContraction,
             Self::Div,
@@ -904,6 +997,7 @@ impl ProductOp {
     }
 
     pub fn call(self, lhs: Blade, rhs: Blade) -> Product {
+        use UnaryOp::{LeftComplement as LC, RightComplement as RC};
         match self {
             ProductOp::Mul | ProductOp::Div => lhs * rhs,
             ProductOp::Geometric => lhs * rhs,
@@ -915,6 +1009,19 @@ impl ProductOp {
             }
             ProductOp::LeftContraction => lhs.left_contraction(rhs),
             ProductOp::RightContraction => lhs.right_contraction(rhs),
+            ProductOp::Antigeometric | ProductOp::Antidot | ProductOp::Antiwedge => {
+                let inner = match self {
+                    Self::Antigeometric => Self::Geometric,
+                    Self::Antidot => Self::Dot,
+                    Self::Antiwedge => Self::Wedge,
+                    _ => unreachable!(),
+                };
+
+                let lhs_comp = LC.call(lhs).blade().unwrap();
+                let rhs_comp = LC.call(rhs).blade().unwrap();
+                let output_comp = inner.call(lhs_comp, rhs_comp);
+                output_comp.map(|blade| RC.call(blade))
+            }
         }
     }
 
@@ -951,13 +1058,16 @@ impl ProductOp {
     pub fn trait_ty(self) -> Type {
         match self {
             ProductOp::Mul => parse_quote!(std::ops::Mul),
-            ProductOp::Geometric => parse_quote!(crate::Geometric),
-            ProductOp::Dot => parse_quote!(crate::Dot),
-            ProductOp::Wedge => parse_quote!(crate::Wedge),
-            ProductOp::Grade(grade) => parse_str(&format!("{}Product", grade.name())).unwrap(),
             ProductOp::Div => parse_quote!(std::ops::Div),
-            ProductOp::LeftContraction => parse_quote!(crate::LeftContraction),
-            ProductOp::RightContraction => parse_quote!(crate::RightContraction),
+            ProductOp::Geometric => parse_quote!(Geometric),
+            ProductOp::Dot => parse_quote!(Dot),
+            ProductOp::Wedge => parse_quote!(Wedge),
+            ProductOp::Antigeometric => parse_quote!(Antigeometric),
+            ProductOp::Antidot => parse_quote!(Antidot),
+            ProductOp::Antiwedge => parse_quote!(Antiwedge),
+            ProductOp::Grade(grade) => parse_str(&format!("{}Product", grade.name())).unwrap(),
+            ProductOp::LeftContraction => parse_quote!(LeftContraction),
+            ProductOp::RightContraction => parse_quote!(RightContraction),
         }
     }
 
@@ -967,6 +1077,9 @@ impl ProductOp {
             ProductOp::Geometric => parse_quote!(geo),
             ProductOp::Dot => parse_quote!(dot),
             ProductOp::Wedge => parse_quote!(wedge),
+            ProductOp::Antigeometric => parse_quote!(antigeo),
+            ProductOp::Antidot => parse_quote!(antidot),
+            ProductOp::Antiwedge => parse_quote!(antiwedge),
             ProductOp::Grade(grade) => {
                 let str = &format!("{}_prod", grade.name().to_lowercase());
                 Ident::new(str, Span::mixed_site())
@@ -1002,7 +1115,7 @@ pub fn access_blade(parent: AlgebraType, blade: Blade, ident: TokenStream) -> Ex
             if let Some(field) = blade.field() {
                 field
             } else {
-                return parse_quote!(#ident);
+                return ident.convert();
             }
         }),
         AlgebraType::Multivector(_) => blade.grade().mv_field(),
@@ -1039,15 +1152,15 @@ impl SumOp {
         match self {
             Self::Add => parse_quote!(std::ops::Add),
             Self::Sub => parse_quote!(std::ops::Sub),
-            Self::GradeAdd => parse_quote!(crate::GradeAdd),
-            Self::GradeSub => parse_quote!(crate::GradeSub),
+            Self::GradeAdd => parse_quote!(GradeAdd),
+            Self::GradeSub => parse_quote!(GradeSub),
         }
     }
 
     pub fn trait_ty_grade(self) -> Type {
         match self {
-            Self::Add | Self::GradeAdd => parse_quote!(crate::GradeAdd),
-            Self::Sub | Self::GradeSub => parse_quote!(crate::GradeSub),
+            Self::Add | Self::GradeAdd => parse_quote!(GradeAdd),
+            Self::Sub | Self::GradeSub => parse_quote!(GradeSub),
         }
     }
 
@@ -1125,48 +1238,35 @@ pub enum UnaryOp {
     LeftComplement,
     RightComplement,
     Dual,
-    // Bulk,
-    // Weight,
+    Bulk,
+    Weight,
 }
 
 impl UnaryOp {
     pub fn iter(algebra: Algebra) -> impl Iterator<Item = Self> {
+        let mut output = vec![Self::Neg, Self::Reverse];
         if algebra.symmetrical_complements() {
-            vec![Self::Neg, Self::Reverse, Self::Dual].into_iter()
+            output.push(Self::Dual);
         } else {
-            vec![
-                Self::Neg,
-                Self::Reverse,
-                Self::LeftComplement,
-                Self::RightComplement,
-            ]
-            .into_iter()
-        }
-    }
+            output.extend([Self::LeftComplement, Self::RightComplement]);
+        };
 
-    pub fn define(self) -> Option<syn::ItemTrait> {
-        match self {
-            Self::LeftComplement | Self::RightComplement | Self::Dual => {
-                let trait_ = self.trait_ty();
-                let fn_ = self.trait_fn();
-                Some(parse_quote! {
-                    pub trait #trait_ {
-                        type Output;
-                        fn #fn_(self) -> Self::Output;
-                    }
-                })
-            }
-            _ => None,
+        if algebra.is_homogenous() {
+            output.extend([Self::Bulk, Self::Weight]);
         }
+
+        output.into_iter()
     }
 
     pub fn trait_ty(self) -> Type {
         match self {
             Self::Neg => parse_quote! { std::ops::Neg },
-            Self::Reverse => parse_quote! { crate::Reverse },
+            Self::Reverse => parse_quote! { Reverse },
             Self::LeftComplement => parse_quote! { LeftComplement },
             Self::RightComplement => parse_quote! { RightComplement },
             Self::Dual => parse_quote! { Dual },
+            Self::Bulk => parse_quote!(Bulk),
+            Self::Weight => parse_quote!(Weight),
         }
     }
 
@@ -1177,8 +1277,8 @@ impl UnaryOp {
             Self::LeftComplement => parse_quote! { left_comp },
             Self::RightComplement => parse_quote! { right_comp },
             Self::Dual => parse_quote! { dual },
-            // Self::Bulk => parse_quote! { bulk },
-            // Self::Weight => parse_quote! { weight },
+            Self::Bulk => parse_quote! { bulk },
+            Self::Weight => parse_quote! { weight },
         }
     }
 
@@ -1213,20 +1313,38 @@ impl UnaryOp {
                 (blade * complement).with_blade(complement)
             }
             Self::Dual => Self::LeftComplement.call(blade),
-            // Self::Bulk => {
-            //     let null_blade = blade.1.null_basis().unwrap();
-            //     match blade.wedge(null_blade) {
-            //         Product::Zero => Product::Zero,
-            //         _ => Product::Pos(blade),
-            //     }
-            // }
-            // Self::Weight => {
-            //     let null_blade = blade.1.null_basis().unwrap();
-            //     match blade.wedge(null_blade) {
-            //         Product::Zero => Product::Pos(blade),
-            //         _ => Product::Zero,
-            //     }
-            // }
+            Self::Bulk => {
+                let mut null_blades = blade.1.null_blades();
+                if null_blades.any(|null_blade| blade.wedge(null_blade).is_zero()) {
+                    Product::Zero
+                } else {
+                    Product::Pos(blade)
+                }
+            }
+            Self::Weight => {
+                let mut null_blades = blade.1.null_blades();
+                if null_blades.any(|null_blade| blade.wedge(null_blade).is_zero()) {
+                    Product::Pos(blade)
+                } else {
+                    Product::Zero
+                }
+            }
+        }
+    }
+
+    pub fn left_comp(algebra: Algebra) -> Self {
+        if algebra.symmetrical_complements() {
+            Self::Dual
+        } else {
+            Self::LeftComplement
+        }
+    }
+
+    pub fn right_comp(algebra: Algebra) -> Self {
+        if algebra.symmetrical_complements() {
+            Self::Dual
+        } else {
+            Self::RightComplement
         }
     }
 }
@@ -1238,25 +1356,25 @@ mod tests {
     #[test]
     #[should_panic]
     fn no_bases() {
-        Algebra::new_with_scalar(0, 0, 0).square(0);
+        Algebra::new(0, 0, 0).square(0);
     }
 
     #[test]
     #[should_panic]
     fn too_many_bases() {
-        Algebra::new_with_scalar(7, 0, 0);
+        Algebra::new(7, 0, 0);
     }
 
     #[test]
     fn one_d() {
-        let alg = Algebra::new_with_scalar(1, 0, 0);
+        let alg = Algebra::new(1, 0, 0);
         assert!(alg.square(1).is_pos());
         assert!(std::panic::catch_unwind(|| alg.square(2)).is_err());
     }
 
     #[test]
     fn pga() {
-        let alg = Algebra::new_with_scalar(3, 0, 1);
+        let alg = Algebra::new(3, 0, 1);
         assert!(alg.square(3).is_pos());
         assert_eq!(Product::Zero, alg.square(4));
         assert!(std::panic::catch_unwind(|| alg.square(5)).is_err());
@@ -1264,7 +1382,7 @@ mod tests {
 
     #[test]
     fn cga() {
-        let bases = Algebra::new_with_scalar(4, 1, 0);
+        let bases = Algebra::new(4, 1, 0);
         assert!(bases.square(4).is_pos());
         assert!(bases.square(5).is_neg());
         assert!(std::panic::catch_unwind(|| bases.square(6)).is_err());
@@ -1293,14 +1411,14 @@ mod tests {
 
     #[test]
     fn bases_pseudovector() {
-        let alg = Algebra::new_with_scalar(3, 0, 0);
+        let alg = Algebra::new(3, 0, 0);
 
         assert_eq!(alg.blade(0b_0111), alg.pseudoscalar());
     }
 
     #[test]
     fn grade_blades() {
-        let alg = Algebra::new_with_scalar(3, 1, 0);
+        let alg = Algebra::new(3, 1, 0);
 
         assert_eq!(1, alg.grade(0).blades().count());
         assert_eq!(4, alg.grade(1).blades().count());
@@ -1311,7 +1429,7 @@ mod tests {
 
     #[test]
     fn blade_multiplication() {
-        let alg = Algebra::new_with_scalar(3, 1, 1);
+        let alg = Algebra::new(3, 1, 1);
         let e12 = alg.blade(0b_0011);
         let e23 = alg.blade(0b_0110);
         let e24 = alg.blade(0b_1010);
@@ -1326,7 +1444,7 @@ mod tests {
 
     #[test]
     fn blade_dot() {
-        let alg = Algebra::new_with_scalar(3, 1, 0);
+        let alg = Algebra::new(3, 1, 0);
         let e12 = alg.blade(0b_0011);
         let e23 = alg.blade(0b_0110);
         let e34 = alg.blade(0b_1100);
@@ -1338,7 +1456,7 @@ mod tests {
 
     #[test]
     fn blade_wedge() {
-        let alg = Algebra::new_with_scalar(3, 1, 0);
+        let alg = Algebra::new(3, 1, 0);
         let e12 = alg.blade(0b_0011);
         let e23 = alg.blade(0b_0110);
         let e34 = alg.blade(0b_1100);
@@ -1350,7 +1468,7 @@ mod tests {
 
     #[test]
     fn blade_left_contraction() {
-        let algebra = Algebra::new_with_scalar(3, 0, 1);
+        let algebra = Algebra::new(3, 0, 1);
         let scalar = algebra.scalar();
         let e1 = algebra.blade(1);
 
@@ -1362,7 +1480,7 @@ mod tests {
 
     #[test]
     fn blade_right_contraction() {
-        let algebra = Algebra::new_with_scalar(3, 0, 1);
+        let algebra = Algebra::new(3, 0, 1);
         let scalar = algebra.scalar();
         let e1 = algebra.blade(1);
 
@@ -1374,26 +1492,26 @@ mod tests {
 
     #[test]
     fn complement_symmetr_g1() {
-        assert!(Algebra::new_with_scalar(1, 0, 0).symmetrical_complements());
+        assert!(Algebra::new(1, 0, 0).symmetrical_complements());
     }
 
     #[test]
     fn complement_symmetr_g2() {
-        assert!(!Algebra::new_with_scalar(2, 0, 0).symmetrical_complements());
+        assert!(!Algebra::new(2, 0, 0).symmetrical_complements());
     }
 
     #[test]
     fn complement_symmetr_g3() {
-        assert!(Algebra::new_with_scalar(3, 0, 0).symmetrical_complements());
+        assert!(Algebra::new(3, 0, 0).symmetrical_complements());
     }
 
     #[test]
     fn complement_symmetr_g4() {
-        assert!(!Algebra::new_with_scalar(4, 0, 0).symmetrical_complements());
+        assert!(!Algebra::new(4, 0, 0).symmetrical_complements());
     }
 
     #[test]
     fn complement_symmetr_g5() {
-        assert!(Algebra::new_with_scalar(5, 0, 0).symmetrical_complements());
+        assert!(Algebra::new(5, 0, 0).symmetrical_complements());
     }
 }
