@@ -24,13 +24,7 @@
 //! - [ ] Euclidean
 //!     - [ ] Meet
 //!     - [ ] Join
-//! - [ ] Homogeneous 3D - points as vectors
-//!     - [x] Antigeometric
-//!     - [x] Antiwedge
-//!     - [x] Antidot
-//!     - [ ] Antireverse
-//!     - [ ] Meet
-//!     - [ ] Join
+//! - [ ] Homogeneous
 //!     - [x] Weight
 //!     - [x] Bulk
 //!     - [ ] IsIdeal
@@ -39,9 +33,9 @@
 //! - [ ] Conformal
 //!     - [ ] Meet
 //!     - [ ] Join
-//!     - [ ] Origin
-//!     - [ ] Infinity
-//!     - [ ] IsFlat
+//!     - [x] Origin
+//!     - [x] Infinity
+//!     - [x] IsFlat
 //! - [ ] Minkowski
 //!
 //! Types:
@@ -53,16 +47,19 @@
 //! - [x] Mul
 //! - [x] Div
 //! - [x] Geometric
+//! - [x] Antigeometric
 //! - [ ] Commutator
 //! - [ ] Sandwich
 //!
 //! Inner products:
 //! - [x] Dot
+//! - [x] Antidot
 //! - [x] Left contraction
 //! - [x] Right contraction
 //!
 //! Outer products:
 //! - [x] Wedge
+//! - [x] Antiwedge
 //!
 //! Sum products:
 //! - [x] Addition
@@ -73,16 +70,13 @@
 //! - [x] Left complement
 //! - [x] Right complement
 //! - [x] Reverse
-//! - [ ] Antireverse
+//! - [x] Antireverse
 //!
 //! Norm-based operations:
 //! - [x] Norm
 //! - [x] NormSquared
 //! - [x] Inverse
 //! - [x] Unitize
-//!
-//! Multivector operations:
-//! - [ ] PartialEq<Grade>, asserts that other grades are zero
 //!
 //! Compound products:
 //! - [ ] Sandwich
@@ -91,12 +85,16 @@
 //!
 //! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features.html
 
-pub mod va_3d_manual;
+pub use proc_macros::clifford;
 
 #[cfg(feature = "ga_3d")]
 pub mod ga_3d;
 
-#[cfg(feature = "va_3d_mv")]
-pub mod va_3d_mv;
+#[cfg(feature = "pga_3d")]
+pub mod pga_3d;
 
-pub use proc_macros::clifford;
+#[cfg(feature = "cga_2d")]
+pub mod cga_2d;
+
+#[cfg(feature = "cga_3d")]
+pub mod cga_3d;

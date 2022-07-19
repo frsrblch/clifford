@@ -72,8 +72,8 @@ where
     }
 }
 
-pub const fn point(x: f64, y: f64, z: f64) -> Vector {
-    Vector::new(x, y, z, 1.)
+pub fn point<T: num_traits::One>(x: T, y: T, z: T) -> Vector<T> {
+    Vector::new(x, y, z, T::one())
 }
 
 #[cfg(test)]
@@ -118,10 +118,11 @@ mod tests {
             ..Default::default()
         };
 
-        let expected = Even {
+        let expected = Bivector {
             e34: -1.,
             ..Default::default()
-        };
+        } + 0.0
+            + Quadvector::default();
 
         assert_eq!(expected, e14.antigeo(e24));
     }
@@ -145,15 +146,6 @@ mod tests {
 
         assert_eq!(bulk, b.bulk());
         assert_eq!(weight, b.weight());
-    }
-
-    #[test]
-    fn ideal_point() {
-        let real = point(1., 2., 3.);
-        let ideal = Vector::new(1., 2., 3., 0.);
-
-        assert!(!real.is_ideal());
-        assert!(ideal.is_ideal());
     }
 
     #[test]

@@ -1,16 +1,19 @@
 proc_macros::clifford!(4, 1, 0);
 
 /// Point at the origin
-pub const N: Vector = Vector::new(0., 0., 0., 0.5, 0.5);
+pub const N: Vector<f64> = Vector::new(0., 0., 0., 0.5, 0.5);
 
 /// Point through infinity
-pub const N_BAR: Vector = Vector::new(0., 0., 0., -1., 1.);
+pub const N_BAR: Vector<f64> = Vector::new(0., 0., 0., -1., 1.);
 
-pub fn translate(v: Vector, t: Multivector<f64, Zero, Bivector, Zero, Zero, Zero>) -> Vector {
+pub fn translate(
+    v: Vector<f64>,
+    t: Multivector<f64, Zero, Bivector<f64>, Zero, Zero, Zero>,
+) -> Vector<f64> {
     (t * v * t.rev()).1
 }
 
-pub const fn point(x: f64, y: f64, z: f64) -> Vector {
+pub const fn point(x: f64, y: f64, z: f64) -> Vector<f64> {
     let x2 = x * x + y * y + z * z;
     Vector::new(x, y, z, 0.5 - 0.5 * x2, 0.5 + 0.5 * x2)
 }
@@ -32,7 +35,7 @@ pub trait IsFlat {
 
 impl<T, U> IsFlat for T
 where
-    T: crate::Wedge<Vector, Output = U> + Copy,
+    T: Wedge<Vector<f64>, Output = U> + Copy,
     U: Default + PartialEq,
 {
     fn is_flat(&self) -> bool {
@@ -47,11 +50,11 @@ fn flat_test() {
     let b = point(0., 1., 0.);
     let c = point(0., 0., 1.);
 
-    let points: Bivector = o.wedge(a);
-    let line: Trivector = points.wedge(N_BAR);
-    let circle: Trivector = points.wedge(b);
-    let plane: Quadvector = line.wedge(c);
-    let sphere: Quadvector = circle.wedge(c);
+    let points: Bivector<f64> = o.wedge(a);
+    let line: Trivector<f64> = points.wedge(N_BAR);
+    let circle: Trivector<f64> = points.wedge(b);
+    let plane: Quadvector<f64> = line.wedge(c);
+    let sphere: Quadvector<f64> = circle.wedge(c);
 
     assert!(!o.is_flat());
     assert!(!points.is_flat());

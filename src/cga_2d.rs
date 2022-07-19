@@ -1,12 +1,12 @@
 proc_macros::clifford!(3, 1, 0);
 
 /// Point at the origin
-pub const N: Vector = Vector::new(0., 0., 0.5, 0.5);
+pub const N: Vector<f64> = Vector::new(0., 0., 0.5, 0.5);
 
 /// Point through infinity
-pub const N_BAR: Vector = Vector::new(0., 0., -1., 1.);
+pub const N_BAR: Vector<f64> = Vector::new(0., 0., -1., 1.);
 
-pub const fn point(x: f64, y: f64) -> Vector {
+pub const fn point(x: f64, y: f64) -> Vector<f64> {
     let x2 = x * x + y * y;
     Vector::new(x, y, 0.5 - 0.5 * x2, 0.5 + 0.5 * x2)
 }
@@ -28,7 +28,7 @@ trait IsFlat {
 
 impl<T, U> IsFlat for T
 where
-    T: crate::Wedge<Vector, Output = U>,
+    T: Wedge<Vector<f64>, Output = U>,
     U: Default + PartialEq,
 {
     fn is_flat(self) -> bool {

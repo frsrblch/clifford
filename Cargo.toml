@@ -13,13 +13,8 @@ num-traits = "0.2.15"
 name = "cga_3d_tests"
 required-features = ["cga_3d"]
 
-[[test]]
-name = "ga_3d_tests"
-required-features = ["ga_3d"]
-
 [features]
 ga_3d = []
 pga_3d = []
-va_3d = []
 cga_2d = []
 cga_3d = []
