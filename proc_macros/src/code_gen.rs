@@ -177,18 +177,17 @@ impl UnaryOp {
         generics.params.extend(output_params);
 
         let trait_ty = self.trait_ty();
-        let predicates = ty.algebra().grades().map::<WherePredicate, _>(|grade_in| {
-            let ty_out = AlgebraType::from_iter(self.products(grade_in), ty.algebra());
-            let grade_out = match ty_out {
-                AlgebraType::Grade(g) => g,
-                _ => unreachable!(),
-            };
-            let out = grade_out.generic(OUT_SUFFIX);
-            let ident = grade_in.generic("");
-            parse_quote! {
-                #ident: #trait_ty<Output = #out>
-            }
-        });
+        let predicates = ty
+            .algebra()
+            .grades()
+            .filter_map::<WherePredicate, _>(|grade_in| {
+                let grade_out = self.grade_out(grade_in);
+                let out = grade_out.generic(OUT_SUFFIX);
+                let ident = grade_in.generic("");
+                Some(parse_quote! {
+                    #ident: #trait_ty<Output = #out>
+                })
+            });
         let where_clause = generics.make_where_clause();
         where_clause.predicates.extend(predicates);
 
@@ -255,13 +254,11 @@ impl UnaryOp {
                 let ident = Multivector::ident();
                 let fields = mv.1.grades().map(|grade_out| {
                     let exprs = mv.grades().filter_map(|grade_in| {
-                        let ty_out = AlgebraType::from_iter(self.products(grade_in), mv.1);
-                        match ty_out {
-                            AlgebraType::Grade(ty_grade) if ty_grade == grade_out => {
-                                let f = access_grade(ty, grade_in, quote!(self));
-                                Some(quote! { #trait_ty::#trait_fn(#f) })
-                            }
-                            _ => None,
+                        if self.grade_out(grade_in) == grade_out {
+                            let f = access_grade(ty, grade_in, quote!(self));
+                            Some(quote! { #trait_ty::#trait_fn(#f) })
+                        } else {
+                            None
                         }
                     });
                     quote!( #(#exprs)+* )
@@ -270,6 +267,16 @@ impl UnaryOp {
                     #ident(#(#fields),*)
                 }
             }
+        }
+    }
+
+    fn grade_out(self, grade: Grade) -> Grade {
+        match self {
+            Self::RightComplement | Self::LeftComplement | Self::Dual => {
+                let out = grade.1.dimensions() - grade.0;
+                grade.1.grade(out)
+            }
+            _ => grade,
         }
     }
 }
@@ -1003,7 +1010,7 @@ fn access_grade(parent: AlgebraType, grade: Grade, ident: TokenStream) -> syn::E
 
 fn assign_blade(blade: Blade, sum: &Vec<syn::Expr>) -> TokenStream {
     let expr = if sum.is_empty() {
-        quote! { 0. }
+        quote! { T::zero() }
     } else {
         quote! { #( #sum )+* }
     };
@@ -2046,8 +2053,8 @@ mod tests {
 
     #[test]
     // #[ignore]
-    fn write_out_scalarless_algebra() {
-        let algebra = Algebra::new(3, 0, 0);
+    fn write_algebra() {
+        let algebra = Algebra::new(3, 0, 1);
         write_to_file(&algebra.define());
     }
 }

@@ -58,10 +58,10 @@ impl Algebra {
 
         if index <= self.one {
             Product::Pos(self.scalar())
-        } else if index <= self.one + self.zero {
-            Product::Zero
-        } else if index <= self.one + self.zero + self.neg_one {
+        } else if index <= self.one + self.neg_one {
             Product::Neg(self.scalar())
+        } else if index <= self.one + self.neg_one + self.zero {
+            Product::Zero
         } else {
             panic!("index out of range: {index}");
         }
@@ -1425,8 +1425,8 @@ mod tests {
         assert_eq!(Product::Neg(alg.blade(0)), e12 * e12);
         assert_eq!(Product::Pos(alg.blade(0b_0101)), e12 * e23);
         assert_eq!(Product::Pos(alg.blade(0b_1001)), e12 * e24);
-        assert_eq!(Product::Zero, e24 * e24);
-        assert_eq!(Product::Neg(alg.blade(0)), e5 * e5);
+        assert_eq!(Product::Pos(alg.blade(0)), e24 * e24);
+        assert_eq!(Product::Zero, e5 * e5);
     }
 
     #[test]
