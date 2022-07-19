@@ -14,7 +14,7 @@ macro_rules! parse_quote {
     };
 }
 
-// TODO Multivector::grade(self) -> Grade for
+// TODO Multivector::grade(self) -> Grade
 // TODO sandwich product that returns identical grades (this is challenging for multivectors)
 //        perhaps have a GradeFilter<Input>
 //          Zero: GradeFilter<_, Output = Zero>,
@@ -86,11 +86,14 @@ impl Algebra {
             .flat_map(|op| AlgebraType::iter(self).map(move |lhs| (op, lhs)))
             .flat_map(|(op, ty)| op.impl_item(ty));
 
+        let norm_ops = NormOps::iter().map(NormOps::define_and_blanket);
+
         quote! {
             #(#product_ops_definitions)*
             #(#product_ops_blanket_impls)*
             #(#unary_ops_definitions)*
             #(#sum_ops_definitions)*
+            #(#norm_ops)*
             #(#types)*
             #(#type_impls)*
             #(#sum_ops)*
@@ -861,6 +864,88 @@ impl ProductOp {
     }
 }
 
+impl NormOps {
+    pub fn define_and_blanket(self) -> TokenStream {
+        match self {
+            Self::Norm2 => quote! {
+                pub trait Norm2 {
+                    type Output;
+                    fn norm2(self) -> Self::Output;
+                }
+
+                impl<T, S> Norm2 for T
+                where
+                    T: ScalarProduct<T, Output = S> + Reverse<Output = T> + Copy,
+                {
+                    type Output = S;
+                    #[inline]
+                    fn norm2(self) -> Self::Output {
+                        self.scalar_prod(self.rev())
+                    }
+                }
+            },
+            Self::Norm => quote! {
+                pub trait Norm {
+                    type Output;
+                    fn norm(self) -> Self::Output;
+                }
+
+                impl<T, S> Norm for T
+                where
+                    T: Norm2<Output = S>,
+                    S: num_traits::Float,
+                {
+                    type Output = S;
+                    #[inline]
+                    fn norm(self) -> Self::Output {
+                        self.norm2().sqrt()
+                    }
+                }
+            },
+            Self::Inverse => quote! {
+                pub trait Inverse {
+                    fn inv(self) -> Self;
+                }
+
+                impl<T, S> Inverse for T
+                where
+                    T: Reverse<Output = T> + Norm2<Output = S> + std::ops::Div<S, Output = T> + Copy,
+                    S: num_traits::Float,
+                {
+                    #[inline]
+                    fn inv(self) -> Self {
+                        let norm2 = self.norm2();
+                        if norm2 == S::zero() {
+                            panic!("div by zero");
+                        }
+                        self.rev() / norm2
+                    }
+                }
+            },
+            Self::Unitize => quote! {
+                pub trait Unitize {
+                    fn unit(self) -> Self;
+                }
+
+                impl<T, S> Unitize for T
+                where
+                    T: Reverse<Output = T> + Norm<Output = S> + std::ops::Div<S, Output = T> + Copy,
+                    S: num_traits::Float,
+                {
+                    #[inline]
+                    fn unit(self) -> Self {
+                        let norm = self.norm();
+                        if norm == S::zero() {
+                            panic!("div by zero");
+                        }
+                        self.rev() / norm
+                    }
+                }
+            },
+        }
+    }
+}
+
 fn is_generic(lhs: AlgebraType, rhs: AlgebraType) -> bool {
     lhs.is_generic() || rhs.is_generic()
 }
@@ -891,7 +976,6 @@ fn sum_grade_fields_expr(op: SumOp, grade: Grade, lhs: AlgebraType, rhs: Algebra
     }
 }
 
-// TODO replace with enum
 const LHS_SUFFIX: &'static str = "Lhs";
 const RHS_SUFFIX: &'static str = "Rhs";
 const OUT_SUFFIX: &'static str = "Out";
@@ -1804,9 +1888,6 @@ mod tests {
 
         assert_eq!(expected, actual);
     }
-
-    // TODO Zero + T = T ?
-    // TODO f32/f64/Vector + Zero?
 
     #[test]
 

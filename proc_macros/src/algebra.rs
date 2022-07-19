@@ -1322,6 +1322,20 @@ impl UnaryOp {
     }
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum NormOps {
+    Norm,
+    Norm2,
+    Inverse,
+    Unitize,
+}
+
+impl NormOps {
+    pub fn iter() -> impl Iterator<Item = Self> {
+        [Self::Norm, Self::Norm2, Self::Inverse, Self::Unitize].into_iter()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
