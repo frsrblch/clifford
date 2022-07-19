@@ -1208,6 +1208,7 @@ impl SumOp {
 pub enum UnaryOp {
     Neg,
     Reverse,
+    Antireverse,
     LeftComplement,
     RightComplement,
     Dual,
@@ -1217,7 +1218,7 @@ pub enum UnaryOp {
 
 impl UnaryOp {
     pub fn iter(algebra: Algebra) -> impl Iterator<Item = Self> {
-        let mut output = vec![Self::Neg, Self::Reverse];
+        let mut output = vec![Self::Neg, Self::Reverse, Self::Antireverse];
         if algebra.symmetrical_complements() {
             output.push(Self::Dual);
         } else {
@@ -1235,6 +1236,7 @@ impl UnaryOp {
         match self {
             Self::Neg => parse_quote! { std::ops::Neg },
             Self::Reverse => parse_quote! { Reverse },
+            Self::Antireverse => parse_quote! { Antireverse },
             Self::LeftComplement => parse_quote! { LeftComplement },
             Self::RightComplement => parse_quote! { RightComplement },
             Self::Dual => parse_quote! { Dual },
@@ -1247,6 +1249,7 @@ impl UnaryOp {
         match self {
             Self::Neg => parse_quote! { neg },
             Self::Reverse => parse_quote! { rev },
+            Self::Antireverse => parse_quote! { antirev },
             Self::LeftComplement => parse_quote! { left_comp },
             Self::RightComplement => parse_quote! { right_comp },
             Self::Dual => parse_quote! { dual },
@@ -1273,6 +1276,10 @@ impl UnaryOp {
                     Product::Neg(blade)
                 }
             }
+            Self::Antireverse => Self::LeftComplement
+                .call(blade)
+                .map(|b| Self::Reverse.call(b))
+                .map(|b| Self::RightComplement.call(b)),
             Self::LeftComplement => {
                 let antiscalar = blade.1.pseudoscalar();
                 let set = antiscalar.0 .0 ^ blade.0 .0;
@@ -1500,5 +1507,48 @@ mod tests {
     #[test]
     fn complement_symmetr_g5() {
         assert!(Algebra::new(5, 0, 0).symmetrical_complements());
+    }
+
+    #[test]
+    fn reverse_and_antireverse() {
+        let algebra = Algebra::new(3, 0, 1);
+        let vec = algebra.grade(1);
+
+        assert!(vec.blades().all(|b| UnaryOp::Reverse.call(b).is_pos()));
+        assert!(vec
+            .blades()
+            .all(|b| UnaryOp::Reverse.call(b).blade().unwrap().grade() == vec));
+        assert!(vec.blades().all(|b| UnaryOp::Antireverse.call(b).is_neg()));
+        assert!(vec
+            .blades()
+            .all(|b| UnaryOp::Antireverse.call(b).blade().unwrap().grade() == vec));
+
+        let trivec = algebra.grade(3);
+        assert!(trivec.blades().all(|b| UnaryOp::Reverse.call(b).is_neg()));
+        assert!(trivec
+            .blades()
+            .all(|b| UnaryOp::Reverse.call(b).blade().unwrap().grade() == trivec));
+        assert!(trivec
+            .blades()
+            .all(|b| UnaryOp::Antireverse.call(b).is_pos()));
+        assert!(trivec
+            .blades()
+            .all(|b| UnaryOp::Antireverse.call(b).blade().unwrap().grade() == trivec));
+    }
+
+    #[test]
+    fn blade_mul_pos_neg_zero() {
+        let algebra = Algebra::new(1, 1, 1);
+
+        let pos = algebra.basis(1).to_blade();
+        let neg = algebra.basis(2).to_blade();
+        let zero = algebra.basis(3).to_blade();
+
+        assert!((pos * pos).is_pos(), "{:?}", pos * pos);
+        assert!((neg * neg).is_neg(), "{:?}", neg * neg);
+        assert!((zero * zero).is_zero(), "{:?}", zero * zero);
+
+        let e13 = pos.wedge(zero);
+        assert_eq!(Product::Zero, e13 * e13);
     }
 }

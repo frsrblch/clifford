@@ -65,6 +65,7 @@ impl Algebra {
             ProductOp::iter_all(self).filter_map(|t| t.blanket_impl(self));
 
         let unary_ops_definitions = UnaryOp::iter(self).filter_map(|t| t.define());
+        let unary_ops_blanket_impls = UnaryOp::iter(self).filter_map(|t| t.blanket_impl(self));
 
         let sum_ops_definitions = SumOp::iter().filter_map(|t| t.define());
 
@@ -92,6 +93,7 @@ impl Algebra {
             #(#product_ops_definitions)*
             #(#product_ops_blanket_impls)*
             #(#unary_ops_definitions)*
+            #(#unary_ops_blanket_impls)*
             #(#sum_ops_definitions)*
             #(#norm_ops)*
             #(#types)*
@@ -120,7 +122,51 @@ impl UnaryOp {
         })
     }
 
+    pub fn blanket_impl(self, algebra: Algebra) -> Option<ItemImpl> {
+        if let UnaryOp::Antireverse = self {
+            let trait_ = self.trait_ty();
+            let fn_ = self.trait_fn();
+
+            let mut generics = Generics::default();
+            generics.params.push(parse_quote!(T));
+            generics.params.push(parse_quote!(U));
+            let left_comp = UnaryOp::left_comp(algebra);
+            let right_comp = UnaryOp::right_comp(algebra);
+            let rev_ty = UnaryOp::Reverse.trait_ty();
+            let rev_fn = UnaryOp::Reverse.trait_fn();
+
+            let left_comp_ty = left_comp.trait_ty();
+            let right_comp_ty = right_comp.trait_ty();
+
+            let predicates = &mut generics.make_where_clause().predicates;
+            predicates.push(parse_quote!(T: #left_comp_ty<Output = U>));
+            predicates.push(parse_quote!(U: #right_comp_ty<Output = T> + #rev_ty<Output = U>));
+
+            let left_comp_fn = left_comp.trait_fn();
+            let right_comp_fn = right_comp.trait_fn();
+            let expr = quote!(self.#left_comp_fn().#rev_fn().#right_comp_fn());
+
+            let (ig, _, wc) = generics.split_for_impl();
+
+            Some(parse_quote! {
+                impl #ig #trait_ for T #wc {
+                    type Output = Self;
+                    fn #fn_(self) -> Self::Output {
+                        #expr
+                    }
+                }
+            })
+        } else {
+            None
+        }
+    }
+
     pub fn impl_item(self, type_mv: AlgebraType) -> Vec<ItemImpl> {
+        // traits with blanket impls do not need implementation
+        if self.blanket_impl(type_mv.algebra()).is_some() {
+            return vec![];
+        }
+
         // cannot have blanket impls for foreign traits
         if matches!(self, Self::Neg) && type_mv.is_scalar() {
             return vec![];
