@@ -48,8 +48,6 @@
 //! - [x] Div
 //! - [x] Geometric
 //! - [x] Antigeometric
-//! - [ ] Commutator
-//! - [ ] Sandwich
 //!
 //! Inner products:
 //! - [x] Dot
@@ -65,6 +63,10 @@
 //! - [x] Addition
 //! - [x] Subtraction
 //!
+//! Assignment:
+//! - [ ] Add/SubAssign
+//! - [ ] Mul/DivAssign
+//!
 //! Unary operations:
 //! - [x] Neg
 //! - [x] Left complement
@@ -74,9 +76,13 @@
 //!
 //! Norm-based operations:
 //! - [x] Norm
-//! - [x] NormSquared
+//! - [x] Norm2
 //! - [x] Inverse
 //! - [x] Unitize
+//! - [ ] Antinorm
+//! - [ ] Antinorm2
+//! - [ ] AntiInverse
+//! - [ ] AntiUnit
 //!
 //! Compound products:
 //! - [ ] Sandwich

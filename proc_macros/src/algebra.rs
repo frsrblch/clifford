@@ -900,7 +900,6 @@ impl std::ops::BitOr for GradeSet {
     }
 }
 
-// TODO MulAssign/DivAssign
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum ProductOp {
     Mul,
@@ -1081,7 +1080,6 @@ pub fn access_blade(parent: AlgebraType, blade: Blade, ident: TokenStream) -> Ex
     }
 }
 
-// TODO AddAssign/SubAssign
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum SumOp {
     Add,
