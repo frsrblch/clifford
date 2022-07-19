@@ -163,12 +163,9 @@ impl GradeBlades {
 impl Iterator for GradeBlades {
     type Item = Blade;
     fn next(&mut self) -> Option<Self::Item> {
-        for blade in self.blades_unsorted.by_ref() {
-            if blade.grade() == self.grade {
-                return Some(blade);
-            }
-        }
-        None
+        self.blades_unsorted
+            .by_ref()
+            .find(|blade| blade.grade() == self.grade)
     }
 }
 
@@ -863,12 +860,7 @@ impl MvGrades {
 impl Iterator for MvGrades {
     type Item = Grade;
     fn next(&mut self) -> Option<Self::Item> {
-        for grade in self.grades.by_ref() {
-            if self.set.contains(grade) {
-                return Some(grade);
-            }
-        }
-        None
+        self.grades.by_ref().find(|grade| self.set.contains(*grade))
     }
 }
 
@@ -926,10 +918,7 @@ pub enum ProductOp {
 
 impl ProductOp {
     pub fn is_local(self) -> bool {
-        match self {
-            Self::Mul | Self::Div => false,
-            _ => true,
-        }
+        !matches!(self, Self::Mul | Self::Div)
     }
 
     pub fn output_contains(

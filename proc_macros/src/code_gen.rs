@@ -223,17 +223,14 @@ impl UnaryOp {
         generics.params.extend(output_params);
 
         let trait_ty = self.trait_ty();
-        let predicates = ty
-            .algebra()
-            .grades()
-            .filter_map::<WherePredicate, _>(|grade_in| {
-                let grade_out = self.grade_out(grade_in);
-                let out = grade_out.generic(OUT_SUFFIX);
-                let ident = grade_in.generic("");
-                Some(parse_quote! {
-                    #ident: #trait_ty<Output = #out>
-                })
-            });
+        let predicates = ty.algebra().grades().map::<WherePredicate, _>(|grade_in| {
+            let grade_out = self.grade_out(grade_in);
+            let out = grade_out.generic(OUT_SUFFIX);
+            let ident = grade_in.generic("");
+            parse_quote! {
+                #ident: #trait_ty<Output = #out>
+            }
+        });
         let where_clause = generics.make_where_clause();
         where_clause.predicates.extend(predicates);
 
@@ -783,7 +780,7 @@ impl ProductOp {
         self.intermediate_and_sum_types(lhs, rhs, grade)
             .checked_sub(1)
             .map(|n| grade.generic_n(n))
-            .unwrap_or_else(|| Zero::ident())
+            .unwrap_or_else(Zero::ident)
     }
 
     fn intermediate_and_sum_types(self, lhs: AlgebraType, rhs: AlgebraType, grade: Grade) -> usize {
@@ -1029,9 +1026,9 @@ fn sum_grade_fields_expr(op: SumOp, grade: Grade, lhs: AlgebraType, rhs: Algebra
     }
 }
 
-const LHS_SUFFIX: &'static str = "Lhs";
-const RHS_SUFFIX: &'static str = "Rhs";
-const OUT_SUFFIX: &'static str = "Out";
+const LHS_SUFFIX: &str = "Lhs";
+const RHS_SUFFIX: &str = "Rhs";
+const OUT_SUFFIX: &str = "Out";
 
 fn grade_type(ty: AlgebraType, grade: Grade, suffix: &str, float: Option<FloatType>) -> syn::Type {
     if ty.is_generic() {
@@ -1075,9 +1072,7 @@ impl AlgebraType {
                 pub struct Zero;
             }),
             Self::Grade(grade) => {
-                if grade.ident().is_none() {
-                    return None;
-                }
+                grade.ident()?;
 
                 let ty = grade.ty();
                 let fields = grade.blades().map(|blade| {
