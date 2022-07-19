@@ -1943,7 +1943,6 @@ mod tests {
     }
 
     #[test]
-
     fn add_zero_and_f64() {
         let algebra = Algebra::new(3, 0, 0);
         let zero = AlgebraType::Zero(algebra);
