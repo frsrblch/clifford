@@ -16,9 +16,9 @@ macro_rules! parse_quote {
     };
 }
 
+// TODO inverse for algebras with numbers that square to -1 (null cone)
 // TODO reconfigure to accommodate larger geometries (BladeSet, GradeSet, etc)
 // TODO pass in specialized grade types (e.g., IdealPoints (pga), DualPlanes (cga))
-// TODO pass in alternate blade symbols?
 
 trait Convert<U> {
     fn convert(&self) -> U;
@@ -35,6 +35,7 @@ pub struct Algebra {
     one: u8,
     neg_one: u8,
     zero: u8,
+    bases: Option<&'static [char]>,
 }
 
 impl Algebra {
@@ -44,7 +45,18 @@ impl Algebra {
             "too many bases to define algebra"
         );
 
-        Self { one, zero, neg_one }
+        Self {
+            one,
+            neg_one,
+            zero,
+            bases: None,
+        }
+    }
+
+    pub fn new_bases(one: u8, neg_one: u8, zero: u8, bases: &'static [char]) -> Self {
+        let mut algebra = Self::new(one, neg_one, zero);
+        algebra.bases = Some(bases);
+        algebra
     }
 
     pub fn basis(self, index: u8) -> Basis {
@@ -309,6 +321,11 @@ impl Basis {
     pub fn to_blade(self) -> Blade {
         Blade(BladeSet::default().with(self.0), self.1)
     }
+
+    pub fn char(self) -> Option<char> {
+        let chars = self.1.bases?;
+        Some(chars[self.0 as usize - 1])
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -385,6 +402,13 @@ impl Blade {
     pub fn field(self) -> Option<Ident> {
         if self.is_scalar() {
             None
+        } else if self.1.bases.is_some() {
+            let name = self
+                .1
+                .bases()
+                .filter_map(|b| if self.contains(b) { b.char() } else { None })
+                .collect::<String>();
+            Some(Ident::new(&name, Span::mixed_site()))
         } else {
             let mut output = "e".to_string();
 
@@ -514,6 +538,7 @@ impl std::ops::Mul for Blade {
     }
 }
 
+/// Can accommodate an algebra with 64 bases
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct BladeSet(pub u64);
 
@@ -549,7 +574,7 @@ impl BladeSet {
     }
 
     pub fn is_empty(self) -> bool {
-        self.0 == 0
+        self == Self::default()
     }
 
     pub fn len(self) -> u8 {
@@ -1321,12 +1346,29 @@ pub enum NormOps {
     Norm,
     Norm2,
     Inverse,
-    Unitize,
+    Unit,
 }
 
 impl NormOps {
+    pub fn iter(algebra: Algebra) -> impl Iterator<Item = Self> {
+        // not implemented for null cone geometries
+        if algebra.neg_one == 0 && algebra.dimensions() <= 4 {
+            vec![Self::Norm, Self::Norm2, Self::Inverse, Self::Unit].into_iter()
+        } else {
+            vec![].into_iter()
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum FloatConvert {
+    F32,
+    F64,
+}
+
+impl FloatConvert {
     pub fn iter() -> impl Iterator<Item = Self> {
-        [Self::Norm, Self::Norm2, Self::Inverse, Self::Unitize].into_iter()
+        [Self::F32, Self::F64].into_iter()
     }
 }
 
@@ -1537,5 +1579,19 @@ mod tests {
 
         let e13 = pos.wedge(zero);
         assert_eq!(Product::Zero, e13 * e13);
+    }
+
+    #[test]
+    fn custom_basis_chars() {
+        let algebra = Algebra {
+            one: 3,
+            neg_one: 0,
+            zero: 1,
+            bases: Some(&['x', 'y', 'z', 'w']),
+        };
+
+        assert!(algebra.scalar().field().is_none());
+        assert_eq!("xy", algebra.blade(0b11).field().unwrap().to_string());
+        assert_eq!("xyzw", algebra.blade(0b1111).field().unwrap().to_string());
     }
 }

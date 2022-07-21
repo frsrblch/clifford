@@ -48,6 +48,8 @@
 //! - [x] Div
 //! - [x] Geometric
 //! - [x] Antigeometric
+//! - [x] Grade products
+//! - [ ] Grade antiproducts
 //!
 //! Inner products:
 //! - [x] Dot
@@ -58,6 +60,12 @@
 //! Outer products:
 //! - [x] Wedge
 //! - [x] Antiwedge
+//!
+//! Interior products:
+//! - [ ] Right interior product
+//! - [ ] Left interior product
+//! - [ ] Right interior antiproduct
+//! - [ ] Left interior antiproduct
 //!
 //! Sum products:
 //! - [x] Addition

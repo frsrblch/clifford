@@ -87,7 +87,7 @@ impl Algebra {
             .flat_map(|op| AlgebraType::iter(self).map(move |lhs| (op, lhs)))
             .flat_map(|(op, ty)| op.impl_item(ty));
 
-        let norm_ops = NormOps::iter().map(NormOps::define_and_blanket);
+        let norm_ops = NormOps::iter(self).map(NormOps::define_and_blanket);
 
         quote! {
             #(#product_ops_definitions)*
@@ -972,12 +972,12 @@ impl NormOps {
                     }
                 }
             },
-            Self::Unitize => quote! {
-                pub trait Unitize {
+            Self::Unit => quote! {
+                pub trait Unit {
                     fn unit(self) -> Self;
                 }
 
-                impl<T, S> Unitize for T
+                impl<T, S> Unit for T
                 where
                     T: Reverse<Output = T> + Norm<Output = S> + std::ops::Div<S, Output = T> + Copy,
                     S: num_traits::Float,
@@ -2092,7 +2092,7 @@ mod tests {
     }
 
     #[test]
-    // #[ignore]
+    #[ignore]
     fn write_algebra() {
         let algebra = Algebra::new(3, 0, 1);
         write_to_file(&algebra.define());

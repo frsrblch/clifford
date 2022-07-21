@@ -3,54 +3,6 @@ use clifford::cga_3d::*;
 
 /// All references to Geometric Algebra for Computer Science
 
-#[test]
-fn bases() {
-    let e_pos = Vector::new(0., 0., 0., 1., 0.);
-    let e_neg = Vector::new(0., 0., 0., 0., 1.);
-
-    // Table 13.1
-    assert_eq!(1., e_pos.dot(e_pos));
-    assert_eq!(-1., e_neg.dot(e_neg));
-    assert_eq!(0., N.dot(N));
-    assert_eq!(0., N_BAR.dot(N_BAR));
-    assert_eq!(-1., N_BAR.dot(N));
-    assert_eq!(-1., N.dot(N_BAR));
-
-    assert_eq!(e_neg - e_pos, N_BAR); // 13.5
-    assert_eq!((e_neg + e_pos) / 2., N); // 13.5
-    assert_eq!(e_pos, N - 0.5 * N_BAR); // 13.6
-    assert_eq!(e_neg, N + 0.5 * N_BAR); // 13.6
-}
-
-#[test]
-fn point_distance() {
-    let a = N;
-    let b = point(3., 4., 0.);
-
-    assert_eq!(-12.5, a.dot(b)); // 13.4
-    assert_eq!(0., b.dot(b));
-}
-
-#[test]
-fn normalized_point_aka_unit_point() {
-    let p = point(1., 2., 3.);
-    assert_eq!(1.0, -N_BAR.dot(p)); // Section 13.1.2
-    assert_eq!(1.0, -N_BAR.dot(N)); // Section 13.1.2
-}
-
-#[test]
-fn dual() {
-    let e1 = Vector::new(1., 0., 0., 0., 0.);
-    let e2 = Vector::new(0., 1., 0., 0., 0.);
-    let e3 = Vector::new(0., 0., 1., 0., 0.);
-    let e4 = Vector::new(0., 0., 0., 1., 0.);
-    let e5 = Vector::new(0., 0., 0., 0., 1.);
-
-    let e124 = e1.wedge(e2).wedge(e4);
-
-    assert_eq!(e124.dual(), -e3.wedge(e5));
-}
-
 #[allow(dead_code)]
 fn invert1(v: Vector<f64>) -> Vector<f64> {
     const E4: Vector<f64> = Vector::new(0., 0., 0., -1., 0.);
@@ -79,6 +31,7 @@ pub trait Inverse {
     fn inv(self) -> Self;
 }
 
+// TODO generic implementation using GradeFilter<T>
 impl Inverse for Vector<f64> {
     fn inv(self) -> Vector<f64> {
         const E4: Vector<f64> = Vector::new(0., 0., 0., -1., 0.);
@@ -105,41 +58,6 @@ impl Inverse for Quadvector<f64> {
         const E4: Vector<f64> = Vector::new(0., 0., 0., -1., 0.);
         -E4.geo(self).geo(E4).4
     }
-}
-
-#[test]
-fn dual_plane_test() {
-    let plane = point(0., 0., 1.)
-        .wedge(point(1., 0., 1.))
-        .wedge(point(0., 1., 1.))
-        .wedge(N_BAR);
-
-    let plane_dual = plane.inv().dual(); // why is this inverse here?
-
-    let expected = Vector::new(0., 0., 1., 0., 0.) - 1. * N_BAR;
-
-    assert_eq!(plane_dual, expected);
-    assert_eq!(0., N_BAR.dot(plane_dual));
-    assert_eq!(1., plane_dual.dot(plane_dual));
-
-    // panic!("{:#?}", plane_dual);
-}
-
-#[test]
-fn dual_real_sphere() {
-    // centred at (0,0,1), r=1
-    let sphere = N
-        .wedge(point(0., 0., 2.))
-        .wedge(point(1., 0., 1.))
-        .wedge(point(0., 1., 1.));
-
-    let sphere_dual = sphere.dual() * 0.5;
-
-    let expected = Vector::new(0., 0., 1., 0., 0.) - 0.5 * 1. * N_BAR;
-
-    assert_eq!(sphere_dual, expected);
-
-    // panic!("{:#?}", sphere_dual);
 }
 
 pub type Translator<T> = Multivector<T, Zero, Bivector<T>, Zero, Zero, Zero>;

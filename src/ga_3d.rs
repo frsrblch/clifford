@@ -1,4 +1,4 @@
-proc_macros::clifford!(3, 0, 0);
+proc_macros::clifford!(3, 0, 0, [x, y, z]);
 
 #[cfg(test)]
 mod tests {
@@ -27,18 +27,14 @@ mod tests {
 
         let da = |x: Vector<f64>| {
             let inv_det = x.dot(x).powf(-2.5);
-            let Vector {
-                e1: x,
-                e2: y,
-                e3: z,
-            } = x;
+            let Vector { x, y, z } = x;
             let (x2, y2, z2) = (x * x, y * y, z * z);
             let da = Vector::new(
                 -2. * x2 + y2 + z2 - 3. * x * (y + z),
                 x2 - 2. * y2 + z2 - 3. * y * (x + z),
                 x2 + y2 - 2. * z2 - 3. * z * (x + y),
             ) * inv_det;
-            move |h: Vector<f64>| Vector::new(da.e1 * h.e1, da.e2 * h.e2, da.e3 * h.e3) / norm(h)
+            move |h: Vector<f64>| Vector::new(da.x * h.x, da.y * h.y, da.z * h.z) / norm(h)
         };
 
         let dt = 0.05f64;
