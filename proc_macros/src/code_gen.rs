@@ -89,18 +89,25 @@ impl Algebra {
 
         let norm_ops = NormOps::iter(self).map(NormOps::define_and_blanket);
 
+        let float_conversion_definitions = FloatConvert::iter().map(FloatConvert::define);
+
+        let float_conversion = AlgebraType::iter(self)
+            .flat_map(|ty| FloatConvert::iter().map(move |fc| fc.impl_item(ty)));
+
         quote! {
             #(#product_ops_definitions)*
             #(#product_ops_blanket_impls)*
             #(#unary_ops_definitions)*
             #(#unary_ops_blanket_impls)*
             #(#sum_ops_definitions)*
+            #(#float_conversion_definitions)*
             #(#norm_ops)*
             #(#types)*
             #(#type_impls)*
             #(#sum_ops)*
             #(#product_ops)*
             #(#unary_ops)*
+            #(#float_conversion)*
         }
     }
 }
@@ -1068,6 +1075,7 @@ impl AlgebraType {
     fn define(self) -> Option<ItemStruct> {
         match self {
             Self::Zero(_) => Some(parse_quote! {
+                #[repr(C)]
                 #[derive(Debug, Default, Copy, Clone, PartialEq)]
                 pub struct Zero;
             }),
@@ -1080,6 +1088,7 @@ impl AlgebraType {
                     quote! { pub #f: T, }
                 });
                 Some(parse_quote! {
+                    #[repr(C)]
                     #[derive(Debug, Default, Copy, Clone, PartialEq)]
                     pub struct #ty {
                         #(#fields)*
@@ -1096,6 +1105,7 @@ impl AlgebraType {
                 });
 
                 Some(parse_quote! {
+                    #[repr(C)]
                     #[derive(Debug, Default, Copy, Clone, PartialEq)]
                     pub struct Multivector < #(#generics),* > ( #(#fields)* );
                 })
@@ -1166,6 +1176,138 @@ impl AlgebraType {
                 })
             }
             _ => None,
+        }
+    }
+}
+
+impl FloatConvert {
+    pub fn define(self) -> ItemTrait {
+        let trait_ = self.trait_ty();
+        let fn_ = self.trait_fn();
+        parse_quote! {
+            pub trait #trait_ {
+                type Output;
+                fn #fn_(self) -> Self::Output;
+            }
+        }
+    }
+
+    fn trait_ty(self) -> syn::Type {
+        match self {
+            Self::F32 => parse_quote!(ToF32),
+            Self::F64 => parse_quote!(ToF64),
+        }
+    }
+
+    fn trait_fn(self) -> Ident {
+        match self {
+            Self::F32 => parse_quote!(to_f32),
+            Self::F64 => parse_quote!(to_f64),
+        }
+    }
+
+    fn input_float(self) -> FloatType {
+        match self {
+            Self::F32 => FloatType::F64,
+            Self::F64 => FloatType::F32,
+        }
+    }
+
+    fn output_float(self) -> FloatType {
+        match self {
+            Self::F32 => FloatType::F32,
+            Self::F64 => FloatType::F64,
+        }
+    }
+
+    fn impl_item(self, ty: AlgebraType) -> ItemImpl {
+        let trait_ = self.trait_ty();
+        let fn_ = self.trait_fn();
+        match ty {
+            AlgebraType::Zero(_) => parse_quote! {
+                impl #trait_ for Zero {
+                    type Output = Zero;
+                    fn #fn_(self) -> Self::Output {
+                        Zero
+                    }
+                }
+            },
+            AlgebraType::Grade(grade) if grade.is_scalar() => {
+                let input = self.input_float().ty();
+                let output = self.output_float().ty();
+                parse_quote! {
+                    impl #trait_ for #input {
+                        type Output = #output;
+                        fn #fn_(self) -> Self::Output {
+                            self as #output
+                        }
+                    }
+                }
+            }
+            AlgebraType::Grade(grade) => {
+                let out_float = self.output_float().ty();
+                let input = grade.ty_with_float(Some(self.input_float()));
+                let output = grade.ty_with_float(Some(self.output_float()));
+                let fields = grade.blades().map(|b| {
+                    if let Some(field) = b.field() {
+                        quote!(#field: self.#field as #out_float)
+                    } else {
+                        quote!(self as #out_float)
+                    }
+                });
+                let expr = if let Some(ident) = grade.ident() {
+                    parse_quote! {
+                        #ident {
+                            #(#fields),*
+                        }
+                    }
+                } else {
+                    quote!(#(#fields),*)
+                };
+                parse_quote! {
+                    impl #trait_ for #input {
+                        type Output = #output;
+                        fn #fn_(self) -> Self::Output {
+                            #expr
+                        }
+                    }
+                }
+            }
+            AlgebraType::Multivector(mv) => {
+                let input = ty.ty_with_suffix(LHS_SUFFIX, None);
+                let output = ty.ty_with_suffix(OUT_SUFFIX, None);
+
+                let mut generics = Generics::default();
+                for (input, output) in mv
+                    .type_parameters(LHS_SUFFIX, None)
+                    .iter()
+                    .zip(&mv.type_parameters(OUT_SUFFIX, None))
+                {
+                    generics.params.push(input.convert());
+                    generics.params.push(output.convert());
+
+                    generics
+                        .make_where_clause()
+                        .predicates
+                        .push(parse_quote!(#input: #trait_<Output = #output>));
+                }
+
+                let fields = ty.algebra().grades().map(|grade| {
+                    let g = grade.mv_field();
+                    quote!(self.#g.#fn_())
+                });
+
+                let (ig, _, wc) = generics.split_for_impl();
+
+                parse_quote! {
+                    impl #ig #trait_ for #input #wc {
+                        type Output = #output;
+                        fn #fn_(self) -> Self::Output {
+                            Multivector( #(#fields),* )
+                        }
+                    }
+                }
+            }
         }
     }
 }
