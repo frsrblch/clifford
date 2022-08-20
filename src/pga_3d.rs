@@ -119,9 +119,13 @@ impl<T: num_traits::Float> Rotor<T> {
         let two = T::one() + T::one();
 
         let num: Rotor<T> = self + i;
-        let den: T = (two + two * self.4.xyzw).sqrt();
+        let den: T = two + two * self.4.xyzw;
 
-        num / den
+        if den == T::zero() {
+            self
+        } else {
+            num / den.sqrt()
+        }
     }
 }
 
