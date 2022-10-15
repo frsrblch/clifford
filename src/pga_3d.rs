@@ -76,7 +76,7 @@ where
 }
 
 #[inline]
-pub fn point<T: num_traits::One>(x: T, y: T, z: T) -> Vector<T> {
+pub fn point<T: num_traits::Float>(x: T, y: T, z: T) -> Vector<T> {
     Vector::new(x, y, z, T::one())
 }
 

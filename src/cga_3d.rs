@@ -18,6 +18,12 @@ pub const fn point(x: f64, y: f64, z: f64) -> Vector<f64> {
     Vector::new(x, y, z, 0.5 - 0.5 * x2, 0.5 + 0.5 * x2)
 }
 
+#[test]
+fn n_and_origin() {
+    let o = point(0., 0., 0.);
+    assert_eq!(N, o);
+}
+
 pub trait IsFlat {
     fn is_flat(&self) -> bool;
 }
@@ -30,6 +36,47 @@ where
     fn is_flat(&self) -> bool {
         self.wedge(N_BAR) == U::default()
     }
+}
+
+impl<T: num_traits::Float> Vector<T> {
+    pub fn null_bases(self) -> (T, T) {
+        let half = T::from(0.5).unwrap();
+        ((self.e + self.E), half * (-self.e + self.E))
+    }
+}
+
+impl<T: num_traits::Float + std::fmt::Debug> Vector<T> {
+    pub fn vector_type(self) -> VectorType<T> {
+        let half = T::from(0.5).unwrap();
+        let two = T::from(2.).unwrap();
+        let (n, n_bar) = self.null_bases();
+        let sqr = |x| x * x;
+        let x2 = sqr(self.x) + sqr(self.y) + sqr(self.z);
+
+        if n.is_zero() && x2.is_zero() {
+            return VectorType::Infinity;
+        }
+
+        if n.is_zero() {
+            return VectorType::DualPlane;
+        }
+
+        let x2 = x2 / (n * n);
+        let n_bar = n_bar / n;
+        let r = two * (x2 * half - n_bar);
+        if r < T::zero() {
+            return VectorType::DualSphere(-num_traits::Float::sqrt(-r));
+        } else {
+            return VectorType::DualSphere(r.sqrt());
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum VectorType<T> {
+    Infinity,
+    DualPlane,
+    DualSphere(T),
 }
 
 #[cfg(test)]
@@ -133,10 +180,8 @@ mod tests {
 
         let expected = Vector::new(0., 0., 1., 0., 0.) - 1. * N_BAR;
 
-        dbg!(plane_dual * plane_dual_inv, plane_dual * plane_dual);
-
         assert_eq!(inv(plane_dual), expected);
-        assert_eq!(0., N_BAR.dot(plane_dual));
+        assert_eq!(2., N_BAR.dot(plane_dual));
         assert_eq!(1., plane_dual.dot(plane_dual));
 
         // panic!("{:#?}", plane_dual);
@@ -157,5 +202,85 @@ mod tests {
         assert_eq!(sphere_dual, expected);
 
         // panic!("{:#?}", sphere_dual);
+    }
+
+    #[test]
+    fn point_inversion() {
+        fn inv(x: Vector<f64>) -> Vector<f64> {
+            const E4: Vector<f64> = Vector::new(0., 0., 0., -1., 0.);
+            -E4.geo(x).geo(E4).1
+        }
+
+        let p = point(2., 3., 5.);
+
+        dbg!(p.null_bases());
+
+        // assert is unit point
+        assert_eq!(-1., p.dot(N_BAR));
+
+        // reflect origin through point
+        let p_ = p.geo(N).geo(p).1 / -38.;
+        assert_eq!(-1., p_.dot(N_BAR));
+        dbg!(p_.null_bases());
+
+        // returns the origin reflected across a sphere with zero radius, i.e., the point itself
+        // panic!("\n{:#?}", p_);
+    }
+
+    #[test]
+    fn null_bases() {
+        assert_eq!((1., 0.), N.null_bases());
+        assert_eq!((0., 1.), N_BAR.null_bases());
+        assert_eq!((1., 1.), (N + N_BAR).null_bases());
+        assert_eq!((2., 3.), (2. * N + 3. * N_BAR).null_bases());
+        assert_eq!((1., 0.5 * (4. + 9. + 25.)), point(2., 3., 5.).null_bases());
+    }
+
+    #[test]
+    fn vector_type() {
+        let origin_plane = Vector::new(1., 0., 0., 0., 0.);
+        let plane = Vector::new(1., 0., 0., 0., 0.) + N_BAR;
+        let sphere_r7 = point(2., 3., 5.) - (0.5 * 7. * 7.) * N_BAR;
+        let sphere_rneg7 = point(2., 3., 5.) + (0.5 * 7. * 7.) * N_BAR;
+
+        assert_eq!(VectorType::Infinity, N_BAR.vector_type());
+        assert_eq!(VectorType::Infinity, (N_BAR * 2.).vector_type());
+        assert_eq!(VectorType::Infinity, (N_BAR * -2.).vector_type());
+
+        assert_eq!(VectorType::DualPlane, origin_plane.vector_type());
+        assert_eq!(VectorType::DualPlane, (origin_plane * 2.).vector_type());
+        assert_eq!(VectorType::DualPlane, (origin_plane * -2.).vector_type());
+
+        assert_eq!(VectorType::DualPlane, plane.vector_type());
+        assert_eq!(VectorType::DualPlane, (plane * 2.).vector_type());
+        assert_eq!(VectorType::DualPlane, (plane * -2.).vector_type());
+
+        assert_eq!(VectorType::DualSphere(0.), N.vector_type());
+        assert_eq!(VectorType::DualSphere(0.), (N * 2.).vector_type());
+        assert_eq!(VectorType::DualSphere(0.), (N * -2.).vector_type());
+
+        assert_eq!(VectorType::DualSphere(0.), point(1., 2., 3.).vector_type());
+        assert_eq!(
+            VectorType::DualSphere(0.),
+            (point(1., 2., 3.) * 2.).vector_type()
+        );
+        assert_eq!(
+            VectorType::DualSphere(0.),
+            (point(1., 2., 3.) * -2.).vector_type()
+        );
+
+        assert_eq!(VectorType::DualSphere(7.), sphere_r7.vector_type());
+        assert_eq!(VectorType::DualSphere(7.), (sphere_r7 * 2.).vector_type());
+        assert_eq!(VectorType::DualSphere(7.), (sphere_r7 * -2.).vector_type());
+
+        assert_eq!(VectorType::DualSphere(-7.), sphere_rneg7.vector_type());
+        assert_eq!(
+            VectorType::DualSphere(-7.),
+            (sphere_rneg7 * 2.).vector_type()
+        );
+        assert_eq!(
+            VectorType::DualSphere(-7.),
+            (sphere_rneg7 * -2.).vector_type()
+        );
     }
 }

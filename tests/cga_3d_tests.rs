@@ -1,4 +1,4 @@
-// #[cfg(feature = "cga_3d")]
+#[cfg(feature = "cga_3d")]
 use clifford::cga_3d::*;
 
 /// All references to Geometric Algebra for Computer Science

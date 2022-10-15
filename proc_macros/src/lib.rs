@@ -14,7 +14,10 @@ use syn::{bracketed, parse_macro_input};
 #[proc_macro]
 pub fn clifford(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let algebra = parse_macro_input!(input as Algebra);
-    algebra.define().into()
+    let tokens = algebra.define();
+    // let print = tokens.to_string();
+    // let _ = std::fs::write("./output.rs", print);
+    tokens.into()
 }
 
 impl Parse for Algebra {

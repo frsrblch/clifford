@@ -1,42 +1,101 @@
 // proc_macros::clifford!(3, 0, 0, [x, y, z]);
 
-pub trait Scalar:
-    num_sqrt::Sqrt<Output = Self> + Copy + num_traits::NumOps + std::ops::Neg<Output = Self>
-{
-}
-
-impl<T> Scalar for T where
-    T: num_sqrt::Sqrt<Output = Self> + Copy + num_traits::NumOps + std::ops::Neg<Output = Self>
-{
-}
+use num_traits::Float;
 
 pub type Motor<T> = Multivector<T, Zero, Bivector<T>, Zero>;
 
-impl Motor<f64> {
+impl<T: Float + std::fmt::Display> Motor<T> {
     pub fn sqrt(&self) -> Self {
-        let angle = self.0.acos() * 0.5;
+        self.debug_assert_unit();
+
+        let half = T::one() / (T::one() + T::one());
+        let angle: T = self.0.acos() * half;
         let (sin, cos) = angle.sin_cos();
 
-        if self.2 == Bivector::default() {
-            Multivector(1., Zero, Bivector::default(), Zero)
-        } else {
-            let bivector = self.2.unit();
+        if let Some(bivector) = self.2.try_unit() {
             Multivector(cos, Zero, bivector * sin, Zero)
+        } else {
+            Multivector(cos, Zero, num_traits::Zero::zero(), Zero)
         }
     }
 
     /// (PI - angle) is a half rotation in the opposite direction
-    pub fn angle_axis(self) -> (f64, Vector<f64>) {
+    pub fn angle_axis(self) -> (T, Vector<T>) {
         // multiply by two because the sandwich operator uses the motor twice
-        (self.0.acos() * 2., self.2.unit().dual())
+        let two = T::one() + T::one();
+        self.debug_assert_unit();
+        (
+            self.0.acos() * two,
+            self.2
+                .try_unit()
+                .unwrap_or_else(|| Bivector::new(T::zero(), T::zero(), T::zero()))
+                .dual(),
+        )
     }
 
-    pub fn from_axis_angle(axis: Vector<f64>, angle: f64) -> Self {
+    pub fn from_axis_angle(axis: Vector<T>, angle: T) -> Self {
+        let half = T::one() / (T::one() + T::one());
         let bivector = axis.dual();
-        let (sin, cos) = (angle * 0.5).sin_cos();
+        let (sin, cos) = (angle * half).sin_cos();
         Multivector(cos, Zero, bivector * sin, Zero)
     }
+
+    fn debug_assert_unit(&self) {
+        let norm2 = self.0 * self.0 + self.2.norm2();
+        let t: T = norm2.sub(T::one()).abs();
+        debug_assert!(
+            t < T::epsilon().sqrt(),
+            "expected unit motor: norm^2 = {}",
+            norm2
+        );
+    }
 }
+
+impl<T: Float> Bivector<T> {
+    #[inline]
+    pub fn try_unit(self) -> Option<Self> {
+        let norm = self.norm();
+        if norm == T::zero() {
+            None
+        } else {
+            Some(self / norm)
+        }
+    }
+}
+
+impl<T: Float> num_traits::Zero for Bivector<T> {
+    fn zero() -> Self {
+        Bivector::new(T::zero(), T::zero(), T::zero())
+    }
+
+    fn is_zero(&self) -> bool {
+        self.xy.is_zero() & self.xz.is_zero() & self.xy.is_zero()
+    }
+}
+
+macro_rules! impl_op_assign {
+    ($type_:ident { $($field:ident),* }) => {
+        impl_op_assign!($type_ { $($field),*} MulAssign :: mul_assign);
+        impl_op_assign!($type_ { $($field),*} DivAssign :: div_assign);
+    };
+    ($type_:ident { $($field:ident),* }  $trait_:ident :: $fn_:ident) => {
+        impl<T: std::ops::$trait_<T> + Copy> std::ops::$trait_<T> for $type_<T> {
+            fn $fn_(&mut self, rhs: T) {
+                $( std::ops::$trait_::$fn_(&mut self.$field, rhs); )*
+            }
+        }
+
+        impl<T: std::ops::$trait_<T> + Copy> std::ops::$trait_<&T> for $type_<T> {
+            fn $fn_(&mut self, rhs: &T) {
+                $( std::ops::$trait_::$fn_(&mut self.$field, *rhs); )*
+            }
+        }
+    };
+}
+
+impl_op_assign!(Vector { x, y, z });
+impl_op_assign!(Bivector { xy, yz, xz });
+impl_op_assign!(Trivector { xyz });
 
 #[cfg(test)]
 mod tests {
@@ -302,159 +361,78 @@ pub trait Norm {
     type Output;
     fn norm(self) -> Self::Output;
 }
-impl<T> Norm for Vector<T>
+
+impl<T: Float> Norm for Vector<T> {
+    type Output = T;
+    #[inline]
+    fn norm(self) -> Self::Output {
+        self.norm2().sqrt()
+    }
+}
+
+impl<T: Float> Norm for Bivector<T>
 where
-    T: Scalar,
-    T: num_sqrt::Sqrt<Output = T>,
-    Vector<T>: ScalarProduct<Vector<T>, Output = T>,
+    Self: Norm2<Output = T>,
 {
     type Output = T;
     #[inline]
     fn norm(self) -> Self::Output {
-        num_sqrt::Sqrt::sqrt(self.scalar_prod(self.rev()))
+        self.norm2().sqrt()
     }
 }
-impl<T> Norm for Bivector<T>
-where
-    T: Scalar,
-    T: num_sqrt::Sqrt<Output = T>,
-    Bivector<T>: ScalarProduct<Bivector<T>, Output = T>,
-{
-    type Output = T;
-    #[inline]
-    fn norm(self) -> Self::Output {
-        num_sqrt::Sqrt::sqrt(self.scalar_prod(self.rev()))
-    }
-}
-impl<T> Norm for Trivector<T>
-where
-    T: Scalar,
-    T: num_sqrt::Sqrt<Output = T>,
-    Trivector<T>: ScalarProduct<Trivector<T>, Output = T>,
-{
-    type Output = T;
-    #[inline]
-    fn norm(self) -> Self::Output {
-        num_sqrt::Sqrt::sqrt(self.scalar_prod(self.rev()))
-    }
-}
+
 pub trait Norm2 {
     type Output;
     fn norm2(self) -> Self::Output;
 }
-impl<T> Norm2 for Vector<T>
+impl<T, S> Norm2 for T
 where
-    T: Scalar,
-    Vector<T>: ScalarProduct<Vector<T>, Output = T>,
+    T: ScalarProduct<T, Output = S> + Reverse<Output = T> + Copy,
 {
-    type Output = T;
-    #[inline]
-    fn norm2(self) -> Self::Output {
-        self.scalar_prod(self.rev())
-    }
-}
-impl<T> Norm2 for Bivector<T>
-where
-    T: Scalar,
-    Bivector<T>: ScalarProduct<Bivector<T>, Output = T>,
-{
-    type Output = T;
-    #[inline]
-    fn norm2(self) -> Self::Output {
-        self.scalar_prod(self.rev())
-    }
-}
-impl<T> Norm2 for Trivector<T>
-where
-    T: Scalar,
-    Trivector<T>: ScalarProduct<Trivector<T>, Output = T>,
-{
-    type Output = T;
+    type Output = S;
     #[inline]
     fn norm2(self) -> Self::Output {
         self.scalar_prod(self.rev())
     }
 }
 pub trait Inverse {
-    type Output;
-    fn inv(self) -> Self::Output;
+    fn inv(self) -> Self;
 }
-impl<T> Inverse for Vector<T>
+impl<T, S> Inverse for T
 where
-    T: Scalar,
-    Vector<T>: Norm2<Output = T>,
+    T: Reverse<Output = T> + Norm2<Output = S> + std::ops::Div<S, Output = T> + Copy,
+    S: num_traits::Float,
 {
-    type Output = Vector<T>;
     #[inline]
-    #[track_caller]
-    fn inv(self) -> Self::Output {
-        self / self.norm2()
-    }
-}
-impl<T> Inverse for Bivector<T>
-where
-    T: Scalar,
-    Bivector<T>: Norm2<Output = T>,
-{
-    type Output = Bivector<T>;
-    #[inline]
-    #[track_caller]
-    fn inv(self) -> Self::Output {
-        self / self.norm2()
-    }
-}
-impl<T> Inverse for Trivector<T>
-where
-    T: Scalar,
-    Trivector<T>: Norm2<Output = T>,
-{
-    type Output = Trivector<T>;
-    #[inline]
-    #[track_caller]
-    fn inv(self) -> Self::Output {
-        self / self.norm2()
+    fn inv(self) -> Self {
+        let norm2 = self.norm2();
+        if norm2 == S::zero() {
+            panic!("div by zero");
+        }
+        self.rev() / norm2
     }
 }
 pub trait Unit {
     type Output;
     fn unit(self) -> Self::Output;
 }
-impl<T> Unit for Vector<T>
-where
-    T: Scalar,
-    Vector<T>: Norm<Output = T>,
-{
-    type Output = Vector<T>;
-    #[inline]
-    #[track_caller]
+
+impl<T: Float> Unit for Vector<T> {
+    type Output = Self;
+
     fn unit(self) -> Self::Output {
         self / self.norm()
     }
 }
-impl<T> Unit for Bivector<T>
-where
-    T: Scalar,
-    Bivector<T>: Norm<Output = T>,
-{
-    type Output = Bivector<T>;
-    #[inline]
-    #[track_caller]
+
+impl<T: Float> Unit for Bivector<T> {
+    type Output = Self;
+
     fn unit(self) -> Self::Output {
         self / self.norm()
     }
 }
-impl<T> Unit for Trivector<T>
-where
-    T: Scalar,
-    Trivector<T>: Norm<Output = T>,
-{
-    type Output = Trivector<T>;
-    #[inline]
-    #[track_caller]
-    fn unit(self) -> Self::Output {
-        self / self.norm()
-    }
-}
+
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub struct Zero;
@@ -501,7 +479,7 @@ impl<T> Trivector<T> {
 impl std::ops::Add<Zero> for Zero {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -509,7 +487,7 @@ impl std::ops::Add<Zero> for Zero {
 impl std::ops::Add<f32> for Zero {
     type Output = f32;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: f32) -> Self::Output {
         rhs
     }
@@ -517,40 +495,37 @@ impl std::ops::Add<f32> for Zero {
 impl std::ops::Add<f64> for Zero {
     type Output = f64;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: f64) -> Self::Output {
         rhs
     }
 }
-impl<T> std::ops::Add<Vector<T>> for Zero
-where
-    T: Scalar,
-{
+impl<T> std::ops::Add<Vector<T>> for Zero {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Vector<T>) -> Self::Output {
         rhs
     }
 }
 impl<T> std::ops::Add<Bivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Bivector<T>) -> Self::Output {
         rhs
     }
 }
 impl<T> std::ops::Add<Trivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Trivector<T>) -> Self::Output {
         rhs
     }
@@ -558,7 +533,7 @@ where
 impl<G0Rhs, G1Rhs, G2Rhs, G3Rhs> std::ops::Add<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Zero {
     type Output = Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         rhs
     }
@@ -566,7 +541,7 @@ impl<G0Rhs, G1Rhs, G2Rhs, G3Rhs> std::ops::Add<Multivector<G0Rhs, G1Rhs, G2Rhs, 
 impl std::ops::Add<Zero> for f32 {
     type Output = f32;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Zero) -> Self::Output {
         self
     }
@@ -574,7 +549,7 @@ impl std::ops::Add<Zero> for f32 {
 impl std::ops::Add<Zero> for f64 {
     type Output = f64;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Zero) -> Self::Output {
         self
     }
@@ -582,7 +557,7 @@ impl std::ops::Add<Zero> for f64 {
 impl std::ops::Add<Vector<f32>> for f32 {
     type Output = Multivector<f32, Vector<f32>, Zero, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Vector<f32>) -> Self::Output {
         Multivector(self, rhs, Zero, Zero)
     }
@@ -590,7 +565,7 @@ impl std::ops::Add<Vector<f32>> for f32 {
 impl std::ops::Add<Vector<f64>> for f64 {
     type Output = Multivector<f64, Vector<f64>, Zero, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Vector<f64>) -> Self::Output {
         Multivector(self, rhs, Zero, Zero)
     }
@@ -598,7 +573,7 @@ impl std::ops::Add<Vector<f64>> for f64 {
 impl std::ops::Add<Bivector<f32>> for f32 {
     type Output = Multivector<f32, Zero, Bivector<f32>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Bivector<f32>) -> Self::Output {
         Multivector(self, Zero, rhs, Zero)
     }
@@ -606,7 +581,7 @@ impl std::ops::Add<Bivector<f32>> for f32 {
 impl std::ops::Add<Bivector<f64>> for f64 {
     type Output = Multivector<f64, Zero, Bivector<f64>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Bivector<f64>) -> Self::Output {
         Multivector(self, Zero, rhs, Zero)
     }
@@ -614,7 +589,7 @@ impl std::ops::Add<Bivector<f64>> for f64 {
 impl std::ops::Add<Trivector<f32>> for f32 {
     type Output = Multivector<f32, Zero, Zero, Trivector<f32>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Trivector<f32>) -> Self::Output {
         Multivector(self, Zero, Zero, rhs)
     }
@@ -622,7 +597,7 @@ impl std::ops::Add<Trivector<f32>> for f32 {
 impl std::ops::Add<Trivector<f64>> for f64 {
     type Output = Multivector<f64, Zero, Zero, Trivector<f64>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Trivector<f64>) -> Self::Output {
         Multivector(self, Zero, Zero, rhs)
     }
@@ -634,7 +609,7 @@ where
 {
     type Output = Multivector<G0Out, G1Rhs, G2Rhs, G3Rhs>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(GradeAdd::add(self, rhs.0), rhs.1, rhs.2, rhs.3)
     }
@@ -646,66 +621,68 @@ where
 {
     type Output = Multivector<G0Out, G1Rhs, G2Rhs, G3Rhs>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(GradeAdd::add(self, rhs.0), rhs.1, rhs.2, rhs.3)
     }
 }
 impl<T> std::ops::Add<Zero> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Zero) -> Self::Output {
         self
     }
 }
 impl<T> std::ops::Add<T> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Vector<T>, Zero, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: T) -> Self::Output {
         Multivector(rhs, self, Zero, Zero)
     }
 }
 impl<T> std::ops::Add<Vector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Vector<T>) -> Self::Output {
-        Vector {
-            x: std::ops::Add::add(self.x, rhs.x),
-            y: std::ops::Add::add(self.y, rhs.y),
-            z: std::ops::Add::add(self.z, rhs.z),
+        unsafe {
+            Vector {
+                x: std::intrinsics::fadd_fast(self.x, rhs.x),
+                y: std::intrinsics::fadd_fast(self.y, rhs.y),
+                z: std::intrinsics::fadd_fast(self.z, rhs.z),
+            }
         }
     }
 }
 impl<T> std::ops::Add<Bivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Bivector<T>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(Zero, self, rhs, Zero)
     }
 }
 impl<T> std::ops::Add<Trivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Zero, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Trivector<T>) -> Self::Output {
         Multivector(Zero, self, Zero, rhs)
     }
@@ -713,71 +690,73 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G1Out> std::ops::Add<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>>
     for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Vector<T>: GradeAdd<G1Rhs, Output = G1Out>,
 {
     type Output = Multivector<G0Rhs, G1Out, G2Rhs, G3Rhs>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(rhs.0, GradeAdd::add(self, rhs.1), rhs.2, rhs.3)
     }
 }
 impl<T> std::ops::Add<Zero> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Zero) -> Self::Output {
         self
     }
 }
 impl<T> std::ops::Add<T> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Zero, Bivector<T>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: T) -> Self::Output {
         Multivector(rhs, Zero, self, Zero)
     }
 }
 impl<T> std::ops::Add<Vector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Bivector<T>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Vector<T>) -> Self::Output {
         Multivector(Zero, rhs, self, Zero)
     }
 }
 impl<T> std::ops::Add<Bivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Bivector<T>) -> Self::Output {
-        Bivector {
-            xy: std::ops::Add::add(self.xy, rhs.xy),
-            xz: std::ops::Add::add(self.xz, rhs.xz),
-            yz: std::ops::Add::add(self.yz, rhs.yz),
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fadd_fast(self.xy, rhs.xy),
+                xz: std::intrinsics::fadd_fast(self.xz, rhs.xz),
+                yz: std::intrinsics::fadd_fast(self.yz, rhs.yz),
+            }
         }
     }
 }
 impl<T> std::ops::Add<Trivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Zero, Bivector<T>, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Trivector<T>) -> Self::Output {
         Multivector(Zero, Zero, self, rhs)
     }
@@ -785,82 +764,84 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G2Out> std::ops::Add<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>>
     for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Bivector<T>: GradeAdd<G2Rhs, Output = G2Out>,
 {
     type Output = Multivector<G0Rhs, G1Rhs, G2Out, G3Rhs>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(rhs.0, rhs.1, GradeAdd::add(self, rhs.2), rhs.3)
     }
 }
 impl<T> std::ops::Add<Zero> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Zero) -> Self::Output {
         self
     }
 }
 impl<T> std::ops::Add<T> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Zero, Zero, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: T) -> Self::Output {
         Multivector(rhs, Zero, Zero, self)
     }
 }
 impl<T> std::ops::Add<Vector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Zero, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Vector<T>) -> Self::Output {
         Multivector(Zero, rhs, Zero, self)
     }
 }
 impl<T> std::ops::Add<Bivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Zero, Bivector<T>, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(Zero, Zero, rhs, self)
     }
 }
 impl<T> std::ops::Add<Trivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Trivector<T>) -> Self::Output {
-        Trivector {
-            xyz: std::ops::Add::add(self.xyz, rhs.xyz),
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fadd_fast(self.xyz, rhs.xyz),
+            }
         }
     }
 }
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G3Out> std::ops::Add<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>>
     for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Trivector<T>: GradeAdd<G3Rhs, Output = G3Out>,
 {
     type Output = Multivector<G0Rhs, G1Rhs, G2Rhs, G3Out>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(rhs.0, rhs.1, rhs.2, GradeAdd::add(self, rhs.3))
     }
@@ -868,7 +849,7 @@ where
 impl<G0Lhs, G1Lhs, G2Lhs, G3Lhs> std::ops::Add<Zero> for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs> {
     type Output = Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Zero) -> Self::Output {
         self
     }
@@ -876,12 +857,12 @@ impl<G0Lhs, G1Lhs, G2Lhs, G3Lhs> std::ops::Add<Zero> for Multivector<G0Lhs, G1Lh
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0Out> std::ops::Add<T>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G0Lhs: GradeAdd<T, Output = G0Out>,
 {
     type Output = Multivector<G0Out, G1Lhs, G2Lhs, G3Lhs>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: T) -> Self::Output {
         Multivector(GradeAdd::add(self.0, rhs), self.1, self.2, self.3)
     }
@@ -889,12 +870,12 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G1Out> std::ops::Add<Vector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G1Lhs: GradeAdd<Vector<T>, Output = G1Out>,
 {
     type Output = Multivector<G0Lhs, G1Out, G2Lhs, G3Lhs>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Vector<T>) -> Self::Output {
         Multivector(self.0, GradeAdd::add(self.1, rhs), self.2, self.3)
     }
@@ -902,12 +883,12 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G2Out> std::ops::Add<Bivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G2Lhs: GradeAdd<Bivector<T>, Output = G2Out>,
 {
     type Output = Multivector<G0Lhs, G1Lhs, G2Out, G3Lhs>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(self.0, self.1, GradeAdd::add(self.2, rhs), self.3)
     }
@@ -915,12 +896,12 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G3Out> std::ops::Add<Trivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G3Lhs: GradeAdd<Trivector<T>, Output = G3Out>,
 {
     type Output = Multivector<G0Lhs, G1Lhs, G2Lhs, G3Out>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Trivector<T>) -> Self::Output {
         Multivector(self.0, self.1, self.2, GradeAdd::add(self.3, rhs))
     }
@@ -936,7 +917,7 @@ where
 {
     type Output = Multivector<G0Out, G1Out, G2Out, G3Out>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             GradeAdd::add(self.0, rhs.0),
@@ -949,7 +930,7 @@ where
 impl std::ops::Sub<Zero> for Zero {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -957,7 +938,7 @@ impl std::ops::Sub<Zero> for Zero {
 impl std::ops::Sub<f32> for Zero {
     type Output = f32;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: f32) -> Self::Output {
         -rhs
     }
@@ -965,40 +946,40 @@ impl std::ops::Sub<f32> for Zero {
 impl std::ops::Sub<f64> for Zero {
     type Output = f64;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: f64) -> Self::Output {
         -rhs
     }
 }
 impl<T> std::ops::Sub<Vector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Vector<T>) -> Self::Output {
         -rhs
     }
 }
 impl<T> std::ops::Sub<Bivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Bivector<T>) -> Self::Output {
         -rhs
     }
 }
 impl<T> std::ops::Sub<Trivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Trivector<T>) -> Self::Output {
         -rhs
     }
@@ -1013,7 +994,7 @@ where
 {
     type Output = Multivector<G0Out, G1Out, G2Out, G3Out>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         -rhs
     }
@@ -1021,7 +1002,7 @@ where
 impl std::ops::Sub<Zero> for f32 {
     type Output = f32;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Zero) -> Self::Output {
         self
     }
@@ -1029,7 +1010,7 @@ impl std::ops::Sub<Zero> for f32 {
 impl std::ops::Sub<Zero> for f64 {
     type Output = f64;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Zero) -> Self::Output {
         self
     }
@@ -1037,7 +1018,7 @@ impl std::ops::Sub<Zero> for f64 {
 impl std::ops::Sub<Vector<f32>> for f32 {
     type Output = Multivector<f32, Vector<f32>, Zero, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Vector<f32>) -> Self::Output {
         Multivector(self, -rhs, Zero, Zero)
     }
@@ -1045,7 +1026,7 @@ impl std::ops::Sub<Vector<f32>> for f32 {
 impl std::ops::Sub<Vector<f64>> for f64 {
     type Output = Multivector<f64, Vector<f64>, Zero, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Vector<f64>) -> Self::Output {
         Multivector(self, -rhs, Zero, Zero)
     }
@@ -1053,7 +1034,7 @@ impl std::ops::Sub<Vector<f64>> for f64 {
 impl std::ops::Sub<Bivector<f32>> for f32 {
     type Output = Multivector<f32, Zero, Bivector<f32>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Bivector<f32>) -> Self::Output {
         Multivector(self, Zero, -rhs, Zero)
     }
@@ -1061,7 +1042,7 @@ impl std::ops::Sub<Bivector<f32>> for f32 {
 impl std::ops::Sub<Bivector<f64>> for f64 {
     type Output = Multivector<f64, Zero, Bivector<f64>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Bivector<f64>) -> Self::Output {
         Multivector(self, Zero, -rhs, Zero)
     }
@@ -1069,7 +1050,7 @@ impl std::ops::Sub<Bivector<f64>> for f64 {
 impl std::ops::Sub<Trivector<f32>> for f32 {
     type Output = Multivector<f32, Zero, Zero, Trivector<f32>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Trivector<f32>) -> Self::Output {
         Multivector(self, Zero, Zero, -rhs)
     }
@@ -1077,7 +1058,7 @@ impl std::ops::Sub<Trivector<f32>> for f32 {
 impl std::ops::Sub<Trivector<f64>> for f64 {
     type Output = Multivector<f64, Zero, Zero, Trivector<f64>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Trivector<f64>) -> Self::Output {
         Multivector(self, Zero, Zero, -rhs)
     }
@@ -1092,7 +1073,7 @@ where
 {
     type Output = Multivector<G0Out, G1Out, G2Out, G3Out>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(GradeSub::sub(self, rhs.0), -rhs.1, -rhs.2, -rhs.3)
     }
@@ -1107,66 +1088,68 @@ where
 {
     type Output = Multivector<G0Out, G1Out, G2Out, G3Out>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(GradeSub::sub(self, rhs.0), -rhs.1, -rhs.2, -rhs.3)
     }
 }
 impl<T> std::ops::Sub<Zero> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Zero) -> Self::Output {
         self
     }
 }
 impl<T> std::ops::Sub<T> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Vector<T>, Zero, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: T) -> Self::Output {
         Multivector(-rhs, self, Zero, Zero)
     }
 }
 impl<T> std::ops::Sub<Vector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Vector<T>) -> Self::Output {
-        Vector {
-            x: std::ops::Sub::sub(self.x, rhs.x),
-            y: std::ops::Sub::sub(self.y, rhs.y),
-            z: std::ops::Sub::sub(self.z, rhs.z),
+        unsafe {
+            Vector {
+                x: std::intrinsics::fsub_fast(self.x, rhs.x),
+                y: std::intrinsics::fsub_fast(self.y, rhs.y),
+                z: std::intrinsics::fsub_fast(self.z, rhs.z),
+            }
         }
     }
 }
 impl<T> std::ops::Sub<Bivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Bivector<T>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(Zero, self, -rhs, Zero)
     }
 }
 impl<T> std::ops::Sub<Trivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Zero, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Trivector<T>) -> Self::Output {
         Multivector(Zero, self, Zero, -rhs)
     }
@@ -1174,7 +1157,7 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0Out, G1Out, G2Out, G3Out>
     std::ops::Sub<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G0Rhs: std::ops::Neg<Output = G0Out>,
     Vector<T>: GradeSub<G1Rhs, Output = G1Out>,
     G2Rhs: std::ops::Neg<Output = G2Out>,
@@ -1182,66 +1165,68 @@ where
 {
     type Output = Multivector<G0Out, G1Out, G2Out, G3Out>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(-rhs.0, GradeSub::sub(self, rhs.1), -rhs.2, -rhs.3)
     }
 }
 impl<T> std::ops::Sub<Zero> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Zero) -> Self::Output {
         self
     }
 }
 impl<T> std::ops::Sub<T> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Zero, Bivector<T>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: T) -> Self::Output {
         Multivector(-rhs, Zero, self, Zero)
     }
 }
 impl<T> std::ops::Sub<Vector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Bivector<T>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Vector<T>) -> Self::Output {
         Multivector(Zero, -rhs, self, Zero)
     }
 }
 impl<T> std::ops::Sub<Bivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Bivector<T>) -> Self::Output {
-        Bivector {
-            xy: std::ops::Sub::sub(self.xy, rhs.xy),
-            xz: std::ops::Sub::sub(self.xz, rhs.xz),
-            yz: std::ops::Sub::sub(self.yz, rhs.yz),
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fsub_fast(self.xy, rhs.xy),
+                xz: std::intrinsics::fsub_fast(self.xz, rhs.xz),
+                yz: std::intrinsics::fsub_fast(self.yz, rhs.yz),
+            }
         }
     }
 }
 impl<T> std::ops::Sub<Trivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Zero, Bivector<T>, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Trivector<T>) -> Self::Output {
         Multivector(Zero, Zero, self, -rhs)
     }
@@ -1249,7 +1234,7 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0Out, G1Out, G2Out, G3Out>
     std::ops::Sub<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G0Rhs: std::ops::Neg<Output = G0Out>,
     G1Rhs: std::ops::Neg<Output = G1Out>,
     Bivector<T>: GradeSub<G2Rhs, Output = G2Out>,
@@ -1257,72 +1242,74 @@ where
 {
     type Output = Multivector<G0Out, G1Out, G2Out, G3Out>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(-rhs.0, -rhs.1, GradeSub::sub(self, rhs.2), -rhs.3)
     }
 }
 impl<T> std::ops::Sub<Zero> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Zero) -> Self::Output {
         self
     }
 }
 impl<T> std::ops::Sub<T> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Zero, Zero, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: T) -> Self::Output {
         Multivector(-rhs, Zero, Zero, self)
     }
 }
 impl<T> std::ops::Sub<Vector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Zero, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Vector<T>) -> Self::Output {
         Multivector(Zero, -rhs, Zero, self)
     }
 }
 impl<T> std::ops::Sub<Bivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Zero, Bivector<T>, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(Zero, Zero, -rhs, self)
     }
 }
 impl<T> std::ops::Sub<Trivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Trivector<T>) -> Self::Output {
-        Trivector {
-            xyz: std::ops::Sub::sub(self.xyz, rhs.xyz),
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fsub_fast(self.xyz, rhs.xyz),
+            }
         }
     }
 }
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0Out, G1Out, G2Out, G3Out>
     std::ops::Sub<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G0Rhs: std::ops::Neg<Output = G0Out>,
     G1Rhs: std::ops::Neg<Output = G1Out>,
     G2Rhs: std::ops::Neg<Output = G2Out>,
@@ -1330,7 +1317,7 @@ where
 {
     type Output = Multivector<G0Out, G1Out, G2Out, G3Out>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(-rhs.0, -rhs.1, -rhs.2, GradeSub::sub(self, rhs.3))
     }
@@ -1338,7 +1325,7 @@ where
 impl<G0Lhs, G1Lhs, G2Lhs, G3Lhs> std::ops::Sub<Zero> for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs> {
     type Output = Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Zero) -> Self::Output {
         self
     }
@@ -1346,12 +1333,12 @@ impl<G0Lhs, G1Lhs, G2Lhs, G3Lhs> std::ops::Sub<Zero> for Multivector<G0Lhs, G1Lh
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0Out> std::ops::Sub<T>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G0Lhs: GradeSub<T, Output = G0Out>,
 {
     type Output = Multivector<G0Out, G1Lhs, G2Lhs, G3Lhs>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: T) -> Self::Output {
         Multivector(GradeSub::sub(self.0, rhs), self.1, self.2, self.3)
     }
@@ -1359,12 +1346,12 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G1Out> std::ops::Sub<Vector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G1Lhs: GradeSub<Vector<T>, Output = G1Out>,
 {
     type Output = Multivector<G0Lhs, G1Out, G2Lhs, G3Lhs>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Vector<T>) -> Self::Output {
         Multivector(self.0, GradeSub::sub(self.1, rhs), self.2, self.3)
     }
@@ -1372,12 +1359,12 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G2Out> std::ops::Sub<Bivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G2Lhs: GradeSub<Bivector<T>, Output = G2Out>,
 {
     type Output = Multivector<G0Lhs, G1Lhs, G2Out, G3Lhs>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(self.0, self.1, GradeSub::sub(self.2, rhs), self.3)
     }
@@ -1385,12 +1372,12 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G3Out> std::ops::Sub<Trivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G3Lhs: GradeSub<Trivector<T>, Output = G3Out>,
 {
     type Output = Multivector<G0Lhs, G1Lhs, G2Lhs, G3Out>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Trivector<T>) -> Self::Output {
         Multivector(self.0, self.1, self.2, GradeSub::sub(self.3, rhs))
     }
@@ -1406,7 +1393,7 @@ where
 {
     type Output = Multivector<G0Out, G1Out, G2Out, G3Out>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             GradeSub::sub(self.0, rhs.0),
@@ -1419,7 +1406,7 @@ where
 impl GradeAdd<Zero> for Zero {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -1427,7 +1414,7 @@ impl GradeAdd<Zero> for Zero {
 impl GradeAdd<f32> for Zero {
     type Output = f32;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: f32) -> Self::Output {
         rhs
     }
@@ -1435,278 +1422,284 @@ impl GradeAdd<f32> for Zero {
 impl GradeAdd<f64> for Zero {
     type Output = f64;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: f64) -> Self::Output {
         rhs
     }
 }
 impl<T> GradeAdd<Vector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Vector<T>) -> Self::Output {
         rhs
     }
 }
 impl<T> GradeAdd<Bivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Bivector<T>) -> Self::Output {
         rhs
     }
 }
 impl<T> GradeAdd<Trivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Trivector<T>) -> Self::Output {
         rhs
     }
 }
 impl<T> GradeAdd<Zero> for T
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Zero) -> Self::Output {
         self
     }
 }
 impl<T> GradeAdd<T> for T
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: T) -> Self::Output {
-        std::ops::Add::add(self, rhs)
+        unsafe { std::intrinsics::fadd_fast(self, rhs) }
     }
 }
 impl<T> GradeAdd<Vector<T>> for T
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Vector<T>, Zero, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Vector<T>) -> Self::Output {
         Multivector(self, rhs, Zero, Zero)
     }
 }
 impl<T> GradeAdd<Bivector<T>> for T
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Zero, Bivector<T>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(self, Zero, rhs, Zero)
     }
 }
 impl<T> GradeAdd<Trivector<T>> for T
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Zero, Zero, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Trivector<T>) -> Self::Output {
         Multivector(self, Zero, Zero, rhs)
     }
 }
 impl<T> GradeAdd<Zero> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Zero) -> Self::Output {
         self
     }
 }
 impl<T> GradeAdd<T> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Vector<T>, Zero, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: T) -> Self::Output {
         Multivector(rhs, self, Zero, Zero)
     }
 }
 impl<T> GradeAdd<Vector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Vector<T>) -> Self::Output {
-        Vector {
-            x: std::ops::Add::add(self.x, rhs.x),
-            y: std::ops::Add::add(self.y, rhs.y),
-            z: std::ops::Add::add(self.z, rhs.z),
+        unsafe {
+            Vector {
+                x: std::intrinsics::fadd_fast(self.x, rhs.x),
+                y: std::intrinsics::fadd_fast(self.y, rhs.y),
+                z: std::intrinsics::fadd_fast(self.z, rhs.z),
+            }
         }
     }
 }
 impl<T> GradeAdd<Bivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Bivector<T>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(Zero, self, rhs, Zero)
     }
 }
 impl<T> GradeAdd<Trivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Zero, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Trivector<T>) -> Self::Output {
         Multivector(Zero, self, Zero, rhs)
     }
 }
 impl<T> GradeAdd<Zero> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Zero) -> Self::Output {
         self
     }
 }
 impl<T> GradeAdd<T> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Zero, Bivector<T>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: T) -> Self::Output {
         Multivector(rhs, Zero, self, Zero)
     }
 }
 impl<T> GradeAdd<Vector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Bivector<T>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Vector<T>) -> Self::Output {
         Multivector(Zero, rhs, self, Zero)
     }
 }
 impl<T> GradeAdd<Bivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Bivector<T>) -> Self::Output {
-        Bivector {
-            xy: std::ops::Add::add(self.xy, rhs.xy),
-            xz: std::ops::Add::add(self.xz, rhs.xz),
-            yz: std::ops::Add::add(self.yz, rhs.yz),
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fadd_fast(self.xy, rhs.xy),
+                xz: std::intrinsics::fadd_fast(self.xz, rhs.xz),
+                yz: std::intrinsics::fadd_fast(self.yz, rhs.yz),
+            }
         }
     }
 }
 impl<T> GradeAdd<Trivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Zero, Bivector<T>, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Trivector<T>) -> Self::Output {
         Multivector(Zero, Zero, self, rhs)
     }
 }
 impl<T> GradeAdd<Zero> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Zero) -> Self::Output {
         self
     }
 }
 impl<T> GradeAdd<T> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Zero, Zero, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: T) -> Self::Output {
         Multivector(rhs, Zero, Zero, self)
     }
 }
 impl<T> GradeAdd<Vector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Zero, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Vector<T>) -> Self::Output {
         Multivector(Zero, rhs, Zero, self)
     }
 }
 impl<T> GradeAdd<Bivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Zero, Bivector<T>, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(Zero, Zero, rhs, self)
     }
 }
 impl<T> GradeAdd<Trivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn add(self, rhs: Trivector<T>) -> Self::Output {
-        Trivector {
-            xyz: std::ops::Add::add(self.xyz, rhs.xyz),
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fadd_fast(self.xyz, rhs.xyz),
+            }
         }
     }
 }
 impl GradeSub<Zero> for Zero {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -1714,7 +1707,7 @@ impl GradeSub<Zero> for Zero {
 impl GradeSub<f32> for Zero {
     type Output = f32;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: f32) -> Self::Output {
         -rhs
     }
@@ -1722,322 +1715,328 @@ impl GradeSub<f32> for Zero {
 impl GradeSub<f64> for Zero {
     type Output = f64;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: f64) -> Self::Output {
         -rhs
     }
 }
 impl<T> GradeSub<Vector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Vector<T>) -> Self::Output {
         -rhs
     }
 }
 impl<T> GradeSub<Bivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Bivector<T>) -> Self::Output {
         -rhs
     }
 }
 impl<T> GradeSub<Trivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Trivector<T>) -> Self::Output {
         -rhs
     }
 }
 impl<T> GradeSub<Zero> for T
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Zero) -> Self::Output {
         self
     }
 }
 impl<T> GradeSub<T> for T
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: T) -> Self::Output {
-        std::ops::Sub::sub(self, rhs)
+        unsafe { std::intrinsics::fsub_fast(self, rhs) }
     }
 }
 impl<T> GradeSub<Vector<T>> for T
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Vector<T>, Zero, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Vector<T>) -> Self::Output {
         Multivector(self, -rhs, Zero, Zero)
     }
 }
 impl<T> GradeSub<Bivector<T>> for T
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Zero, Bivector<T>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(self, Zero, -rhs, Zero)
     }
 }
 impl<T> GradeSub<Trivector<T>> for T
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Zero, Zero, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Trivector<T>) -> Self::Output {
         Multivector(self, Zero, Zero, -rhs)
     }
 }
 impl<T> GradeSub<Zero> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Zero) -> Self::Output {
         self
     }
 }
 impl<T> GradeSub<T> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Vector<T>, Zero, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: T) -> Self::Output {
         Multivector(-rhs, self, Zero, Zero)
     }
 }
 impl<T> GradeSub<Vector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Vector<T>) -> Self::Output {
-        Vector {
-            x: std::ops::Sub::sub(self.x, rhs.x),
-            y: std::ops::Sub::sub(self.y, rhs.y),
-            z: std::ops::Sub::sub(self.z, rhs.z),
+        unsafe {
+            Vector {
+                x: std::intrinsics::fsub_fast(self.x, rhs.x),
+                y: std::intrinsics::fsub_fast(self.y, rhs.y),
+                z: std::intrinsics::fsub_fast(self.z, rhs.z),
+            }
         }
     }
 }
 impl<T> GradeSub<Bivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Bivector<T>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(Zero, self, -rhs, Zero)
     }
 }
 impl<T> GradeSub<Trivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Zero, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Trivector<T>) -> Self::Output {
         Multivector(Zero, self, Zero, -rhs)
     }
 }
 impl<T> GradeSub<Zero> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Zero) -> Self::Output {
         self
     }
 }
 impl<T> GradeSub<T> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Zero, Bivector<T>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: T) -> Self::Output {
         Multivector(-rhs, Zero, self, Zero)
     }
 }
 impl<T> GradeSub<Vector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Bivector<T>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Vector<T>) -> Self::Output {
         Multivector(Zero, -rhs, self, Zero)
     }
 }
 impl<T> GradeSub<Bivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Bivector<T>) -> Self::Output {
-        Bivector {
-            xy: std::ops::Sub::sub(self.xy, rhs.xy),
-            xz: std::ops::Sub::sub(self.xz, rhs.xz),
-            yz: std::ops::Sub::sub(self.yz, rhs.yz),
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fsub_fast(self.xy, rhs.xy),
+                xz: std::intrinsics::fsub_fast(self.xz, rhs.xz),
+                yz: std::intrinsics::fsub_fast(self.yz, rhs.yz),
+            }
         }
     }
 }
 impl<T> GradeSub<Trivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Zero, Bivector<T>, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Trivector<T>) -> Self::Output {
         Multivector(Zero, Zero, self, -rhs)
     }
 }
 impl<T> GradeSub<Zero> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Zero) -> Self::Output {
         self
     }
 }
 impl<T> GradeSub<T> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Zero, Zero, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: T) -> Self::Output {
         Multivector(-rhs, Zero, Zero, self)
     }
 }
 impl<T> GradeSub<Vector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Zero, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Vector<T>) -> Self::Output {
         Multivector(Zero, -rhs, Zero, self)
     }
 }
 impl<T> GradeSub<Bivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Zero, Bivector<T>, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(Zero, Zero, -rhs, self)
     }
 }
 impl<T> GradeSub<Trivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn sub(self, rhs: Trivector<T>) -> Self::Output {
-        Trivector {
-            xyz: std::ops::Sub::sub(self.xyz, rhs.xyz),
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fsub_fast(self.xyz, rhs.xyz),
+            }
         }
     }
 }
 impl std::ops::Mul<Zero> for Zero {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> std::ops::Mul<T> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> std::ops::Mul<Vector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> std::ops::Mul<Bivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> std::ops::Mul<Trivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -2051,7 +2050,7 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Zero
     }
@@ -2059,7 +2058,7 @@ where
 impl std::ops::Mul<Zero> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -2067,7 +2066,7 @@ impl std::ops::Mul<Zero> for f32 {
 impl std::ops::Mul<Zero> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -2075,68 +2074,80 @@ impl std::ops::Mul<Zero> for f64 {
 impl std::ops::Mul<Vector<f32>> for f32 {
     type Output = Vector<f32>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Vector<f32>) -> Self::Output {
-        Vector {
-            x: self * rhs.x,
-            y: self * rhs.y,
-            z: self * rhs.z,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fmul_fast(self, rhs.x),
+                y: std::intrinsics::fmul_fast(self, rhs.y),
+                z: std::intrinsics::fmul_fast(self, rhs.z),
+            }
         }
     }
 }
 impl std::ops::Mul<Vector<f64>> for f64 {
     type Output = Vector<f64>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Vector<f64>) -> Self::Output {
-        Vector {
-            x: self * rhs.x,
-            y: self * rhs.y,
-            z: self * rhs.z,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fmul_fast(self, rhs.x),
+                y: std::intrinsics::fmul_fast(self, rhs.y),
+                z: std::intrinsics::fmul_fast(self, rhs.z),
+            }
         }
     }
 }
 impl std::ops::Mul<Bivector<f32>> for f32 {
     type Output = Bivector<f32>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Bivector<f32>) -> Self::Output {
-        Bivector {
-            xy: self * rhs.xy,
-            xz: self * rhs.xz,
-            yz: self * rhs.yz,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self, rhs.xy),
+                xz: std::intrinsics::fmul_fast(self, rhs.xz),
+                yz: std::intrinsics::fmul_fast(self, rhs.yz),
+            }
         }
     }
 }
 impl std::ops::Mul<Bivector<f64>> for f64 {
     type Output = Bivector<f64>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Bivector<f64>) -> Self::Output {
-        Bivector {
-            xy: self * rhs.xy,
-            xz: self * rhs.xz,
-            yz: self * rhs.yz,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self, rhs.xy),
+                xz: std::intrinsics::fmul_fast(self, rhs.xz),
+                yz: std::intrinsics::fmul_fast(self, rhs.yz),
+            }
         }
     }
 }
 impl std::ops::Mul<Trivector<f32>> for f32 {
     type Output = Trivector<f32>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Trivector<f32>) -> Self::Output {
-        Trivector {
-            xyz: self * rhs.xyz,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self, rhs.xyz),
+            }
         }
     }
 }
 impl std::ops::Mul<Trivector<f64>> for f64 {
     type Output = Trivector<f64>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Trivector<f64>) -> Self::Output {
-        Trivector {
-            xyz: self * rhs.xyz,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self, rhs.xyz),
+            }
         }
     }
 }
@@ -2154,7 +2165,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.scalar_prod(rhs.0),
@@ -2178,7 +2189,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.scalar_prod(rhs.0),
@@ -2190,278 +2201,292 @@ where
 }
 impl<T> std::ops::Mul<Zero> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> std::ops::Mul<T> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: T) -> Self::Output {
-        Vector {
-            x: self.x * rhs,
-            y: self.y * rhs,
-            z: self.z * rhs,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fmul_fast(self.x, rhs),
+                y: std::intrinsics::fmul_fast(self.y, rhs),
+                z: std::intrinsics::fmul_fast(self.z, rhs),
+            }
         }
     }
 }
-impl<T> std::ops::Mul<Vector<T>> for Vector<T>
-where
-    T: Scalar,
-{
-    type Output = Multivector<T, Zero, Bivector<T>, Zero>;
-    #[inline]
-    #[allow(unused_variables)]
-    fn mul(self, rhs: Vector<T>) -> Self::Output {
-        Multivector(self.scalar_prod(rhs), Zero, self.bivector_prod(rhs), Zero)
-    }
-}
-impl<T> std::ops::Mul<Bivector<T>> for Vector<T>
-where
-    T: Scalar,
-{
-    type Output = Multivector<Zero, Vector<T>, Zero, Trivector<T>>;
-    #[inline]
-    #[allow(unused_variables)]
-    fn mul(self, rhs: Bivector<T>) -> Self::Output {
-        Multivector(Zero, self.vector_prod(rhs), Zero, self.trivector_prod(rhs))
-    }
-}
-impl<T> std::ops::Mul<Trivector<T>> for Vector<T>
-where
-    T: Scalar,
-{
-    type Output = Bivector<T>;
-    #[inline]
-    #[allow(unused_variables)]
-    fn mul(self, rhs: Trivector<T>) -> Self::Output {
-        Bivector {
-            xy: self.z * rhs.xyz,
-            xz: -(self.y * rhs.xyz),
-            yz: self.x * rhs.xyz,
-        }
-    }
-}
-impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G1_1, G1_2, G2_0, G2_1, G2_2, G3_0>
-    std::ops::Mul<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Vector<T>
-where
-    T: Scalar,
-    Vector<T>: ScalarProduct<G1Rhs, Output = G0_0>,
-    Vector<T>: VectorProduct<G0Rhs, Output = G1_0>,
-    Vector<T>: VectorProduct<G2Rhs, Output = G1_1>,
-    Vector<T>: BivectorProduct<G1Rhs, Output = G2_0>,
-    Vector<T>: BivectorProduct<G3Rhs, Output = G2_1>,
-    Vector<T>: TrivectorProduct<G2Rhs, Output = G3_0>,
-    G0Rhs: Copy,
-    G1Rhs: Copy,
-    G2Rhs: Copy,
-    G3Rhs: Copy,
-    G1_0: std::ops::Add<G1_1, Output = G1_2>,
-    G2_0: std::ops::Add<G2_1, Output = G2_2>,
-{
-    type Output = Multivector<G0_0, G1_2, G2_2, G3_0>;
-    #[inline]
-    #[allow(unused_variables)]
-    fn mul(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
-        Multivector(
-            self.scalar_prod(rhs.1),
-            self.vector_prod(rhs.0) + self.vector_prod(rhs.2),
-            self.bivector_prod(rhs.1) + self.bivector_prod(rhs.3),
-            self.trivector_prod(rhs.2),
-        )
-    }
-}
+// impl<T> std::ops::Mul<Vector<T>> for Vector<T>
+// where
+//     T: num_traits::Float,
+// {
+//     type Output = Multivector<T, Zero, Bivector<T>, Zero>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn mul(self, rhs: Vector<T>) -> Self::Output {
+//         Multivector(self.scalar_prod(rhs), Zero, self.bivector_prod(rhs), Zero)
+//     }
+// }
+// impl<T> std::ops::Mul<Bivector<T>> for Vector<T>
+// where
+//     T: num_traits::Float,
+// {
+//     type Output = Multivector<Zero, Vector<T>, Zero, Trivector<T>>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn mul(self, rhs: Bivector<T>) -> Self::Output {
+//         Multivector(Zero, self.vector_prod(rhs), Zero, self.trivector_prod(rhs))
+//     }
+// }
+// impl<T> std::ops::Mul<Trivector<T>> for Vector<T>
+// where
+//     T: num_traits::Float,
+// {
+//     type Output = Bivector<T>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn mul(self, rhs: Trivector<T>) -> Self::Output {
+//         unsafe {
+//             Bivector {
+//                 xy: std::intrinsics::fmul_fast(self.z, rhs.xyz),
+//                 xz: -std::intrinsics::fmul_fast(self.y, rhs.xyz),
+//                 yz: std::intrinsics::fmul_fast(self.x, rhs.xyz),
+//             }
+//         }
+//     }
+// }
+// impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G1_1, G1_2, G2_0, G2_1, G2_2, G3_0>
+//     std::ops::Mul<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Vector<T>
+// where
+//     T: num_traits::Float,
+//     Vector<T>: ScalarProduct<G1Rhs, Output = G0_0>,
+//     Vector<T>: VectorProduct<G0Rhs, Output = G1_0>,
+//     Vector<T>: VectorProduct<G2Rhs, Output = G1_1>,
+//     Vector<T>: BivectorProduct<G1Rhs, Output = G2_0>,
+//     Vector<T>: BivectorProduct<G3Rhs, Output = G2_1>,
+//     Vector<T>: TrivectorProduct<G2Rhs, Output = G3_0>,
+//     G0Rhs: Copy,
+//     G1Rhs: Copy,
+//     G2Rhs: Copy,
+//     G3Rhs: Copy,
+//     G1_0: std::ops::Add<G1_1, Output = G1_2>,
+//     G2_0: std::ops::Add<G2_1, Output = G2_2>,
+// {
+//     type Output = Multivector<G0_0, G1_2, G2_2, G3_0>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn mul(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
+//         Multivector(
+//             self.scalar_prod(rhs.1),
+//             self.vector_prod(rhs.0) + self.vector_prod(rhs.2),
+//             self.bivector_prod(rhs.1) + self.bivector_prod(rhs.3),
+//             self.trivector_prod(rhs.2),
+//         )
+//     }
+// }
 impl<T> std::ops::Mul<Zero> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> std::ops::Mul<T> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: T) -> Self::Output {
-        Bivector {
-            xy: self.xy * rhs,
-            xz: self.xz * rhs,
-            yz: self.yz * rhs,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self.xy, rhs),
+                xz: std::intrinsics::fmul_fast(self.xz, rhs),
+                yz: std::intrinsics::fmul_fast(self.yz, rhs),
+            }
         }
     }
 }
-impl<T> std::ops::Mul<Vector<T>> for Bivector<T>
-where
-    T: Scalar,
-{
-    type Output = Multivector<Zero, Vector<T>, Zero, Trivector<T>>;
-    #[inline]
-    #[allow(unused_variables)]
-    fn mul(self, rhs: Vector<T>) -> Self::Output {
-        Multivector(Zero, self.vector_prod(rhs), Zero, self.trivector_prod(rhs))
-    }
-}
-impl<T> std::ops::Mul<Bivector<T>> for Bivector<T>
-where
-    T: Scalar,
-{
-    type Output = Multivector<T, Zero, Bivector<T>, Zero>;
-    #[inline]
-    #[allow(unused_variables)]
-    fn mul(self, rhs: Bivector<T>) -> Self::Output {
-        Multivector(self.scalar_prod(rhs), Zero, self.bivector_prod(rhs), Zero)
-    }
-}
-impl<T> std::ops::Mul<Trivector<T>> for Bivector<T>
-where
-    T: Scalar,
-{
-    type Output = Vector<T>;
-    #[inline]
-    #[allow(unused_variables)]
-    fn mul(self, rhs: Trivector<T>) -> Self::Output {
-        Vector {
-            x: -(self.yz * rhs.xyz),
-            y: self.xz * rhs.xyz,
-            z: -(self.xy * rhs.xyz),
-        }
-    }
-}
-impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G1_1, G1_2, G2_0, G2_1, G2_2, G3_0>
-    std::ops::Mul<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Bivector<T>
-where
-    T: Scalar,
-    Bivector<T>: ScalarProduct<G2Rhs, Output = G0_0>,
-    Bivector<T>: VectorProduct<G1Rhs, Output = G1_0>,
-    Bivector<T>: VectorProduct<G3Rhs, Output = G1_1>,
-    Bivector<T>: BivectorProduct<G0Rhs, Output = G2_0>,
-    Bivector<T>: BivectorProduct<G2Rhs, Output = G2_1>,
-    Bivector<T>: TrivectorProduct<G1Rhs, Output = G3_0>,
-    G0Rhs: Copy,
-    G1Rhs: Copy,
-    G2Rhs: Copy,
-    G3Rhs: Copy,
-    G1_0: std::ops::Add<G1_1, Output = G1_2>,
-    G2_0: std::ops::Add<G2_1, Output = G2_2>,
-{
-    type Output = Multivector<G0_0, G1_2, G2_2, G3_0>;
-    #[inline]
-    #[allow(unused_variables)]
-    fn mul(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
-        Multivector(
-            self.scalar_prod(rhs.2),
-            self.vector_prod(rhs.1) + self.vector_prod(rhs.3),
-            self.bivector_prod(rhs.0) + self.bivector_prod(rhs.2),
-            self.trivector_prod(rhs.1),
-        )
-    }
-}
+// impl<T> std::ops::Mul<Vector<T>> for Bivector<T>
+// where
+//     T: num_traits::Float,
+// {
+//     type Output = Multivector<Zero, Vector<T>, Zero, Trivector<T>>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn mul(self, rhs: Vector<T>) -> Self::Output {
+//         Multivector(Zero, self.vector_prod(rhs), Zero, self.trivector_prod(rhs))
+//     }
+// }
+// impl<T> std::ops::Mul<Bivector<T>> for Bivector<T>
+// where
+//     T: num_traits::Float,
+// {
+//     type Output = Multivector<T, Zero, Bivector<T>, Zero>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn mul(self, rhs: Bivector<T>) -> Self::Output {
+//         Multivector(self.scalar_prod(rhs), Zero, self.bivector_prod(rhs), Zero)
+//     }
+// }
+// impl<T> std::ops::Mul<Trivector<T>> for Bivector<T>
+// where
+//     T: num_traits::Float,
+// {
+//     type Output = Vector<T>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn mul(self, rhs: Trivector<T>) -> Self::Output {
+//         unsafe {
+//             Vector {
+//                 x: -std::intrinsics::fmul_fast(self.yz, rhs.xyz),
+//                 y: std::intrinsics::fmul_fast(self.xz, rhs.xyz),
+//                 z: -std::intrinsics::fmul_fast(self.xy, rhs.xyz),
+//             }
+//         }
+//     }
+// }
+// impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G1_1, G1_2, G2_0, G2_1, G2_2, G3_0>
+//     std::ops::Mul<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Bivector<T>
+// where
+//     T: num_traits::Float,
+//     Bivector<T>: ScalarProduct<G2Rhs, Output = G0_0>,
+//     Bivector<T>: VectorProduct<G1Rhs, Output = G1_0>,
+//     Bivector<T>: VectorProduct<G3Rhs, Output = G1_1>,
+//     Bivector<T>: BivectorProduct<G0Rhs, Output = G2_0>,
+//     Bivector<T>: BivectorProduct<G2Rhs, Output = G2_1>,
+//     Bivector<T>: TrivectorProduct<G1Rhs, Output = G3_0>,
+//     G0Rhs: Copy,
+//     G1Rhs: Copy,
+//     G2Rhs: Copy,
+//     G3Rhs: Copy,
+//     G1_0: std::ops::Add<G1_1, Output = G1_2>,
+//     G2_0: std::ops::Add<G2_1, Output = G2_2>,
+// {
+//     type Output = Multivector<G0_0, G1_2, G2_2, G3_0>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn mul(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
+//         Multivector(
+//             self.scalar_prod(rhs.2),
+//             self.vector_prod(rhs.1) + self.vector_prod(rhs.3),
+//             self.bivector_prod(rhs.0) + self.bivector_prod(rhs.2),
+//             self.trivector_prod(rhs.1),
+//         )
+//     }
+// }
 impl<T> std::ops::Mul<Zero> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> std::ops::Mul<T> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: T) -> Self::Output {
-        Trivector {
-            xyz: self.xyz * rhs,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self.xyz, rhs),
+            }
         }
     }
 }
-impl<T> std::ops::Mul<Vector<T>> for Trivector<T>
-where
-    T: Scalar,
-{
-    type Output = Bivector<T>;
-    #[inline]
-    #[allow(unused_variables)]
-    fn mul(self, rhs: Vector<T>) -> Self::Output {
-        Bivector {
-            xy: self.xyz * rhs.z,
-            xz: -(self.xyz * rhs.y),
-            yz: self.xyz * rhs.x,
-        }
-    }
-}
-impl<T> std::ops::Mul<Bivector<T>> for Trivector<T>
-where
-    T: Scalar,
-{
-    type Output = Vector<T>;
-    #[inline]
-    #[allow(unused_variables)]
-    fn mul(self, rhs: Bivector<T>) -> Self::Output {
-        Vector {
-            x: -(self.xyz * rhs.yz),
-            y: self.xyz * rhs.xz,
-            z: -(self.xyz * rhs.xy),
-        }
-    }
-}
+// impl<T> std::ops::Mul<Vector<T>> for Trivector<T>
+// where
+//     T: num_traits::Float,
+// {
+//     type Output = Bivector<T>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn mul(self, rhs: Vector<T>) -> Self::Output {
+//         unsafe {
+//             Bivector {
+//                 xy: std::intrinsics::fmul_fast(self.xyz, rhs.z),
+//                 xz: -std::intrinsics::fmul_fast(self.xyz, rhs.y),
+//                 yz: std::intrinsics::fmul_fast(self.xyz, rhs.x),
+//             }
+//         }
+//     }
+// }
+// impl<T> std::ops::Mul<Bivector<T>> for Trivector<T>
+// where
+//     T: num_traits::Float,
+// {
+//     type Output = Vector<T>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn mul(self, rhs: Bivector<T>) -> Self::Output {
+//         unsafe {
+//             Vector {
+//                 x: -std::intrinsics::fmul_fast(self.xyz, rhs.yz),
+//                 y: std::intrinsics::fmul_fast(self.xyz, rhs.xz),
+//                 z: -std::intrinsics::fmul_fast(self.xyz, rhs.xy),
+//             }
+//         }
+//     }
+// }
 impl<T> std::ops::Mul<Trivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Trivector<T>) -> Self::Output {
-        -(self.xyz * rhs.xyz)
+        unsafe { -std::intrinsics::fmul_fast(self.xyz, rhs.xyz) }
     }
 }
-impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G2_0, G3_0>
-    std::ops::Mul<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Trivector<T>
-where
-    T: Scalar,
-    Trivector<T>: ScalarProduct<G3Rhs, Output = G0_0>,
-    Trivector<T>: VectorProduct<G2Rhs, Output = G1_0>,
-    Trivector<T>: BivectorProduct<G1Rhs, Output = G2_0>,
-    Trivector<T>: TrivectorProduct<G0Rhs, Output = G3_0>,
-    G0Rhs: Copy,
-    G1Rhs: Copy,
-    G2Rhs: Copy,
-    G3Rhs: Copy,
-{
-    type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
-    #[inline]
-    #[allow(unused_variables)]
-    fn mul(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
-        Multivector(
-            self.scalar_prod(rhs.3),
-            self.vector_prod(rhs.2),
-            self.bivector_prod(rhs.1),
-            self.trivector_prod(rhs.0),
-        )
-    }
-}
+// impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G2_0, G3_0>
+//     std::ops::Mul<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Trivector<T>
+// where
+//     T: num_traits::Float,
+//     Trivector<T>: ScalarProduct<G3Rhs, Output = G0_0>,
+//     Trivector<T>: VectorProduct<G2Rhs, Output = G1_0>,
+//     Trivector<T>: BivectorProduct<G1Rhs, Output = G2_0>,
+//     Trivector<T>: TrivectorProduct<G0Rhs, Output = G3_0>,
+//     G0Rhs: Copy,
+//     G1Rhs: Copy,
+//     G2Rhs: Copy,
+//     G3Rhs: Copy,
+// {
+//     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn mul(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
+//         Multivector(
+//             self.scalar_prod(rhs.3),
+//             self.vector_prod(rhs.2),
+//             self.bivector_prod(rhs.1),
+//             self.trivector_prod(rhs.0),
+//         )
+//     }
+// }
 impl<G0Lhs, G1Lhs, G2Lhs, G3Lhs> std::ops::Mul<Zero> for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
     G0Lhs: Copy,
@@ -2471,119 +2496,119 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
-impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G2_0, G3_0> std::ops::Mul<T>
-    for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
-where
-    T: Scalar,
-    G0Lhs: ScalarProduct<T, Output = G0_0>,
-    G1Lhs: VectorProduct<T, Output = G1_0>,
-    G2Lhs: BivectorProduct<T, Output = G2_0>,
-    G3Lhs: TrivectorProduct<T, Output = G3_0>,
-    G0Lhs: Copy,
-    G1Lhs: Copy,
-    G2Lhs: Copy,
-    G3Lhs: Copy,
-{
-    type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
-    #[inline]
-    #[allow(unused_variables)]
-    fn mul(self, rhs: T) -> Self::Output {
-        Multivector(
-            self.0.scalar_prod(rhs),
-            self.1.vector_prod(rhs),
-            self.2.bivector_prod(rhs),
-            self.3.trivector_prod(rhs),
-        )
-    }
-}
-impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G1_1, G1_2, G2_0, G2_1, G2_2, G3_0>
-    std::ops::Mul<Vector<T>> for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
-where
-    T: Scalar,
-    G1Lhs: ScalarProduct<Vector<T>, Output = G0_0>,
-    G0Lhs: VectorProduct<Vector<T>, Output = G1_0>,
-    G2Lhs: VectorProduct<Vector<T>, Output = G1_1>,
-    G1Lhs: BivectorProduct<Vector<T>, Output = G2_0>,
-    G3Lhs: BivectorProduct<Vector<T>, Output = G2_1>,
-    G2Lhs: TrivectorProduct<Vector<T>, Output = G3_0>,
-    G0Lhs: Copy,
-    G1Lhs: Copy,
-    G2Lhs: Copy,
-    G3Lhs: Copy,
-    G1_0: std::ops::Add<G1_1, Output = G1_2>,
-    G2_0: std::ops::Add<G2_1, Output = G2_2>,
-{
-    type Output = Multivector<G0_0, G1_2, G2_2, G3_0>;
-    #[inline]
-    #[allow(unused_variables)]
-    fn mul(self, rhs: Vector<T>) -> Self::Output {
-        Multivector(
-            self.1.scalar_prod(rhs),
-            self.0.vector_prod(rhs) + self.2.vector_prod(rhs),
-            self.1.bivector_prod(rhs) + self.3.bivector_prod(rhs),
-            self.2.trivector_prod(rhs),
-        )
-    }
-}
-impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G1_1, G1_2, G2_0, G2_1, G2_2, G3_0>
-    std::ops::Mul<Bivector<T>> for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
-where
-    T: Scalar,
-    G2Lhs: ScalarProduct<Bivector<T>, Output = G0_0>,
-    G1Lhs: VectorProduct<Bivector<T>, Output = G1_0>,
-    G3Lhs: VectorProduct<Bivector<T>, Output = G1_1>,
-    G0Lhs: BivectorProduct<Bivector<T>, Output = G2_0>,
-    G2Lhs: BivectorProduct<Bivector<T>, Output = G2_1>,
-    G1Lhs: TrivectorProduct<Bivector<T>, Output = G3_0>,
-    G0Lhs: Copy,
-    G1Lhs: Copy,
-    G2Lhs: Copy,
-    G3Lhs: Copy,
-    G1_0: std::ops::Add<G1_1, Output = G1_2>,
-    G2_0: std::ops::Add<G2_1, Output = G2_2>,
-{
-    type Output = Multivector<G0_0, G1_2, G2_2, G3_0>;
-    #[inline]
-    #[allow(unused_variables)]
-    fn mul(self, rhs: Bivector<T>) -> Self::Output {
-        Multivector(
-            self.2.scalar_prod(rhs),
-            self.1.vector_prod(rhs) + self.3.vector_prod(rhs),
-            self.0.bivector_prod(rhs) + self.2.bivector_prod(rhs),
-            self.1.trivector_prod(rhs),
-        )
-    }
-}
-impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G2_0, G3_0> std::ops::Mul<Trivector<T>>
-    for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
-where
-    T: Scalar,
-    G3Lhs: ScalarProduct<Trivector<T>, Output = G0_0>,
-    G2Lhs: VectorProduct<Trivector<T>, Output = G1_0>,
-    G1Lhs: BivectorProduct<Trivector<T>, Output = G2_0>,
-    G0Lhs: TrivectorProduct<Trivector<T>, Output = G3_0>,
-    G0Lhs: Copy,
-    G1Lhs: Copy,
-    G2Lhs: Copy,
-    G3Lhs: Copy,
-{
-    type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
-    #[inline]
-    #[allow(unused_variables)]
-    fn mul(self, rhs: Trivector<T>) -> Self::Output {
-        Multivector(
-            self.3.scalar_prod(rhs),
-            self.2.vector_prod(rhs),
-            self.1.bivector_prod(rhs),
-            self.0.trivector_prod(rhs),
-        )
-    }
-}
+// impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G2_0, G3_0> std::ops::Mul<T>
+//     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
+// where
+//     T: num_traits::Float,
+//     G0Lhs: ScalarProduct<T, Output = G0_0>,
+//     G1Lhs: VectorProduct<T, Output = G1_0>,
+//     G2Lhs: BivectorProduct<T, Output = G2_0>,
+//     G3Lhs: TrivectorProduct<T, Output = G3_0>,
+//     G0Lhs: Copy,
+//     G1Lhs: Copy,
+//     G2Lhs: Copy,
+//     G3Lhs: Copy,
+// {
+//     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn mul(self, rhs: T) -> Self::Output {
+//         Multivector(
+//             self.0.scalar_prod(rhs),
+//             self.1.vector_prod(rhs),
+//             self.2.bivector_prod(rhs),
+//             self.3.trivector_prod(rhs),
+//         )
+//     }
+// }
+// impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G1_1, G1_2, G2_0, G2_1, G2_2, G3_0>
+//     std::ops::Mul<Vector<T>> for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
+// where
+//     T: num_traits::Float,
+//     G1Lhs: ScalarProduct<Vector<T>, Output = G0_0>,
+//     G0Lhs: VectorProduct<Vector<T>, Output = G1_0>,
+//     G2Lhs: VectorProduct<Vector<T>, Output = G1_1>,
+//     G1Lhs: BivectorProduct<Vector<T>, Output = G2_0>,
+//     G3Lhs: BivectorProduct<Vector<T>, Output = G2_1>,
+//     G2Lhs: TrivectorProduct<Vector<T>, Output = G3_0>,
+//     G0Lhs: Copy,
+//     G1Lhs: Copy,
+//     G2Lhs: Copy,
+//     G3Lhs: Copy,
+//     G1_0: std::ops::Add<G1_1, Output = G1_2>,
+//     G2_0: std::ops::Add<G2_1, Output = G2_2>,
+// {
+//     type Output = Multivector<G0_0, G1_2, G2_2, G3_0>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn mul(self, rhs: Vector<T>) -> Self::Output {
+//         Multivector(
+//             self.1.scalar_prod(rhs),
+//             self.0.vector_prod(rhs) + self.2.vector_prod(rhs),
+//             self.1.bivector_prod(rhs) + self.3.bivector_prod(rhs),
+//             self.2.trivector_prod(rhs),
+//         )
+//     }
+// }
+// impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G1_1, G1_2, G2_0, G2_1, G2_2, G3_0>
+//     std::ops::Mul<Bivector<T>> for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
+// where
+//     T: num_traits::Float,
+//     G2Lhs: ScalarProduct<Bivector<T>, Output = G0_0>,
+//     G1Lhs: VectorProduct<Bivector<T>, Output = G1_0>,
+//     G3Lhs: VectorProduct<Bivector<T>, Output = G1_1>,
+//     G0Lhs: BivectorProduct<Bivector<T>, Output = G2_0>,
+//     G2Lhs: BivectorProduct<Bivector<T>, Output = G2_1>,
+//     G1Lhs: TrivectorProduct<Bivector<T>, Output = G3_0>,
+//     G0Lhs: Copy,
+//     G1Lhs: Copy,
+//     G2Lhs: Copy,
+//     G3Lhs: Copy,
+//     G1_0: std::ops::Add<G1_1, Output = G1_2>,
+//     G2_0: std::ops::Add<G2_1, Output = G2_2>,
+// {
+//     type Output = Multivector<G0_0, G1_2, G2_2, G3_0>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn mul(self, rhs: Bivector<T>) -> Self::Output {
+//         Multivector(
+//             self.2.scalar_prod(rhs),
+//             self.1.vector_prod(rhs) + self.3.vector_prod(rhs),
+//             self.0.bivector_prod(rhs) + self.2.bivector_prod(rhs),
+//             self.1.trivector_prod(rhs),
+//         )
+//     }
+// }
+// impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G2_0, G3_0> std::ops::Mul<Trivector<T>>
+//     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
+// where
+//     T: num_traits::Float,
+//     G3Lhs: ScalarProduct<Trivector<T>, Output = G0_0>,
+//     G2Lhs: VectorProduct<Trivector<T>, Output = G1_0>,
+//     G1Lhs: BivectorProduct<Trivector<T>, Output = G2_0>,
+//     G0Lhs: TrivectorProduct<Trivector<T>, Output = G3_0>,
+//     G0Lhs: Copy,
+//     G1Lhs: Copy,
+//     G2Lhs: Copy,
+//     G3Lhs: Copy,
+// {
+//     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn mul(self, rhs: Trivector<T>) -> Self::Output {
+//         Multivector(
+//             self.3.scalar_prod(rhs),
+//             self.2.vector_prod(rhs),
+//             self.1.bivector_prod(rhs),
+//             self.0.trivector_prod(rhs),
+//         )
+//     }
+// }
 impl<
         G0Lhs,
         G1Lhs,
@@ -2679,7 +2704,7 @@ where
 {
     type Output = Multivector<G0_6, G1_10, G2_10, G3_6>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn mul(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.0.scalar_prod(rhs.0)
@@ -2705,54 +2730,54 @@ where
         )
     }
 }
-impl Geometric<Zero> for Zero {
-    type Output = Zero;
-    #[inline]
-    #[allow(unused_variables)]
-    fn geo(self, rhs: Zero) -> Self::Output {
-        Zero
-    }
-}
+// impl Geometric<Zero> for Zero {
+//     type Output = Zero;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn geo(self, rhs: Zero) -> Self::Output {
+//         Zero
+//     }
+// }
 impl<T> Geometric<T> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> Geometric<Vector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> Geometric<Bivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> Geometric<Trivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -2766,108 +2791,120 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Zero
     }
 }
-impl Geometric<Zero> for f32 {
-    type Output = Zero;
-    #[inline]
-    #[allow(unused_variables)]
-    fn geo(self, rhs: Zero) -> Self::Output {
-        Zero
-    }
-}
-impl Geometric<Zero> for f64 {
-    type Output = Zero;
-    #[inline]
-    #[allow(unused_variables)]
-    fn geo(self, rhs: Zero) -> Self::Output {
-        Zero
-    }
-}
+// impl Geometric<Zero> for f32 {
+//     type Output = Zero;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn geo(self, rhs: Zero) -> Self::Output {
+//         Zero
+//     }
+// }
+// impl Geometric<Zero> for f64 {
+//     type Output = Zero;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn geo(self, rhs: Zero) -> Self::Output {
+//         Zero
+//     }
+// }
 impl Geometric<f32> for f32 {
     type Output = f32;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: f32) -> Self::Output {
-        self * rhs
+        unsafe { std::intrinsics::fmul_fast(self, rhs) }
     }
 }
 impl Geometric<f64> for f64 {
     type Output = f64;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: f64) -> Self::Output {
-        self * rhs
+        unsafe { std::intrinsics::fmul_fast(self, rhs) }
     }
 }
 impl Geometric<Vector<f32>> for f32 {
     type Output = Vector<f32>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Vector<f32>) -> Self::Output {
-        Vector {
-            x: self * rhs.x,
-            y: self * rhs.y,
-            z: self * rhs.z,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fmul_fast(self, rhs.x),
+                y: std::intrinsics::fmul_fast(self, rhs.y),
+                z: std::intrinsics::fmul_fast(self, rhs.z),
+            }
         }
     }
 }
 impl Geometric<Vector<f64>> for f64 {
     type Output = Vector<f64>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Vector<f64>) -> Self::Output {
-        Vector {
-            x: self * rhs.x,
-            y: self * rhs.y,
-            z: self * rhs.z,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fmul_fast(self, rhs.x),
+                y: std::intrinsics::fmul_fast(self, rhs.y),
+                z: std::intrinsics::fmul_fast(self, rhs.z),
+            }
         }
     }
 }
 impl Geometric<Bivector<f32>> for f32 {
     type Output = Bivector<f32>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Bivector<f32>) -> Self::Output {
-        Bivector {
-            xy: self * rhs.xy,
-            xz: self * rhs.xz,
-            yz: self * rhs.yz,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self, rhs.xy),
+                xz: std::intrinsics::fmul_fast(self, rhs.xz),
+                yz: std::intrinsics::fmul_fast(self, rhs.yz),
+            }
         }
     }
 }
 impl Geometric<Bivector<f64>> for f64 {
     type Output = Bivector<f64>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Bivector<f64>) -> Self::Output {
-        Bivector {
-            xy: self * rhs.xy,
-            xz: self * rhs.xz,
-            yz: self * rhs.yz,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self, rhs.xy),
+                xz: std::intrinsics::fmul_fast(self, rhs.xz),
+                yz: std::intrinsics::fmul_fast(self, rhs.yz),
+            }
         }
     }
 }
 impl Geometric<Trivector<f32>> for f32 {
     type Output = Trivector<f32>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Trivector<f32>) -> Self::Output {
-        Trivector {
-            xyz: self * rhs.xyz,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self, rhs.xyz),
+            }
         }
     }
 }
 impl Geometric<Trivector<f64>> for f64 {
     type Output = Trivector<f64>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Trivector<f64>) -> Self::Output {
-        Trivector {
-            xyz: self * rhs.xyz,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self, rhs.xyz),
+            }
         }
     }
 }
@@ -2885,7 +2922,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.scalar_prod(rhs.0),
@@ -2909,7 +2946,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.scalar_prod(rhs.0),
@@ -2919,73 +2956,77 @@ where
         )
     }
 }
-impl<T> Geometric<Zero> for Vector<T>
-where
-    T: Scalar,
-{
-    type Output = Zero;
-    #[inline]
-    #[allow(unused_variables)]
-    fn geo(self, rhs: Zero) -> Self::Output {
-        Zero
-    }
-}
+// impl<T> Geometric<Zero> for Vector<T>
+// where
+//     T: num_traits::Float,
+// {
+//     type Output = Zero;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn geo(self, rhs: Zero) -> Self::Output {
+//         Zero
+//     }
+// }
 impl<T> Geometric<T> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: T) -> Self::Output {
-        Vector {
-            x: self.x * rhs,
-            y: self.y * rhs,
-            z: self.z * rhs,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fmul_fast(self.x, rhs),
+                y: std::intrinsics::fmul_fast(self.y, rhs),
+                z: std::intrinsics::fmul_fast(self.z, rhs),
+            }
         }
     }
 }
 impl<T> Geometric<Vector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Zero, Bivector<T>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Vector<T>) -> Self::Output {
         Multivector(self.scalar_prod(rhs), Zero, self.bivector_prod(rhs), Zero)
     }
 }
 impl<T> Geometric<Bivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Zero, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(Zero, self.vector_prod(rhs), Zero, self.trivector_prod(rhs))
     }
 }
 impl<T> Geometric<Trivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Trivector<T>) -> Self::Output {
-        Bivector {
-            xy: self.z * rhs.xyz,
-            xz: -(self.y * rhs.xyz),
-            yz: self.x * rhs.xyz,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self.z, rhs.xyz),
+                xz: -std::intrinsics::fmul_fast(self.y, rhs.xyz),
+                yz: std::intrinsics::fmul_fast(self.x, rhs.xyz),
+            }
         }
     }
 }
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G1_1, G1_2, G2_0, G2_1, G2_2, G3_0>
     Geometric<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Vector<T>: ScalarProduct<G1Rhs, Output = G0_0>,
     Vector<T>: VectorProduct<G0Rhs, Output = G1_0>,
     Vector<T>: VectorProduct<G2Rhs, Output = G1_1>,
@@ -3001,7 +3042,7 @@ where
 {
     type Output = Multivector<G0_0, G1_2, G2_2, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.scalar_prod(rhs.1),
@@ -3011,73 +3052,77 @@ where
         )
     }
 }
-impl<T> Geometric<Zero> for Bivector<T>
-where
-    T: Scalar,
-{
-    type Output = Zero;
-    #[inline]
-    #[allow(unused_variables)]
-    fn geo(self, rhs: Zero) -> Self::Output {
-        Zero
-    }
-}
+// impl<T> Geometric<Zero> for Bivector<T>
+// where
+//     T: num_traits::Float,
+// {
+//     type Output = Zero;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn geo(self, rhs: Zero) -> Self::Output {
+//         Zero
+//     }
+// }
 impl<T> Geometric<T> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: T) -> Self::Output {
-        Bivector {
-            xy: self.xy * rhs,
-            xz: self.xz * rhs,
-            yz: self.yz * rhs,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self.xy, rhs),
+                xz: std::intrinsics::fmul_fast(self.xz, rhs),
+                yz: std::intrinsics::fmul_fast(self.yz, rhs),
+            }
         }
     }
 }
 impl<T> Geometric<Vector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<Zero, Vector<T>, Zero, Trivector<T>>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Vector<T>) -> Self::Output {
         Multivector(Zero, self.vector_prod(rhs), Zero, self.trivector_prod(rhs))
     }
 }
 impl<T> Geometric<Bivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Multivector<T, Zero, Bivector<T>, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(self.scalar_prod(rhs), Zero, self.bivector_prod(rhs), Zero)
     }
 }
 impl<T> Geometric<Trivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Trivector<T>) -> Self::Output {
-        Vector {
-            x: -(self.yz * rhs.xyz),
-            y: self.xz * rhs.xyz,
-            z: -(self.xy * rhs.xyz),
+        unsafe {
+            Vector {
+                x: -std::intrinsics::fmul_fast(self.yz, rhs.xyz),
+                y: std::intrinsics::fmul_fast(self.xz, rhs.xyz),
+                z: -std::intrinsics::fmul_fast(self.xy, rhs.xyz),
+            }
         }
     }
 }
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G1_1, G1_2, G2_0, G2_1, G2_2, G3_0>
     Geometric<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Bivector<T>: ScalarProduct<G2Rhs, Output = G0_0>,
     Bivector<T>: VectorProduct<G1Rhs, Output = G1_0>,
     Bivector<T>: VectorProduct<G3Rhs, Output = G1_1>,
@@ -3093,7 +3138,7 @@ where
 {
     type Output = Multivector<G0_0, G1_2, G2_2, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.scalar_prod(rhs.2),
@@ -3103,75 +3148,81 @@ where
         )
     }
 }
-impl<T> Geometric<Zero> for Trivector<T>
-where
-    T: Scalar,
-{
-    type Output = Zero;
-    #[inline]
-    #[allow(unused_variables)]
-    fn geo(self, rhs: Zero) -> Self::Output {
-        Zero
-    }
-}
+// impl<T> Geometric<Zero> for Trivector<T>
+// where
+//     T: num_traits::Float,
+// {
+//     type Output = Zero;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn geo(self, rhs: Zero) -> Self::Output {
+//         Zero
+//     }
+// }
 impl<T> Geometric<T> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: T) -> Self::Output {
-        Trivector {
-            xyz: self.xyz * rhs,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self.xyz, rhs),
+            }
         }
     }
 }
 impl<T> Geometric<Vector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Vector<T>) -> Self::Output {
-        Bivector {
-            xy: self.xyz * rhs.z,
-            xz: -(self.xyz * rhs.y),
-            yz: self.xyz * rhs.x,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self.xyz, rhs.z),
+                xz: -std::intrinsics::fmul_fast(self.xyz, rhs.y),
+                yz: std::intrinsics::fmul_fast(self.xyz, rhs.x),
+            }
         }
     }
 }
 impl<T> Geometric<Bivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Bivector<T>) -> Self::Output {
-        Vector {
-            x: -(self.xyz * rhs.yz),
-            y: self.xyz * rhs.xz,
-            z: -(self.xyz * rhs.xy),
+        unsafe {
+            Vector {
+                x: -std::intrinsics::fmul_fast(self.xyz, rhs.yz),
+                y: std::intrinsics::fmul_fast(self.xyz, rhs.xz),
+                z: -std::intrinsics::fmul_fast(self.xyz, rhs.xy),
+            }
         }
     }
 }
 impl<T> Geometric<Trivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Trivector<T>) -> Self::Output {
-        -(self.xyz * rhs.xyz)
+        unsafe { -std::intrinsics::fmul_fast(self.xyz, rhs.xyz) }
     }
 }
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G2_0, G3_0>
     Geometric<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Trivector<T>: ScalarProduct<G3Rhs, Output = G0_0>,
     Trivector<T>: VectorProduct<G2Rhs, Output = G1_0>,
     Trivector<T>: BivectorProduct<G1Rhs, Output = G2_0>,
@@ -3183,7 +3234,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.scalar_prod(rhs.3),
@@ -3193,24 +3244,24 @@ where
         )
     }
 }
-impl<G0Lhs, G1Lhs, G2Lhs, G3Lhs> Geometric<Zero> for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
-where
-    G0Lhs: Copy,
-    G1Lhs: Copy,
-    G2Lhs: Copy,
-    G3Lhs: Copy,
-{
-    type Output = Zero;
-    #[inline]
-    #[allow(unused_variables)]
-    fn geo(self, rhs: Zero) -> Self::Output {
-        Zero
-    }
-}
+// impl<G0Lhs, G1Lhs, G2Lhs, G3Lhs> Geometric<Zero> for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
+// where
+//     G0Lhs: Copy,
+//     G1Lhs: Copy,
+//     G2Lhs: Copy,
+//     G3Lhs: Copy,
+// {
+//     type Output = Zero;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn geo(self, rhs: Zero) -> Self::Output {
+//         Zero
+//     }
+// }
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G2_0, G3_0> Geometric<T>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G0Lhs: ScalarProduct<T, Output = G0_0>,
     G1Lhs: VectorProduct<T, Output = G1_0>,
     G2Lhs: BivectorProduct<T, Output = G2_0>,
@@ -3222,7 +3273,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: T) -> Self::Output {
         Multivector(
             self.0.scalar_prod(rhs),
@@ -3235,7 +3286,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G1_1, G1_2, G2_0, G2_1, G2_2, G3_0>
     Geometric<Vector<T>> for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G1Lhs: ScalarProduct<Vector<T>, Output = G0_0>,
     G0Lhs: VectorProduct<Vector<T>, Output = G1_0>,
     G2Lhs: VectorProduct<Vector<T>, Output = G1_1>,
@@ -3251,7 +3302,7 @@ where
 {
     type Output = Multivector<G0_0, G1_2, G2_2, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Vector<T>) -> Self::Output {
         Multivector(
             self.1.scalar_prod(rhs),
@@ -3264,7 +3315,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G1_1, G1_2, G2_0, G2_1, G2_2, G3_0>
     Geometric<Bivector<T>> for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G2Lhs: ScalarProduct<Bivector<T>, Output = G0_0>,
     G1Lhs: VectorProduct<Bivector<T>, Output = G1_0>,
     G3Lhs: VectorProduct<Bivector<T>, Output = G1_1>,
@@ -3280,7 +3331,7 @@ where
 {
     type Output = Multivector<G0_0, G1_2, G2_2, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(
             self.2.scalar_prod(rhs),
@@ -3293,7 +3344,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G2_0, G3_0> Geometric<Trivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G3Lhs: ScalarProduct<Trivector<T>, Output = G0_0>,
     G2Lhs: VectorProduct<Trivector<T>, Output = G1_0>,
     G1Lhs: BivectorProduct<Trivector<T>, Output = G2_0>,
@@ -3305,7 +3356,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Trivector<T>) -> Self::Output {
         Multivector(
             self.3.scalar_prod(rhs),
@@ -3409,7 +3460,7 @@ where
 {
     type Output = Multivector<G0_6, G1_10, G2_10, G3_6>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn geo(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.0.scalar_prod(rhs.0)
@@ -3438,51 +3489,51 @@ where
 impl Dot<Zero> for Zero {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> Dot<T> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> Dot<Vector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> Dot<Bivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> Dot<Trivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -3496,7 +3547,7 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Zero
     }
@@ -3504,7 +3555,7 @@ where
 impl Dot<Zero> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -3512,7 +3563,7 @@ impl Dot<Zero> for f32 {
 impl Dot<Zero> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -3520,84 +3571,110 @@ impl Dot<Zero> for f64 {
 impl Dot<f32> for f32 {
     type Output = f32;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: f32) -> Self::Output {
-        self * rhs
+        unsafe { std::intrinsics::fmul_fast(self, rhs) }
     }
 }
 impl Dot<f64> for f64 {
     type Output = f64;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: f64) -> Self::Output {
-        self * rhs
+        unsafe { std::intrinsics::fmul_fast(self, rhs) }
     }
 }
-impl Dot<Vector<f32>> for f32 {
-    type Output = Vector<f32>;
+impl<T: Float> Dot<Vector<T>> for T {
+    type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
-    fn dot(self, rhs: Vector<f32>) -> Self::Output {
-        Vector {
-            x: self * rhs.x,
-            y: self * rhs.y,
-            z: self * rhs.z,
+    #[allow(unused_variables, unused_unsafe)]
+    fn dot(self, rhs: Vector<T>) -> Self::Output {
+        unsafe {
+            Vector {
+                x: self * rhs.x,
+                y: self * rhs.y,
+                z: self * rhs.z,
+            }
         }
     }
 }
-impl Dot<Vector<f64>> for f64 {
-    type Output = Vector<f64>;
-    #[inline]
-    #[allow(unused_variables)]
-    fn dot(self, rhs: Vector<f64>) -> Self::Output {
-        Vector {
-            x: self * rhs.x,
-            y: self * rhs.y,
-            z: self * rhs.z,
-        }
-    }
-}
+// impl Dot<Vector<f32>> for f32 {
+//     type Output = Vector<f32>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn dot(self, rhs: Vector<f32>) -> Self::Output {
+//         unsafe {
+//             Vector {
+//                 x: std::intrinsics::fmul_fast(self, rhs.x),
+//                 y: std::intrinsics::fmul_fast(self, rhs.y),
+//                 z: std::intrinsics::fmul_fast(self, rhs.z),
+//             }
+//         }
+//     }
+// }
+// impl Dot<Vector<f64>> for f64 {
+//     type Output = Vector<f64>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn dot(self, rhs: Vector<f64>) -> Self::Output {
+//         unsafe {
+//             Vector {
+//                 x: std::intrinsics::fmul_fast(self, rhs.x),
+//                 y: std::intrinsics::fmul_fast(self, rhs.y),
+//                 z: std::intrinsics::fmul_fast(self, rhs.z),
+//             }
+//         }
+//     }
+// }
 impl Dot<Bivector<f32>> for f32 {
     type Output = Bivector<f32>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Bivector<f32>) -> Self::Output {
-        Bivector {
-            xy: self * rhs.xy,
-            xz: self * rhs.xz,
-            yz: self * rhs.yz,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self, rhs.xy),
+                xz: std::intrinsics::fmul_fast(self, rhs.xz),
+                yz: std::intrinsics::fmul_fast(self, rhs.yz),
+            }
         }
     }
 }
 impl Dot<Bivector<f64>> for f64 {
     type Output = Bivector<f64>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Bivector<f64>) -> Self::Output {
-        Bivector {
-            xy: self * rhs.xy,
-            xz: self * rhs.xz,
-            yz: self * rhs.yz,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self, rhs.xy),
+                xz: std::intrinsics::fmul_fast(self, rhs.xz),
+                yz: std::intrinsics::fmul_fast(self, rhs.yz),
+            }
         }
     }
 }
 impl Dot<Trivector<f32>> for f32 {
     type Output = Trivector<f32>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Trivector<f32>) -> Self::Output {
-        Trivector {
-            xyz: self * rhs.xyz,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self, rhs.xyz),
+            }
         }
     }
 }
 impl Dot<Trivector<f64>> for f64 {
     type Output = Trivector<f64>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Trivector<f64>) -> Self::Output {
-        Trivector {
-            xyz: self * rhs.xyz,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self, rhs.xyz),
+            }
         }
     }
 }
@@ -3615,7 +3692,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.scalar_prod(rhs.0),
@@ -3639,7 +3716,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.scalar_prod(rhs.0),
@@ -3651,75 +3728,98 @@ where
 }
 impl<T> Dot<Zero> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> Dot<T> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: T) -> Self::Output {
-        Vector {
-            x: self.x * rhs,
-            y: self.y * rhs,
-            z: self.z * rhs,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fmul_fast(self.x, rhs),
+                y: std::intrinsics::fmul_fast(self.y, rhs),
+                z: std::intrinsics::fmul_fast(self.z, rhs),
+            }
         }
     }
 }
 impl<T> Dot<Vector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Vector<T>) -> Self::Output {
-        self.x * rhs.x + self.y * rhs.y + self.z * rhs.z
+        unsafe {
+            std::intrinsics::fadd_fast(
+                std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.x, rhs.x),
+                    std::intrinsics::fmul_fast(self.y, rhs.y),
+                ),
+                std::intrinsics::fmul_fast(self.z, rhs.z),
+            )
+        }
     }
 }
 impl<T> Dot<Bivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Bivector<T>) -> Self::Output {
-        Vector {
-            x: -(self.y * rhs.xy) + -(self.z * rhs.xz),
-            y: self.x * rhs.xy + -(self.z * rhs.yz),
-            z: self.x * rhs.xz + self.y * rhs.yz,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fadd_fast(
+                    -std::intrinsics::fmul_fast(self.y, rhs.xy),
+                    -std::intrinsics::fmul_fast(self.z, rhs.xz),
+                ),
+                y: std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.x, rhs.xy),
+                    -std::intrinsics::fmul_fast(self.z, rhs.yz),
+                ),
+                z: std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.x, rhs.xz),
+                    std::intrinsics::fmul_fast(self.y, rhs.yz),
+                ),
+            }
         }
     }
 }
 impl<T> Dot<Trivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Trivector<T>) -> Self::Output {
-        Bivector {
-            xy: self.z * rhs.xyz,
-            xz: -(self.y * rhs.xyz),
-            yz: self.x * rhs.xyz,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self.z, rhs.xyz),
+                xz: -std::intrinsics::fmul_fast(self.y, rhs.xyz),
+                yz: std::intrinsics::fmul_fast(self.x, rhs.xyz),
+            }
         }
     }
 }
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G1_1, G1_2, G2_0>
     Dot<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Vector<T>: ScalarProduct<G1Rhs, Output = G0_0>,
     Vector<T>: VectorProduct<G0Rhs, Output = G1_0>,
     Vector<T>: VectorProduct<G2Rhs, Output = G1_1>,
@@ -3732,7 +3832,7 @@ where
 {
     type Output = Multivector<G0_0, G1_2, G2_0, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.scalar_prod(rhs.1),
@@ -3744,75 +3844,98 @@ where
 }
 impl<T> Dot<Zero> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> Dot<T> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: T) -> Self::Output {
-        Bivector {
-            xy: self.xy * rhs,
-            xz: self.xz * rhs,
-            yz: self.yz * rhs,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self.xy, rhs),
+                xz: std::intrinsics::fmul_fast(self.xz, rhs),
+                yz: std::intrinsics::fmul_fast(self.yz, rhs),
+            }
         }
     }
 }
 impl<T> Dot<Vector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Vector<T>) -> Self::Output {
-        Vector {
-            x: self.xy * rhs.y + self.xz * rhs.z,
-            y: -(self.xy * rhs.x) + self.yz * rhs.z,
-            z: -(self.xz * rhs.x) + -(self.yz * rhs.y),
+        unsafe {
+            Vector {
+                x: std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.xy, rhs.y),
+                    std::intrinsics::fmul_fast(self.xz, rhs.z),
+                ),
+                y: std::intrinsics::fadd_fast(
+                    -std::intrinsics::fmul_fast(self.xy, rhs.x),
+                    std::intrinsics::fmul_fast(self.yz, rhs.z),
+                ),
+                z: std::intrinsics::fadd_fast(
+                    -std::intrinsics::fmul_fast(self.xz, rhs.x),
+                    -std::intrinsics::fmul_fast(self.yz, rhs.y),
+                ),
+            }
         }
     }
 }
 impl<T> Dot<Bivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Bivector<T>) -> Self::Output {
-        -(self.xy * rhs.xy) + -(self.xz * rhs.xz) + -(self.yz * rhs.yz)
+        unsafe {
+            std::intrinsics::fadd_fast(
+                std::intrinsics::fadd_fast(
+                    -std::intrinsics::fmul_fast(self.xy, rhs.xy),
+                    -std::intrinsics::fmul_fast(self.xz, rhs.xz),
+                ),
+                -std::intrinsics::fmul_fast(self.yz, rhs.yz),
+            )
+        }
     }
 }
 impl<T> Dot<Trivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Trivector<T>) -> Self::Output {
-        Vector {
-            x: -(self.yz * rhs.xyz),
-            y: self.xz * rhs.xyz,
-            z: -(self.xy * rhs.xyz),
+        unsafe {
+            Vector {
+                x: -std::intrinsics::fmul_fast(self.yz, rhs.xyz),
+                y: std::intrinsics::fmul_fast(self.xz, rhs.xyz),
+                z: -std::intrinsics::fmul_fast(self.xy, rhs.xyz),
+            }
         }
     }
 }
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G1_1, G1_2, G2_0>
     Dot<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Bivector<T>: ScalarProduct<G2Rhs, Output = G0_0>,
     Bivector<T>: VectorProduct<G1Rhs, Output = G1_0>,
     Bivector<T>: VectorProduct<G3Rhs, Output = G1_1>,
@@ -3825,7 +3948,7 @@ where
 {
     type Output = Multivector<G0_0, G1_2, G2_0, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.scalar_prod(rhs.2),
@@ -3837,73 +3960,79 @@ where
 }
 impl<T> Dot<Zero> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> Dot<T> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: T) -> Self::Output {
-        Trivector {
-            xyz: self.xyz * rhs,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self.xyz, rhs),
+            }
         }
     }
 }
 impl<T> Dot<Vector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Vector<T>) -> Self::Output {
-        Bivector {
-            xy: self.xyz * rhs.z,
-            xz: -(self.xyz * rhs.y),
-            yz: self.xyz * rhs.x,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self.xyz, rhs.z),
+                xz: -std::intrinsics::fmul_fast(self.xyz, rhs.y),
+                yz: std::intrinsics::fmul_fast(self.xyz, rhs.x),
+            }
         }
     }
 }
 impl<T> Dot<Bivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Bivector<T>) -> Self::Output {
-        Vector {
-            x: -(self.xyz * rhs.yz),
-            y: self.xyz * rhs.xz,
-            z: -(self.xyz * rhs.xy),
+        unsafe {
+            Vector {
+                x: -std::intrinsics::fmul_fast(self.xyz, rhs.yz),
+                y: std::intrinsics::fmul_fast(self.xyz, rhs.xz),
+                z: -std::intrinsics::fmul_fast(self.xyz, rhs.xy),
+            }
         }
     }
 }
 impl<T> Dot<Trivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Trivector<T>) -> Self::Output {
-        -(self.xyz * rhs.xyz)
+        unsafe { -std::intrinsics::fmul_fast(self.xyz, rhs.xyz) }
     }
 }
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G2_0, G3_0>
     Dot<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Trivector<T>: ScalarProduct<G3Rhs, Output = G0_0>,
     Trivector<T>: VectorProduct<G2Rhs, Output = G1_0>,
     Trivector<T>: BivectorProduct<G1Rhs, Output = G2_0>,
@@ -3915,7 +4044,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.scalar_prod(rhs.3),
@@ -3934,7 +4063,7 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -3942,7 +4071,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G2_0, G3_0> Dot<T>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G0Lhs: ScalarProduct<T, Output = G0_0>,
     G1Lhs: VectorProduct<T, Output = G1_0>,
     G2Lhs: BivectorProduct<T, Output = G2_0>,
@@ -3954,7 +4083,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: T) -> Self::Output {
         Multivector(
             self.0.scalar_prod(rhs),
@@ -3967,7 +4096,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G1_1, G1_2, G2_0> Dot<Vector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G1Lhs: ScalarProduct<Vector<T>, Output = G0_0>,
     G0Lhs: VectorProduct<Vector<T>, Output = G1_0>,
     G2Lhs: VectorProduct<Vector<T>, Output = G1_1>,
@@ -3980,7 +4109,7 @@ where
 {
     type Output = Multivector<G0_0, G1_2, G2_0, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Vector<T>) -> Self::Output {
         Multivector(
             self.1.scalar_prod(rhs),
@@ -3993,7 +4122,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G1_1, G1_2, G2_0> Dot<Bivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G2Lhs: ScalarProduct<Bivector<T>, Output = G0_0>,
     G1Lhs: VectorProduct<Bivector<T>, Output = G1_0>,
     G3Lhs: VectorProduct<Bivector<T>, Output = G1_1>,
@@ -4006,7 +4135,7 @@ where
 {
     type Output = Multivector<G0_0, G1_2, G2_0, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(
             self.2.scalar_prod(rhs),
@@ -4019,7 +4148,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G2_0, G3_0> Dot<Trivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G3Lhs: ScalarProduct<Trivector<T>, Output = G0_0>,
     G2Lhs: VectorProduct<Trivector<T>, Output = G1_0>,
     G1Lhs: BivectorProduct<Trivector<T>, Output = G2_0>,
@@ -4031,7 +4160,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Trivector<T>) -> Self::Output {
         Multivector(
             self.3.scalar_prod(rhs),
@@ -4119,7 +4248,7 @@ where
 {
     type Output = Multivector<G0_6, G1_10, G2_6, G3_2>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn dot(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.0.scalar_prod(rhs.0)
@@ -4143,51 +4272,51 @@ where
 impl Wedge<Zero> for Zero {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> Wedge<T> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> Wedge<Vector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> Wedge<Bivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> Wedge<Trivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -4201,7 +4330,7 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Zero
     }
@@ -4209,7 +4338,7 @@ where
 impl Wedge<Zero> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -4217,7 +4346,7 @@ impl Wedge<Zero> for f32 {
 impl Wedge<Zero> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -4225,84 +4354,96 @@ impl Wedge<Zero> for f64 {
 impl Wedge<f32> for f32 {
     type Output = f32;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: f32) -> Self::Output {
-        self * rhs
+        unsafe { std::intrinsics::fmul_fast(self, rhs) }
     }
 }
 impl Wedge<f64> for f64 {
     type Output = f64;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: f64) -> Self::Output {
-        self * rhs
+        unsafe { std::intrinsics::fmul_fast(self, rhs) }
     }
 }
 impl Wedge<Vector<f32>> for f32 {
     type Output = Vector<f32>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Vector<f32>) -> Self::Output {
-        Vector {
-            x: self * rhs.x,
-            y: self * rhs.y,
-            z: self * rhs.z,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fmul_fast(self, rhs.x),
+                y: std::intrinsics::fmul_fast(self, rhs.y),
+                z: std::intrinsics::fmul_fast(self, rhs.z),
+            }
         }
     }
 }
 impl Wedge<Vector<f64>> for f64 {
     type Output = Vector<f64>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Vector<f64>) -> Self::Output {
-        Vector {
-            x: self * rhs.x,
-            y: self * rhs.y,
-            z: self * rhs.z,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fmul_fast(self, rhs.x),
+                y: std::intrinsics::fmul_fast(self, rhs.y),
+                z: std::intrinsics::fmul_fast(self, rhs.z),
+            }
         }
     }
 }
 impl Wedge<Bivector<f32>> for f32 {
     type Output = Bivector<f32>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Bivector<f32>) -> Self::Output {
-        Bivector {
-            xy: self * rhs.xy,
-            xz: self * rhs.xz,
-            yz: self * rhs.yz,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self, rhs.xy),
+                xz: std::intrinsics::fmul_fast(self, rhs.xz),
+                yz: std::intrinsics::fmul_fast(self, rhs.yz),
+            }
         }
     }
 }
 impl Wedge<Bivector<f64>> for f64 {
     type Output = Bivector<f64>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Bivector<f64>) -> Self::Output {
-        Bivector {
-            xy: self * rhs.xy,
-            xz: self * rhs.xz,
-            yz: self * rhs.yz,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self, rhs.xy),
+                xz: std::intrinsics::fmul_fast(self, rhs.xz),
+                yz: std::intrinsics::fmul_fast(self, rhs.yz),
+            }
         }
     }
 }
 impl Wedge<Trivector<f32>> for f32 {
     type Output = Trivector<f32>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Trivector<f32>) -> Self::Output {
-        Trivector {
-            xyz: self * rhs.xyz,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self, rhs.xyz),
+            }
         }
     }
 }
 impl Wedge<Trivector<f64>> for f64 {
     type Output = Trivector<f64>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Trivector<f64>) -> Self::Output {
-        Trivector {
-            xyz: self * rhs.xyz,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self, rhs.xyz),
+            }
         }
     }
 }
@@ -4320,7 +4461,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.scalar_prod(rhs.0),
@@ -4344,7 +4485,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.scalar_prod(rhs.0),
@@ -4356,65 +4497,86 @@ where
 }
 impl<T> Wedge<Zero> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> Wedge<T> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: T) -> Self::Output {
-        Vector {
-            x: self.x * rhs,
-            y: self.y * rhs,
-            z: self.z * rhs,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fmul_fast(self.x, rhs),
+                y: std::intrinsics::fmul_fast(self.y, rhs),
+                z: std::intrinsics::fmul_fast(self.z, rhs),
+            }
         }
     }
 }
 impl<T> Wedge<Vector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Vector<T>) -> Self::Output {
-        Bivector {
-            xy: self.x * rhs.y + -(self.y * rhs.x),
-            xz: self.x * rhs.z + -(self.z * rhs.x),
-            yz: self.y * rhs.z + -(self.z * rhs.y),
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.x, rhs.y),
+                    -std::intrinsics::fmul_fast(self.y, rhs.x),
+                ),
+                xz: std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.x, rhs.z),
+                    -std::intrinsics::fmul_fast(self.z, rhs.x),
+                ),
+                yz: std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.y, rhs.z),
+                    -std::intrinsics::fmul_fast(self.z, rhs.y),
+                ),
+            }
         }
     }
 }
 impl<T> Wedge<Bivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Bivector<T>) -> Self::Output {
-        Trivector {
-            xyz: self.x * rhs.yz + -(self.y * rhs.xz) + self.z * rhs.xy,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fadd_fast(
+                    std::intrinsics::fadd_fast(
+                        std::intrinsics::fmul_fast(self.x, rhs.yz),
+                        -std::intrinsics::fmul_fast(self.y, rhs.xz),
+                    ),
+                    std::intrinsics::fmul_fast(self.z, rhs.xy),
+                ),
+            }
         }
     }
 }
 impl<T> Wedge<Trivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -4422,7 +4584,7 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G1_0, G2_0, G3_0> Wedge<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>>
     for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Vector<T>: VectorProduct<G0Rhs, Output = G1_0>,
     Vector<T>: BivectorProduct<G1Rhs, Output = G2_0>,
     Vector<T>: TrivectorProduct<G2Rhs, Output = G3_0>,
@@ -4433,7 +4595,7 @@ where
 {
     type Output = Multivector<Zero, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             Zero,
@@ -4445,61 +4607,71 @@ where
 }
 impl<T> Wedge<Zero> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> Wedge<T> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: T) -> Self::Output {
-        Bivector {
-            xy: self.xy * rhs,
-            xz: self.xz * rhs,
-            yz: self.yz * rhs,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self.xy, rhs),
+                xz: std::intrinsics::fmul_fast(self.xz, rhs),
+                yz: std::intrinsics::fmul_fast(self.yz, rhs),
+            }
         }
     }
 }
 impl<T> Wedge<Vector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Vector<T>) -> Self::Output {
-        Trivector {
-            xyz: self.xy * rhs.z + -(self.xz * rhs.y) + self.yz * rhs.x,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fadd_fast(
+                    std::intrinsics::fadd_fast(
+                        std::intrinsics::fmul_fast(self.xy, rhs.z),
+                        -std::intrinsics::fmul_fast(self.xz, rhs.y),
+                    ),
+                    std::intrinsics::fmul_fast(self.yz, rhs.x),
+                ),
+            }
         }
     }
 }
 impl<T> Wedge<Bivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> Wedge<Trivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -4507,7 +4679,7 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G2_0, G3_0> Wedge<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>>
     for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Bivector<T>: BivectorProduct<G0Rhs, Output = G2_0>,
     Bivector<T>: TrivectorProduct<G1Rhs, Output = G3_0>,
     G0Rhs: Copy,
@@ -4517,7 +4689,7 @@ where
 {
     type Output = Multivector<Zero, Zero, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             Zero,
@@ -4529,57 +4701,59 @@ where
 }
 impl<T> Wedge<Zero> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> Wedge<T> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: T) -> Self::Output {
-        Trivector {
-            xyz: self.xyz * rhs,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self.xyz, rhs),
+            }
         }
     }
 }
 impl<T> Wedge<Vector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> Wedge<Bivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> Wedge<Trivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -4587,7 +4761,7 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G3_0> Wedge<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>>
     for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Trivector<T>: TrivectorProduct<G0Rhs, Output = G3_0>,
     G0Rhs: Copy,
     G1Rhs: Copy,
@@ -4596,7 +4770,7 @@ where
 {
     type Output = G3_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.trivector_prod(rhs.0)
     }
@@ -4610,7 +4784,7 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -4618,7 +4792,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G2_0, G3_0> Wedge<T>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G0Lhs: ScalarProduct<T, Output = G0_0>,
     G1Lhs: VectorProduct<T, Output = G1_0>,
     G2Lhs: BivectorProduct<T, Output = G2_0>,
@@ -4630,7 +4804,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: T) -> Self::Output {
         Multivector(
             self.0.scalar_prod(rhs),
@@ -4643,7 +4817,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G1_0, G2_0, G3_0> Wedge<Vector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: Copy,
     G0Lhs: VectorProduct<Vector<T>, Output = G1_0>,
     G1Lhs: BivectorProduct<Vector<T>, Output = G2_0>,
     G2Lhs: TrivectorProduct<Vector<T>, Output = G3_0>,
@@ -4654,7 +4828,7 @@ where
 {
     type Output = Multivector<Zero, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Vector<T>) -> Self::Output {
         Multivector(
             Zero,
@@ -4667,7 +4841,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G2_0, G3_0> Wedge<Bivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G0Lhs: BivectorProduct<Bivector<T>, Output = G2_0>,
     G1Lhs: TrivectorProduct<Bivector<T>, Output = G3_0>,
     G0Lhs: Copy,
@@ -4677,7 +4851,7 @@ where
 {
     type Output = Multivector<Zero, Zero, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(
             Zero,
@@ -4690,7 +4864,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G3_0> Wedge<Trivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G0Lhs: TrivectorProduct<Trivector<T>, Output = G3_0>,
     G0Lhs: Copy,
     G1Lhs: Copy,
@@ -4699,7 +4873,7 @@ where
 {
     type Output = G3_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Trivector<T>) -> Self::Output {
         self.0.trivector_prod(rhs)
     }
@@ -4758,7 +4932,7 @@ where
 {
     type Output = Multivector<G0_0, G1_2, G2_4, G3_6>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn wedge(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.0.scalar_prod(rhs.0),
@@ -4774,51 +4948,51 @@ where
 impl LeftContraction<Zero> for Zero {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> LeftContraction<T> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> LeftContraction<Vector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> LeftContraction<Bivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> LeftContraction<Trivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -4832,7 +5006,7 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Zero
     }
@@ -4840,7 +5014,7 @@ where
 impl LeftContraction<Zero> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -4848,7 +5022,7 @@ impl LeftContraction<Zero> for f32 {
 impl LeftContraction<Zero> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -4856,84 +5030,96 @@ impl LeftContraction<Zero> for f64 {
 impl LeftContraction<f32> for f32 {
     type Output = f32;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: f32) -> Self::Output {
-        self * rhs
+        unsafe { std::intrinsics::fmul_fast(self, rhs) }
     }
 }
 impl LeftContraction<f64> for f64 {
     type Output = f64;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: f64) -> Self::Output {
-        self * rhs
+        unsafe { std::intrinsics::fmul_fast(self, rhs) }
     }
 }
 impl LeftContraction<Vector<f32>> for f32 {
     type Output = Vector<f32>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Vector<f32>) -> Self::Output {
-        Vector {
-            x: self * rhs.x,
-            y: self * rhs.y,
-            z: self * rhs.z,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fmul_fast(self, rhs.x),
+                y: std::intrinsics::fmul_fast(self, rhs.y),
+                z: std::intrinsics::fmul_fast(self, rhs.z),
+            }
         }
     }
 }
 impl LeftContraction<Vector<f64>> for f64 {
     type Output = Vector<f64>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Vector<f64>) -> Self::Output {
-        Vector {
-            x: self * rhs.x,
-            y: self * rhs.y,
-            z: self * rhs.z,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fmul_fast(self, rhs.x),
+                y: std::intrinsics::fmul_fast(self, rhs.y),
+                z: std::intrinsics::fmul_fast(self, rhs.z),
+            }
         }
     }
 }
 impl LeftContraction<Bivector<f32>> for f32 {
     type Output = Bivector<f32>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Bivector<f32>) -> Self::Output {
-        Bivector {
-            xy: self * rhs.xy,
-            xz: self * rhs.xz,
-            yz: self * rhs.yz,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self, rhs.xy),
+                xz: std::intrinsics::fmul_fast(self, rhs.xz),
+                yz: std::intrinsics::fmul_fast(self, rhs.yz),
+            }
         }
     }
 }
 impl LeftContraction<Bivector<f64>> for f64 {
     type Output = Bivector<f64>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Bivector<f64>) -> Self::Output {
-        Bivector {
-            xy: self * rhs.xy,
-            xz: self * rhs.xz,
-            yz: self * rhs.yz,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self, rhs.xy),
+                xz: std::intrinsics::fmul_fast(self, rhs.xz),
+                yz: std::intrinsics::fmul_fast(self, rhs.yz),
+            }
         }
     }
 }
 impl LeftContraction<Trivector<f32>> for f32 {
     type Output = Trivector<f32>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Trivector<f32>) -> Self::Output {
-        Trivector {
-            xyz: self * rhs.xyz,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self, rhs.xyz),
+            }
         }
     }
 }
 impl LeftContraction<Trivector<f64>> for f64 {
     type Output = Trivector<f64>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Trivector<f64>) -> Self::Output {
-        Trivector {
-            xyz: self * rhs.xyz,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self, rhs.xyz),
+            }
         }
     }
 }
@@ -4951,7 +5137,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.left_contraction(rhs.0),
@@ -4975,7 +5161,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.left_contraction(rhs.0),
@@ -4987,71 +5173,92 @@ where
 }
 impl<T> LeftContraction<Zero> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> LeftContraction<T> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> LeftContraction<Vector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Vector<T>) -> Self::Output {
-        self.x * rhs.x + self.y * rhs.y + self.z * rhs.z
+        unsafe {
+            std::intrinsics::fadd_fast(
+                std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.x, rhs.x),
+                    std::intrinsics::fmul_fast(self.y, rhs.y),
+                ),
+                std::intrinsics::fmul_fast(self.z, rhs.z),
+            )
+        }
     }
 }
 impl<T> LeftContraction<Bivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Bivector<T>) -> Self::Output {
-        Vector {
-            x: -(self.y * rhs.xy) + -(self.z * rhs.xz),
-            y: self.x * rhs.xy + -(self.z * rhs.yz),
-            z: self.x * rhs.xz + self.y * rhs.yz,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fadd_fast(
+                    -std::intrinsics::fmul_fast(self.y, rhs.xy),
+                    -std::intrinsics::fmul_fast(self.z, rhs.xz),
+                ),
+                y: std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.x, rhs.xy),
+                    -std::intrinsics::fmul_fast(self.z, rhs.yz),
+                ),
+                z: std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.x, rhs.xz),
+                    std::intrinsics::fmul_fast(self.y, rhs.yz),
+                ),
+            }
         }
     }
 }
 impl<T> LeftContraction<Trivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Trivector<T>) -> Self::Output {
-        Bivector {
-            xy: self.z * rhs.xyz,
-            xz: -(self.y * rhs.xyz),
-            yz: self.x * rhs.xyz,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self.z, rhs.xyz),
+                xz: -std::intrinsics::fmul_fast(self.y, rhs.xyz),
+                yz: std::intrinsics::fmul_fast(self.x, rhs.xyz),
+            }
         }
     }
 }
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G2_0>
     LeftContraction<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Vector<T>: LeftContraction<G1Rhs, Output = G0_0>,
     Vector<T>: LeftContraction<G2Rhs, Output = G1_0>,
     Vector<T>: LeftContraction<G3Rhs, Output = G2_0>,
@@ -5062,7 +5269,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.left_contraction(rhs.1),
@@ -5074,67 +5281,77 @@ where
 }
 impl<T> LeftContraction<Zero> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> LeftContraction<T> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> LeftContraction<Vector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> LeftContraction<Bivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Bivector<T>) -> Self::Output {
-        -(self.xy * rhs.xy) + -(self.xz * rhs.xz) + -(self.yz * rhs.yz)
+        unsafe {
+            std::intrinsics::fadd_fast(
+                std::intrinsics::fadd_fast(
+                    -std::intrinsics::fmul_fast(self.xy, rhs.xy),
+                    -std::intrinsics::fmul_fast(self.xz, rhs.xz),
+                ),
+                -std::intrinsics::fmul_fast(self.yz, rhs.yz),
+            )
+        }
     }
 }
 impl<T> LeftContraction<Trivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Trivector<T>) -> Self::Output {
-        Vector {
-            x: -(self.yz * rhs.xyz),
-            y: self.xz * rhs.xyz,
-            z: -(self.xy * rhs.xyz),
+        unsafe {
+            Vector {
+                x: -std::intrinsics::fmul_fast(self.yz, rhs.xyz),
+                y: std::intrinsics::fmul_fast(self.xz, rhs.xyz),
+                z: -std::intrinsics::fmul_fast(self.xy, rhs.xyz),
+            }
         }
     }
 }
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0>
     LeftContraction<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Bivector<T>: LeftContraction<G2Rhs, Output = G0_0>,
     Bivector<T>: LeftContraction<G3Rhs, Output = G1_0>,
     G0Rhs: Copy,
@@ -5144,7 +5361,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, Zero, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.left_contraction(rhs.2),
@@ -5156,63 +5373,63 @@ where
 }
 impl<T> LeftContraction<Zero> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> LeftContraction<T> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> LeftContraction<Vector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> LeftContraction<Bivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> LeftContraction<Trivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Trivector<T>) -> Self::Output {
-        -(self.xyz * rhs.xyz)
+        unsafe { -std::intrinsics::fmul_fast(self.xyz, rhs.xyz) }
     }
 }
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0> LeftContraction<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>>
     for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Trivector<T>: LeftContraction<G3Rhs, Output = G0_0>,
     G0Rhs: Copy,
     G1Rhs: Copy,
@@ -5221,7 +5438,7 @@ where
 {
     type Output = G0_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.left_contraction(rhs.3)
     }
@@ -5235,7 +5452,7 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -5243,7 +5460,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0> LeftContraction<T>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G0Lhs: LeftContraction<T, Output = G0_0>,
     G0Lhs: Copy,
     G1Lhs: Copy,
@@ -5252,7 +5469,7 @@ where
 {
     type Output = G0_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: T) -> Self::Output {
         self.0.left_contraction(rhs)
     }
@@ -5260,7 +5477,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0> LeftContraction<Vector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G1Lhs: LeftContraction<Vector<T>, Output = G0_0>,
     G0Lhs: LeftContraction<Vector<T>, Output = G1_0>,
     G0Lhs: Copy,
@@ -5270,7 +5487,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, Zero, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Vector<T>) -> Self::Output {
         Multivector(
             self.1.left_contraction(rhs),
@@ -5283,7 +5500,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G2_0> LeftContraction<Bivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G2Lhs: LeftContraction<Bivector<T>, Output = G0_0>,
     G1Lhs: LeftContraction<Bivector<T>, Output = G1_0>,
     G0Lhs: LeftContraction<Bivector<T>, Output = G2_0>,
@@ -5294,7 +5511,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(
             self.2.left_contraction(rhs),
@@ -5307,7 +5524,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G2_0, G3_0> LeftContraction<Trivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G3Lhs: LeftContraction<Trivector<T>, Output = G0_0>,
     G2Lhs: LeftContraction<Trivector<T>, Output = G1_0>,
     G1Lhs: LeftContraction<Trivector<T>, Output = G2_0>,
@@ -5319,7 +5536,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Trivector<T>) -> Self::Output {
         Multivector(
             self.3.left_contraction(rhs),
@@ -5384,7 +5601,7 @@ where
 {
     type Output = Multivector<G0_6, G1_4, G2_2, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn left_contraction(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.0.left_contraction(rhs.0)
@@ -5402,51 +5619,51 @@ where
 impl RightContraction<Zero> for Zero {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> RightContraction<T> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> RightContraction<Vector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> RightContraction<Bivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> RightContraction<Trivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -5460,7 +5677,7 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Zero
     }
@@ -5468,7 +5685,7 @@ where
 impl RightContraction<Zero> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -5476,7 +5693,7 @@ impl RightContraction<Zero> for f32 {
 impl RightContraction<Zero> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -5484,23 +5701,23 @@ impl RightContraction<Zero> for f64 {
 impl RightContraction<f32> for f32 {
     type Output = f32;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: f32) -> Self::Output {
-        self * rhs
+        unsafe { std::intrinsics::fmul_fast(self, rhs) }
     }
 }
 impl RightContraction<f64> for f64 {
     type Output = f64;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: f64) -> Self::Output {
-        self * rhs
+        unsafe { std::intrinsics::fmul_fast(self, rhs) }
     }
 }
 impl RightContraction<Vector<f32>> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Vector<f32>) -> Self::Output {
         Zero
     }
@@ -5508,7 +5725,7 @@ impl RightContraction<Vector<f32>> for f32 {
 impl RightContraction<Vector<f64>> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Vector<f64>) -> Self::Output {
         Zero
     }
@@ -5516,7 +5733,7 @@ impl RightContraction<Vector<f64>> for f64 {
 impl RightContraction<Bivector<f32>> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Bivector<f32>) -> Self::Output {
         Zero
     }
@@ -5524,7 +5741,7 @@ impl RightContraction<Bivector<f32>> for f32 {
 impl RightContraction<Bivector<f64>> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Bivector<f64>) -> Self::Output {
         Zero
     }
@@ -5532,7 +5749,7 @@ impl RightContraction<Bivector<f64>> for f64 {
 impl RightContraction<Trivector<f32>> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Trivector<f32>) -> Self::Output {
         Zero
     }
@@ -5540,7 +5757,7 @@ impl RightContraction<Trivector<f32>> for f32 {
 impl RightContraction<Trivector<f64>> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Trivector<f64>) -> Self::Output {
         Zero
     }
@@ -5556,7 +5773,7 @@ where
 {
     type Output = G0_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.right_contraction(rhs.0)
     }
@@ -5572,66 +5789,76 @@ where
 {
     type Output = G0_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.right_contraction(rhs.0)
     }
 }
 impl<T> RightContraction<Zero> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> RightContraction<T> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: T) -> Self::Output {
-        Vector {
-            x: self.x * rhs,
-            y: self.y * rhs,
-            z: self.z * rhs,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fmul_fast(self.x, rhs),
+                y: std::intrinsics::fmul_fast(self.y, rhs),
+                z: std::intrinsics::fmul_fast(self.z, rhs),
+            }
         }
     }
 }
 impl<T> RightContraction<Vector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Vector<T>) -> Self::Output {
-        self.x * rhs.x + self.y * rhs.y + self.z * rhs.z
+        unsafe {
+            std::intrinsics::fadd_fast(
+                std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.x, rhs.x),
+                    std::intrinsics::fmul_fast(self.y, rhs.y),
+                ),
+                std::intrinsics::fmul_fast(self.z, rhs.z),
+            )
+        }
     }
 }
 impl<T> RightContraction<Bivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> RightContraction<Trivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -5639,7 +5866,7 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0>
     RightContraction<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Vector<T>: RightContraction<G1Rhs, Output = G0_0>,
     Vector<T>: RightContraction<G0Rhs, Output = G1_0>,
     G0Rhs: Copy,
@@ -5649,7 +5876,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, Zero, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.right_contraction(rhs.1),
@@ -5661,63 +5888,84 @@ where
 }
 impl<T> RightContraction<Zero> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> RightContraction<T> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: T) -> Self::Output {
-        Bivector {
-            xy: self.xy * rhs,
-            xz: self.xz * rhs,
-            yz: self.yz * rhs,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self.xy, rhs),
+                xz: std::intrinsics::fmul_fast(self.xz, rhs),
+                yz: std::intrinsics::fmul_fast(self.yz, rhs),
+            }
         }
     }
 }
 impl<T> RightContraction<Vector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Vector<T>) -> Self::Output {
-        Vector {
-            x: self.xy * rhs.y + self.xz * rhs.z,
-            y: -(self.xy * rhs.x) + self.yz * rhs.z,
-            z: -(self.xz * rhs.x) + -(self.yz * rhs.y),
+        unsafe {
+            Vector {
+                x: std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.xy, rhs.y),
+                    std::intrinsics::fmul_fast(self.xz, rhs.z),
+                ),
+                y: std::intrinsics::fadd_fast(
+                    -std::intrinsics::fmul_fast(self.xy, rhs.x),
+                    std::intrinsics::fmul_fast(self.yz, rhs.z),
+                ),
+                z: std::intrinsics::fadd_fast(
+                    -std::intrinsics::fmul_fast(self.xz, rhs.x),
+                    -std::intrinsics::fmul_fast(self.yz, rhs.y),
+                ),
+            }
         }
     }
 }
 impl<T> RightContraction<Bivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Bivector<T>) -> Self::Output {
-        -(self.xy * rhs.xy) + -(self.xz * rhs.xz) + -(self.yz * rhs.yz)
+        unsafe {
+            std::intrinsics::fadd_fast(
+                std::intrinsics::fadd_fast(
+                    -std::intrinsics::fmul_fast(self.xy, rhs.xy),
+                    -std::intrinsics::fmul_fast(self.xz, rhs.xz),
+                ),
+                -std::intrinsics::fmul_fast(self.yz, rhs.yz),
+            )
+        }
     }
 }
 impl<T> RightContraction<Trivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -5725,7 +5973,7 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G2_0>
     RightContraction<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Bivector<T>: RightContraction<G2Rhs, Output = G0_0>,
     Bivector<T>: RightContraction<G1Rhs, Output = G1_0>,
     Bivector<T>: RightContraction<G0Rhs, Output = G2_0>,
@@ -5736,7 +5984,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.right_contraction(rhs.2),
@@ -5748,73 +5996,79 @@ where
 }
 impl<T> RightContraction<Zero> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> RightContraction<T> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: T) -> Self::Output {
-        Trivector {
-            xyz: self.xyz * rhs,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self.xyz, rhs),
+            }
         }
     }
 }
 impl<T> RightContraction<Vector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Vector<T>) -> Self::Output {
-        Bivector {
-            xy: self.xyz * rhs.z,
-            xz: -(self.xyz * rhs.y),
-            yz: self.xyz * rhs.x,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self.xyz, rhs.z),
+                xz: -std::intrinsics::fmul_fast(self.xyz, rhs.y),
+                yz: std::intrinsics::fmul_fast(self.xyz, rhs.x),
+            }
         }
     }
 }
 impl<T> RightContraction<Bivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Bivector<T>) -> Self::Output {
-        Vector {
-            x: -(self.xyz * rhs.yz),
-            y: self.xyz * rhs.xz,
-            z: -(self.xyz * rhs.xy),
+        unsafe {
+            Vector {
+                x: -std::intrinsics::fmul_fast(self.xyz, rhs.yz),
+                y: std::intrinsics::fmul_fast(self.xyz, rhs.xz),
+                z: -std::intrinsics::fmul_fast(self.xyz, rhs.xy),
+            }
         }
     }
 }
 impl<T> RightContraction<Trivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Trivector<T>) -> Self::Output {
-        -(self.xyz * rhs.xyz)
+        unsafe { -std::intrinsics::fmul_fast(self.xyz, rhs.xyz) }
     }
 }
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0, G1_0, G2_0, G3_0>
     RightContraction<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Trivector<T>: RightContraction<G3Rhs, Output = G0_0>,
     Trivector<T>: RightContraction<G2Rhs, Output = G1_0>,
     Trivector<T>: RightContraction<G1Rhs, Output = G2_0>,
@@ -5826,7 +6080,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.right_contraction(rhs.3),
@@ -5845,7 +6099,7 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -5853,7 +6107,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G2_0, G3_0> RightContraction<T>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G0Lhs: RightContraction<T, Output = G0_0>,
     G1Lhs: RightContraction<T, Output = G1_0>,
     G2Lhs: RightContraction<T, Output = G2_0>,
@@ -5865,7 +6119,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: T) -> Self::Output {
         Multivector(
             self.0.right_contraction(rhs),
@@ -5878,7 +6132,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G2_0> RightContraction<Vector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G1Lhs: RightContraction<Vector<T>, Output = G0_0>,
     G2Lhs: RightContraction<Vector<T>, Output = G1_0>,
     G3Lhs: RightContraction<Vector<T>, Output = G2_0>,
@@ -5889,7 +6143,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Vector<T>) -> Self::Output {
         Multivector(
             self.1.right_contraction(rhs),
@@ -5902,7 +6156,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0> RightContraction<Bivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G2Lhs: RightContraction<Bivector<T>, Output = G0_0>,
     G3Lhs: RightContraction<Bivector<T>, Output = G1_0>,
     G0Lhs: Copy,
@@ -5912,7 +6166,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, Zero, Zero>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Bivector<T>) -> Self::Output {
         Multivector(
             self.2.right_contraction(rhs),
@@ -5925,7 +6179,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0> RightContraction<Trivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G3Lhs: RightContraction<Trivector<T>, Output = G0_0>,
     G0Lhs: Copy,
     G1Lhs: Copy,
@@ -5934,7 +6188,7 @@ where
 {
     type Output = G0_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Trivector<T>) -> Self::Output {
         self.3.right_contraction(rhs)
     }
@@ -5994,7 +6248,7 @@ where
 {
     type Output = Multivector<G0_6, G1_4, G2_2, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn right_contraction(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Multivector(
             self.0.right_contraction(rhs.0)
@@ -6011,62 +6265,68 @@ where
 }
 impl<T> std::ops::Div<T> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn div(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> std::ops::Div<T> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn div(self, rhs: T) -> Self::Output {
-        Vector {
-            x: self.x / rhs,
-            y: self.y / rhs,
-            z: self.z / rhs,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fdiv_fast(self.x, rhs),
+                y: std::intrinsics::fdiv_fast(self.y, rhs),
+                z: std::intrinsics::fdiv_fast(self.z, rhs),
+            }
         }
     }
 }
 impl<T> std::ops::Div<T> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn div(self, rhs: T) -> Self::Output {
-        Bivector {
-            xy: self.xy / rhs,
-            xz: self.xz / rhs,
-            yz: self.yz / rhs,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fdiv_fast(self.xy, rhs),
+                xz: std::intrinsics::fdiv_fast(self.xz, rhs),
+                yz: std::intrinsics::fdiv_fast(self.yz, rhs),
+            }
         }
     }
 }
 impl<T> std::ops::Div<T> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn div(self, rhs: T) -> Self::Output {
-        Trivector {
-            xyz: self.xyz / rhs,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fdiv_fast(self.xyz, rhs),
+            }
         }
     }
 }
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0, G1_0, G2_0, G3_0> std::ops::Div<T>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G0Lhs: std::ops::Div<T, Output = G0_0>,
     G1Lhs: std::ops::Div<T, Output = G1_0>,
     G2Lhs: std::ops::Div<T, Output = G2_0>,
@@ -6078,7 +6338,7 @@ where
 {
     type Output = Multivector<G0_0, G1_0, G2_0, G3_0>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn div(self, rhs: T) -> Self::Output {
         Multivector(
             self.0.div(rhs),
@@ -6091,51 +6351,51 @@ where
 impl ScalarProduct<Zero> for Zero {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> ScalarProduct<T> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> ScalarProduct<Vector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> ScalarProduct<Bivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> ScalarProduct<Trivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -6149,7 +6409,7 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Zero
     }
@@ -6157,7 +6417,7 @@ where
 impl ScalarProduct<Zero> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -6165,7 +6425,7 @@ impl ScalarProduct<Zero> for f32 {
 impl ScalarProduct<Zero> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -6173,23 +6433,23 @@ impl ScalarProduct<Zero> for f64 {
 impl ScalarProduct<f32> for f32 {
     type Output = f32;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: f32) -> Self::Output {
-        self * rhs
+        unsafe { std::intrinsics::fmul_fast(self, rhs) }
     }
 }
 impl ScalarProduct<f64> for f64 {
     type Output = f64;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: f64) -> Self::Output {
-        self * rhs
+        unsafe { std::intrinsics::fmul_fast(self, rhs) }
     }
 }
 impl ScalarProduct<Vector<f32>> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Vector<f32>) -> Self::Output {
         Zero
     }
@@ -6197,7 +6457,7 @@ impl ScalarProduct<Vector<f32>> for f32 {
 impl ScalarProduct<Vector<f64>> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Vector<f64>) -> Self::Output {
         Zero
     }
@@ -6205,7 +6465,7 @@ impl ScalarProduct<Vector<f64>> for f64 {
 impl ScalarProduct<Bivector<f32>> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Bivector<f32>) -> Self::Output {
         Zero
     }
@@ -6213,7 +6473,7 @@ impl ScalarProduct<Bivector<f32>> for f32 {
 impl ScalarProduct<Bivector<f64>> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Bivector<f64>) -> Self::Output {
         Zero
     }
@@ -6221,7 +6481,7 @@ impl ScalarProduct<Bivector<f64>> for f64 {
 impl ScalarProduct<Trivector<f32>> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Trivector<f32>) -> Self::Output {
         Zero
     }
@@ -6229,7 +6489,7 @@ impl ScalarProduct<Trivector<f32>> for f32 {
 impl ScalarProduct<Trivector<f64>> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Trivector<f64>) -> Self::Output {
         Zero
     }
@@ -6245,7 +6505,7 @@ where
 {
     type Output = G0_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.scalar_prod(rhs.0)
     }
@@ -6261,62 +6521,70 @@ where
 {
     type Output = G0_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.scalar_prod(rhs.0)
     }
 }
 impl<T> ScalarProduct<Zero> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> ScalarProduct<T> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> ScalarProduct<Vector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Vector<T>) -> Self::Output {
-        self.x * rhs.x + self.y * rhs.y + self.z * rhs.z
+        unsafe {
+            std::intrinsics::fadd_fast(
+                std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.x, rhs.x),
+                    std::intrinsics::fmul_fast(self.y, rhs.y),
+                ),
+                std::intrinsics::fmul_fast(self.z, rhs.z),
+            )
+        }
     }
 }
 impl<T> ScalarProduct<Bivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> ScalarProduct<Trivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -6324,7 +6592,7 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0> ScalarProduct<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>>
     for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Vector<T>: ScalarProduct<G1Rhs, Output = G0_0>,
     G0Rhs: Copy,
     G1Rhs: Copy,
@@ -6333,62 +6601,70 @@ where
 {
     type Output = G0_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.scalar_prod(rhs.1)
     }
 }
 impl<T> ScalarProduct<Zero> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> ScalarProduct<T> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> ScalarProduct<Vector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> ScalarProduct<Bivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Bivector<T>) -> Self::Output {
-        -(self.xy * rhs.xy) + -(self.xz * rhs.xz) + -(self.yz * rhs.yz)
+        unsafe {
+            std::intrinsics::fadd_fast(
+                std::intrinsics::fadd_fast(
+                    -std::intrinsics::fmul_fast(self.xy, rhs.xy),
+                    -std::intrinsics::fmul_fast(self.xz, rhs.xz),
+                ),
+                -std::intrinsics::fmul_fast(self.yz, rhs.yz),
+            )
+        }
     }
 }
 impl<T> ScalarProduct<Trivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -6396,7 +6672,7 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0> ScalarProduct<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>>
     for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Bivector<T>: ScalarProduct<G2Rhs, Output = G0_0>,
     G0Rhs: Copy,
     G1Rhs: Copy,
@@ -6405,70 +6681,70 @@ where
 {
     type Output = G0_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.scalar_prod(rhs.2)
     }
 }
 impl<T> ScalarProduct<Zero> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> ScalarProduct<T> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> ScalarProduct<Vector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> ScalarProduct<Bivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> ScalarProduct<Trivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Trivector<T>) -> Self::Output {
-        -(self.xyz * rhs.xyz)
+        unsafe { -std::intrinsics::fmul_fast(self.xyz, rhs.xyz) }
     }
 }
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G0_0> ScalarProduct<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>>
     for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Trivector<T>: ScalarProduct<G3Rhs, Output = G0_0>,
     G0Rhs: Copy,
     G1Rhs: Copy,
@@ -6477,7 +6753,7 @@ where
 {
     type Output = G0_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.scalar_prod(rhs.3)
     }
@@ -6491,7 +6767,7 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -6499,7 +6775,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0> ScalarProduct<T>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G0Lhs: ScalarProduct<T, Output = G0_0>,
     G0Lhs: Copy,
     G1Lhs: Copy,
@@ -6508,7 +6784,7 @@ where
 {
     type Output = G0_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: T) -> Self::Output {
         self.0.scalar_prod(rhs)
     }
@@ -6516,7 +6792,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0> ScalarProduct<Vector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G1Lhs: ScalarProduct<Vector<T>, Output = G0_0>,
     G0Lhs: Copy,
     G1Lhs: Copy,
@@ -6525,7 +6801,7 @@ where
 {
     type Output = G0_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Vector<T>) -> Self::Output {
         self.1.scalar_prod(rhs)
     }
@@ -6533,7 +6809,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0> ScalarProduct<Bivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G2Lhs: ScalarProduct<Bivector<T>, Output = G0_0>,
     G0Lhs: Copy,
     G1Lhs: Copy,
@@ -6542,7 +6818,7 @@ where
 {
     type Output = G0_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Bivector<T>) -> Self::Output {
         self.2.scalar_prod(rhs)
     }
@@ -6550,7 +6826,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G0_0> ScalarProduct<Trivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G3Lhs: ScalarProduct<Trivector<T>, Output = G0_0>,
     G0Lhs: Copy,
     G1Lhs: Copy,
@@ -6559,7 +6835,7 @@ where
 {
     type Output = G0_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Trivector<T>) -> Self::Output {
         self.3.scalar_prod(rhs)
     }
@@ -6601,7 +6877,7 @@ where
 {
     type Output = G0_6;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn scalar_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.0.scalar_prod(rhs.0)
             + self.1.scalar_prod(rhs.1)
@@ -6612,51 +6888,51 @@ where
 impl VectorProduct<Zero> for Zero {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> VectorProduct<T> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> VectorProduct<Vector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> VectorProduct<Bivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> VectorProduct<Trivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -6670,71 +6946,121 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Zero
     }
 }
-impl<T: Scalar> VectorProduct<Zero> for T {
+impl VectorProduct<Zero> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
-impl<T: Scalar> VectorProduct<T> for T {
+impl VectorProduct<Zero> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
+    fn vector_prod(self, rhs: Zero) -> Self::Output {
+        Zero
+    }
+}
+impl<T: Float> VectorProduct<T> for T {
+    type Output = Zero;
+    #[inline]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: T) -> Self::Output {
         Zero
     }
 }
-impl VectorProduct<Vector<f32>> for f32 {
-    type Output = Vector<f32>;
+// impl VectorProduct<f32> for f32 {
+//     type Output = Zero;
+//     #[inline]
+//         #[allow(unused_variables, unused_unsafe)]
+//         fn vector_prod(self, rhs: f32) -> Self::Output {
+//         Zero
+//     }
+// }
+// impl VectorProduct<f64> for f64 {
+//     type Output = Zero;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn vector_prod(self, rhs: f64) -> Self::Output {
+//         Zero
+//     }
+// }
+impl<T: Float> VectorProduct<Vector<T>> for T {
+    type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
-    fn vector_prod(self, rhs: Vector<f32>) -> Self::Output {
-        Vector {
-            x: self * rhs.x,
-            y: self * rhs.y,
-            z: self * rhs.z,
+    #[allow(unused_variables, unused_unsafe)]
+    fn vector_prod(self, rhs: Vector<T>) -> Self::Output {
+        unsafe {
+            Vector {
+                x: self * rhs.x,
+                y: self * rhs.y,
+                z: self * rhs.z,
+            }
         }
     }
 }
-impl VectorProduct<Vector<f64>> for f64 {
-    type Output = Vector<f64>;
-    #[inline]
-    #[allow(unused_variables)]
-    fn vector_prod(self, rhs: Vector<f64>) -> Self::Output {
-        Vector {
-            x: self * rhs.x,
-            y: self * rhs.y,
-            z: self * rhs.z,
-        }
-    }
-}
-impl VectorProduct<Bivector<f32>> for f32 {
+// impl VectorProduct<Vector<f32>> for f32 {
+//     type Output = Vector<f32>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn vector_prod(self, rhs: Vector<f32>) -> Self::Output {
+//         unsafe {
+//             Vector {
+//                 x: std::intrinsics::fmul_fast(self, rhs.x),
+//                 y: std::intrinsics::fmul_fast(self, rhs.y),
+//                 z: std::intrinsics::fmul_fast(self, rhs.z),
+//             }
+//         }
+//     }
+// }
+// impl VectorProduct<Vector<f64>> for f64 {
+//     type Output = Vector<f64>;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn vector_prod(self, rhs: Vector<f64>) -> Self::Output {
+//         unsafe {
+//             Vector {
+//                 x: std::intrinsics::fmul_fast(self, rhs.x),
+//                 y: std::intrinsics::fmul_fast(self, rhs.y),
+//                 z: std::intrinsics::fmul_fast(self, rhs.z),
+//             }
+//         }
+//     }
+// }
+impl<T: Float> VectorProduct<Bivector<T>> for T {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
-    fn vector_prod(self, rhs: Bivector<f32>) -> Self::Output {
+    #[allow(unused_variables, unused_unsafe)]
+    fn vector_prod(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
-impl VectorProduct<Bivector<f64>> for f64 {
-    type Output = Zero;
-    #[inline]
-    #[allow(unused_variables)]
-    fn vector_prod(self, rhs: Bivector<f64>) -> Self::Output {
-        Zero
-    }
-}
+// impl VectorProduct<Bivector<f32>> for f32 {
+//     type Output = Zero;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn vector_prod(self, rhs: Bivector<f32>) -> Self::Output {
+//         Zero
+//     }
+// }
+// impl VectorProduct<Bivector<f64>> for f64 {
+//     type Output = Zero;
+//     #[inline]
+//     #[allow(unused_variables, unused_unsafe)]
+//     fn vector_prod(self, rhs: Bivector<f64>) -> Self::Output {
+//         Zero
+//     }
+// }
 impl VectorProduct<Trivector<f32>> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Trivector<f32>) -> Self::Output {
         Zero
     }
@@ -6742,7 +7068,7 @@ impl VectorProduct<Trivector<f32>> for f32 {
 impl VectorProduct<Trivector<f64>> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Trivector<f64>) -> Self::Output {
         Zero
     }
@@ -6758,7 +7084,7 @@ where
 {
     type Output = G1_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.vector_prod(rhs.1)
     }
@@ -6774,70 +7100,83 @@ where
 {
     type Output = G1_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.vector_prod(rhs.1)
     }
 }
 impl<T> VectorProduct<Zero> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> VectorProduct<T> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: T) -> Self::Output {
-        Vector {
-            x: self.x * rhs,
-            y: self.y * rhs,
-            z: self.z * rhs,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fmul_fast(self.x, rhs),
+                y: std::intrinsics::fmul_fast(self.y, rhs),
+                z: std::intrinsics::fmul_fast(self.z, rhs),
+            }
         }
     }
 }
 impl<T> VectorProduct<Vector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> VectorProduct<Bivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Bivector<T>) -> Self::Output {
-        Vector {
-            x: -(self.y * rhs.xy) + -(self.z * rhs.xz),
-            y: self.x * rhs.xy + -(self.z * rhs.yz),
-            z: self.x * rhs.xz + self.y * rhs.yz,
+        unsafe {
+            Vector {
+                x: std::intrinsics::fadd_fast(
+                    -std::intrinsics::fmul_fast(self.y, rhs.xy),
+                    -std::intrinsics::fmul_fast(self.z, rhs.xz),
+                ),
+                y: std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.x, rhs.xy),
+                    -std::intrinsics::fmul_fast(self.z, rhs.yz),
+                ),
+                z: std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.x, rhs.xz),
+                    std::intrinsics::fmul_fast(self.y, rhs.yz),
+                ),
+            }
         }
     }
 }
 impl<T> VectorProduct<Trivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -6845,7 +7184,7 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G1_0, G1_1, G1_2>
     VectorProduct<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Vector<T>: VectorProduct<G0Rhs, Output = G1_0>,
     Vector<T>: VectorProduct<G2Rhs, Output = G1_1>,
     G0Rhs: Copy,
@@ -6856,78 +7195,91 @@ where
 {
     type Output = G1_2;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.vector_prod(rhs.0) + self.vector_prod(rhs.2)
     }
 }
 impl<T> VectorProduct<Zero> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> VectorProduct<T> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> VectorProduct<Vector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Vector<T>) -> Self::Output {
-        Vector {
-            x: self.xy * rhs.y + self.xz * rhs.z,
-            y: -(self.xy * rhs.x) + self.yz * rhs.z,
-            z: -(self.xz * rhs.x) + -(self.yz * rhs.y),
+        unsafe {
+            Vector {
+                x: std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.xy, rhs.y),
+                    std::intrinsics::fmul_fast(self.xz, rhs.z),
+                ),
+                y: std::intrinsics::fadd_fast(
+                    -std::intrinsics::fmul_fast(self.xy, rhs.x),
+                    std::intrinsics::fmul_fast(self.yz, rhs.z),
+                ),
+                z: std::intrinsics::fadd_fast(
+                    -std::intrinsics::fmul_fast(self.xz, rhs.x),
+                    -std::intrinsics::fmul_fast(self.yz, rhs.y),
+                ),
+            }
         }
     }
 }
 impl<T> VectorProduct<Bivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> VectorProduct<Trivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: Copy + num_traits::NumOps + std::ops::Neg<Output = T>,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Trivector<T>) -> Self::Output {
-        Vector {
-            x: -(self.yz * rhs.xyz),
-            y: self.xz * rhs.xyz,
-            z: -(self.xy * rhs.xyz),
+        unsafe {
+            Vector {
+                x: self.yz * rhs.xyz,
+                y: self.xz * rhs.xyz,
+                z: -self.xy * rhs.xyz,
+            }
         }
     }
 }
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G1_0, G1_1, G1_2>
     VectorProduct<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Bivector<T>: VectorProduct<G1Rhs, Output = G1_0>,
     Bivector<T>: VectorProduct<G3Rhs, Output = G1_1>,
     G0Rhs: Copy,
@@ -6938,66 +7290,68 @@ where
 {
     type Output = G1_2;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.vector_prod(rhs.1) + self.vector_prod(rhs.3)
     }
 }
 impl<T> VectorProduct<Zero> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> VectorProduct<T> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> VectorProduct<Vector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> VectorProduct<Bivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Bivector<T>) -> Self::Output {
-        Vector {
-            x: -(self.xyz * rhs.yz),
-            y: self.xyz * rhs.xz,
-            z: -(self.xyz * rhs.xy),
+        unsafe {
+            Vector {
+                x: -std::intrinsics::fmul_fast(self.xyz, rhs.yz),
+                y: std::intrinsics::fmul_fast(self.xyz, rhs.xz),
+                z: -std::intrinsics::fmul_fast(self.xyz, rhs.xy),
+            }
         }
     }
 }
 impl<T> VectorProduct<Trivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -7005,7 +7359,7 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G1_0> VectorProduct<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>>
     for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Trivector<T>: VectorProduct<G2Rhs, Output = G1_0>,
     G0Rhs: Copy,
     G1Rhs: Copy,
@@ -7014,7 +7368,7 @@ where
 {
     type Output = G1_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.vector_prod(rhs.2)
     }
@@ -7028,7 +7382,7 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -7036,7 +7390,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G1_0> VectorProduct<T>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G1Lhs: VectorProduct<T, Output = G1_0>,
     G0Lhs: Copy,
     G1Lhs: Copy,
@@ -7045,7 +7399,7 @@ where
 {
     type Output = G1_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: T) -> Self::Output {
         self.1.vector_prod(rhs)
     }
@@ -7053,7 +7407,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G1_0, G1_1, G1_2> VectorProduct<Vector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G0Lhs: VectorProduct<Vector<T>, Output = G1_0>,
     G2Lhs: VectorProduct<Vector<T>, Output = G1_1>,
     G0Lhs: Copy,
@@ -7064,7 +7418,7 @@ where
 {
     type Output = G1_2;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Vector<T>) -> Self::Output {
         self.0.vector_prod(rhs) + self.2.vector_prod(rhs)
     }
@@ -7072,7 +7426,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G1_0, G1_1, G1_2> VectorProduct<Bivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G1Lhs: VectorProduct<Bivector<T>, Output = G1_0>,
     G3Lhs: VectorProduct<Bivector<T>, Output = G1_1>,
     G0Lhs: Copy,
@@ -7083,7 +7437,7 @@ where
 {
     type Output = G1_2;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Bivector<T>) -> Self::Output {
         self.1.vector_prod(rhs) + self.3.vector_prod(rhs)
     }
@@ -7091,7 +7445,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G1_0> VectorProduct<Trivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G2Lhs: VectorProduct<Trivector<T>, Output = G1_0>,
     G0Lhs: Copy,
     G1Lhs: Copy,
@@ -7100,7 +7454,7 @@ where
 {
     type Output = G1_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Trivector<T>) -> Self::Output {
         self.2.vector_prod(rhs)
     }
@@ -7150,7 +7504,7 @@ where
 {
     type Output = G1_10;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn vector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.0.vector_prod(rhs.1)
             + self.1.vector_prod(rhs.0)
@@ -7163,51 +7517,51 @@ where
 impl BivectorProduct<Zero> for Zero {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> BivectorProduct<T> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> BivectorProduct<Vector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> BivectorProduct<Bivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> BivectorProduct<Trivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -7221,7 +7575,7 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Zero
     }
@@ -7229,7 +7583,7 @@ where
 impl BivectorProduct<Zero> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -7237,7 +7591,7 @@ impl BivectorProduct<Zero> for f32 {
 impl BivectorProduct<Zero> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -7245,7 +7599,7 @@ impl BivectorProduct<Zero> for f64 {
 impl BivectorProduct<f32> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: f32) -> Self::Output {
         Zero
     }
@@ -7253,7 +7607,7 @@ impl BivectorProduct<f32> for f32 {
 impl BivectorProduct<f64> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: f64) -> Self::Output {
         Zero
     }
@@ -7261,7 +7615,7 @@ impl BivectorProduct<f64> for f64 {
 impl BivectorProduct<Vector<f32>> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Vector<f32>) -> Self::Output {
         Zero
     }
@@ -7269,7 +7623,7 @@ impl BivectorProduct<Vector<f32>> for f32 {
 impl BivectorProduct<Vector<f64>> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Vector<f64>) -> Self::Output {
         Zero
     }
@@ -7277,31 +7631,35 @@ impl BivectorProduct<Vector<f64>> for f64 {
 impl BivectorProduct<Bivector<f32>> for f32 {
     type Output = Bivector<f32>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Bivector<f32>) -> Self::Output {
-        Bivector {
-            xy: self * rhs.xy,
-            xz: self * rhs.xz,
-            yz: self * rhs.yz,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self, rhs.xy),
+                xz: std::intrinsics::fmul_fast(self, rhs.xz),
+                yz: std::intrinsics::fmul_fast(self, rhs.yz),
+            }
         }
     }
 }
 impl BivectorProduct<Bivector<f64>> for f64 {
     type Output = Bivector<f64>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Bivector<f64>) -> Self::Output {
-        Bivector {
-            xy: self * rhs.xy,
-            xz: self * rhs.xz,
-            yz: self * rhs.yz,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self, rhs.xy),
+                xz: std::intrinsics::fmul_fast(self, rhs.xz),
+                yz: std::intrinsics::fmul_fast(self, rhs.yz),
+            }
         }
     }
 }
 impl BivectorProduct<Trivector<f32>> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Trivector<f32>) -> Self::Output {
         Zero
     }
@@ -7309,7 +7667,7 @@ impl BivectorProduct<Trivector<f32>> for f32 {
 impl BivectorProduct<Trivector<f64>> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Trivector<f64>) -> Self::Output {
         Zero
     }
@@ -7325,7 +7683,7 @@ where
 {
     type Output = G2_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.bivector_prod(rhs.2)
     }
@@ -7341,78 +7699,91 @@ where
 {
     type Output = G2_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.bivector_prod(rhs.2)
     }
 }
 impl<T> BivectorProduct<Zero> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> BivectorProduct<T> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> BivectorProduct<Vector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Vector<T>) -> Self::Output {
-        Bivector {
-            xy: self.x * rhs.y + -(self.y * rhs.x),
-            xz: self.x * rhs.z + -(self.z * rhs.x),
-            yz: self.y * rhs.z + -(self.z * rhs.y),
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.x, rhs.y),
+                    -std::intrinsics::fmul_fast(self.y, rhs.x),
+                ),
+                xz: std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.x, rhs.z),
+                    -std::intrinsics::fmul_fast(self.z, rhs.x),
+                ),
+                yz: std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.y, rhs.z),
+                    -std::intrinsics::fmul_fast(self.z, rhs.y),
+                ),
+            }
         }
     }
 }
 impl<T> BivectorProduct<Bivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> BivectorProduct<Trivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Trivector<T>) -> Self::Output {
-        Bivector {
-            xy: self.z * rhs.xyz,
-            xz: -(self.y * rhs.xyz),
-            yz: self.x * rhs.xyz,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self.z, rhs.xyz),
+                xz: -std::intrinsics::fmul_fast(self.y, rhs.xyz),
+                yz: std::intrinsics::fmul_fast(self.x, rhs.xyz),
+            }
         }
     }
 }
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G2_0, G2_1, G2_2>
     BivectorProduct<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Vector<T>: BivectorProduct<G1Rhs, Output = G2_0>,
     Vector<T>: BivectorProduct<G3Rhs, Output = G2_1>,
     G0Rhs: Copy,
@@ -7423,70 +7794,83 @@ where
 {
     type Output = G2_2;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.bivector_prod(rhs.1) + self.bivector_prod(rhs.3)
     }
 }
 impl<T> BivectorProduct<Zero> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> BivectorProduct<T> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: T) -> Self::Output {
-        Bivector {
-            xy: self.xy * rhs,
-            xz: self.xz * rhs,
-            yz: self.yz * rhs,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self.xy, rhs),
+                xz: std::intrinsics::fmul_fast(self.xz, rhs),
+                yz: std::intrinsics::fmul_fast(self.yz, rhs),
+            }
         }
     }
 }
 impl<T> BivectorProduct<Vector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> BivectorProduct<Bivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Bivector<T>) -> Self::Output {
-        Bivector {
-            xy: -(self.xz * rhs.yz) + self.yz * rhs.xz,
-            xz: self.xy * rhs.yz + -(self.yz * rhs.xy),
-            yz: -(self.xy * rhs.xz) + self.xz * rhs.xy,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fadd_fast(
+                    -std::intrinsics::fmul_fast(self.xz, rhs.yz),
+                    std::intrinsics::fmul_fast(self.yz, rhs.xz),
+                ),
+                xz: std::intrinsics::fadd_fast(
+                    std::intrinsics::fmul_fast(self.xy, rhs.yz),
+                    -std::intrinsics::fmul_fast(self.yz, rhs.xy),
+                ),
+                yz: std::intrinsics::fadd_fast(
+                    -std::intrinsics::fmul_fast(self.xy, rhs.xz),
+                    std::intrinsics::fmul_fast(self.xz, rhs.xy),
+                ),
+            }
         }
     }
 }
 impl<T> BivectorProduct<Trivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -7494,7 +7878,7 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G2_0, G2_1, G2_2>
     BivectorProduct<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Bivector<T>: BivectorProduct<G0Rhs, Output = G2_0>,
     Bivector<T>: BivectorProduct<G2Rhs, Output = G2_1>,
     G0Rhs: Copy,
@@ -7505,66 +7889,68 @@ where
 {
     type Output = G2_2;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.bivector_prod(rhs.0) + self.bivector_prod(rhs.2)
     }
 }
 impl<T> BivectorProduct<Zero> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> BivectorProduct<T> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> BivectorProduct<Vector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Vector<T>) -> Self::Output {
-        Bivector {
-            xy: self.xyz * rhs.z,
-            xz: -(self.xyz * rhs.y),
-            yz: self.xyz * rhs.x,
+        unsafe {
+            Bivector {
+                xy: std::intrinsics::fmul_fast(self.xyz, rhs.z),
+                xz: -std::intrinsics::fmul_fast(self.xyz, rhs.y),
+                yz: std::intrinsics::fmul_fast(self.xyz, rhs.x),
+            }
         }
     }
 }
 impl<T> BivectorProduct<Bivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> BivectorProduct<Trivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -7572,7 +7958,7 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G2_0> BivectorProduct<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>>
     for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Trivector<T>: BivectorProduct<G1Rhs, Output = G2_0>,
     G0Rhs: Copy,
     G1Rhs: Copy,
@@ -7581,7 +7967,7 @@ where
 {
     type Output = G2_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.bivector_prod(rhs.1)
     }
@@ -7595,7 +7981,7 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -7603,7 +7989,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G2_0> BivectorProduct<T>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G2Lhs: BivectorProduct<T, Output = G2_0>,
     G0Lhs: Copy,
     G1Lhs: Copy,
@@ -7612,7 +7998,7 @@ where
 {
     type Output = G2_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: T) -> Self::Output {
         self.2.bivector_prod(rhs)
     }
@@ -7620,7 +8006,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G2_0, G2_1, G2_2> BivectorProduct<Vector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G1Lhs: BivectorProduct<Vector<T>, Output = G2_0>,
     G3Lhs: BivectorProduct<Vector<T>, Output = G2_1>,
     G0Lhs: Copy,
@@ -7631,7 +8017,7 @@ where
 {
     type Output = G2_2;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Vector<T>) -> Self::Output {
         self.1.bivector_prod(rhs) + self.3.bivector_prod(rhs)
     }
@@ -7639,7 +8025,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G2_0, G2_1, G2_2> BivectorProduct<Bivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G0Lhs: BivectorProduct<Bivector<T>, Output = G2_0>,
     G2Lhs: BivectorProduct<Bivector<T>, Output = G2_1>,
     G0Lhs: Copy,
@@ -7650,7 +8036,7 @@ where
 {
     type Output = G2_2;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Bivector<T>) -> Self::Output {
         self.0.bivector_prod(rhs) + self.2.bivector_prod(rhs)
     }
@@ -7658,7 +8044,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G2_0> BivectorProduct<Trivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G1Lhs: BivectorProduct<Trivector<T>, Output = G2_0>,
     G0Lhs: Copy,
     G1Lhs: Copy,
@@ -7667,7 +8053,7 @@ where
 {
     type Output = G2_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Trivector<T>) -> Self::Output {
         self.1.bivector_prod(rhs)
     }
@@ -7717,7 +8103,7 @@ where
 {
     type Output = G2_10;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn bivector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.0.bivector_prod(rhs.2)
             + self.1.bivector_prod(rhs.1)
@@ -7730,51 +8116,51 @@ where
 impl TrivectorProduct<Zero> for Zero {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> TrivectorProduct<T> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> TrivectorProduct<Vector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> TrivectorProduct<Bivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> TrivectorProduct<Trivector<T>> for Zero
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -7788,7 +8174,7 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         Zero
     }
@@ -7796,7 +8182,7 @@ where
 impl TrivectorProduct<Zero> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -7804,7 +8190,7 @@ impl TrivectorProduct<Zero> for f32 {
 impl TrivectorProduct<Zero> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -7812,7 +8198,7 @@ impl TrivectorProduct<Zero> for f64 {
 impl TrivectorProduct<f32> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: f32) -> Self::Output {
         Zero
     }
@@ -7820,7 +8206,7 @@ impl TrivectorProduct<f32> for f32 {
 impl TrivectorProduct<f64> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: f64) -> Self::Output {
         Zero
     }
@@ -7828,7 +8214,7 @@ impl TrivectorProduct<f64> for f64 {
 impl TrivectorProduct<Vector<f32>> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Vector<f32>) -> Self::Output {
         Zero
     }
@@ -7836,7 +8222,7 @@ impl TrivectorProduct<Vector<f32>> for f32 {
 impl TrivectorProduct<Vector<f64>> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Vector<f64>) -> Self::Output {
         Zero
     }
@@ -7844,7 +8230,7 @@ impl TrivectorProduct<Vector<f64>> for f64 {
 impl TrivectorProduct<Bivector<f32>> for f32 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Bivector<f32>) -> Self::Output {
         Zero
     }
@@ -7852,7 +8238,7 @@ impl TrivectorProduct<Bivector<f32>> for f32 {
 impl TrivectorProduct<Bivector<f64>> for f64 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Bivector<f64>) -> Self::Output {
         Zero
     }
@@ -7860,20 +8246,24 @@ impl TrivectorProduct<Bivector<f64>> for f64 {
 impl TrivectorProduct<Trivector<f32>> for f32 {
     type Output = Trivector<f32>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Trivector<f32>) -> Self::Output {
-        Trivector {
-            xyz: self * rhs.xyz,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self, rhs.xyz),
+            }
         }
     }
 }
 impl TrivectorProduct<Trivector<f64>> for f64 {
     type Output = Trivector<f64>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Trivector<f64>) -> Self::Output {
-        Trivector {
-            xyz: self * rhs.xyz,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self, rhs.xyz),
+            }
         }
     }
 }
@@ -7888,7 +8278,7 @@ where
 {
     type Output = G3_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.trivector_prod(rhs.3)
     }
@@ -7904,64 +8294,72 @@ where
 {
     type Output = G3_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.trivector_prod(rhs.3)
     }
 }
 impl<T> TrivectorProduct<Zero> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> TrivectorProduct<T> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> TrivectorProduct<Vector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> TrivectorProduct<Bivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Bivector<T>) -> Self::Output {
-        Trivector {
-            xyz: self.x * rhs.yz + -(self.y * rhs.xz) + self.z * rhs.xy,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fadd_fast(
+                    std::intrinsics::fadd_fast(
+                        std::intrinsics::fmul_fast(self.x, rhs.yz),
+                        -std::intrinsics::fmul_fast(self.y, rhs.xz),
+                    ),
+                    std::intrinsics::fmul_fast(self.z, rhs.xy),
+                ),
+            }
         }
     }
 }
 impl<T> TrivectorProduct<Trivector<T>> for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -7969,7 +8367,7 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G3_0> TrivectorProduct<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>>
     for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Vector<T>: TrivectorProduct<G2Rhs, Output = G3_0>,
     G0Rhs: Copy,
     G1Rhs: Copy,
@@ -7978,64 +8376,72 @@ where
 {
     type Output = G3_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.trivector_prod(rhs.2)
     }
 }
 impl<T> TrivectorProduct<Zero> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> TrivectorProduct<T> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: T) -> Self::Output {
         Zero
     }
 }
 impl<T> TrivectorProduct<Vector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Vector<T>) -> Self::Output {
-        Trivector {
-            xyz: self.xy * rhs.z + -(self.xz * rhs.y) + self.yz * rhs.x,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fadd_fast(
+                    std::intrinsics::fadd_fast(
+                        std::intrinsics::fmul_fast(self.xy, rhs.z),
+                        -std::intrinsics::fmul_fast(self.xz, rhs.y),
+                    ),
+                    std::intrinsics::fmul_fast(self.yz, rhs.x),
+                ),
+            }
         }
     }
 }
 impl<T> TrivectorProduct<Bivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> TrivectorProduct<Trivector<T>> for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -8043,7 +8449,7 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G3_0> TrivectorProduct<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>>
     for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Bivector<T>: TrivectorProduct<G1Rhs, Output = G3_0>,
     G0Rhs: Copy,
     G1Rhs: Copy,
@@ -8052,64 +8458,66 @@ where
 {
     type Output = G3_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.trivector_prod(rhs.1)
     }
 }
 impl<T> TrivectorProduct<Zero> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
 }
 impl<T> TrivectorProduct<T> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: T) -> Self::Output {
-        Trivector {
-            xyz: self.xyz * rhs,
+        unsafe {
+            Trivector {
+                xyz: std::intrinsics::fmul_fast(self.xyz, rhs),
+            }
         }
     }
 }
 impl<T> TrivectorProduct<Vector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Vector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> TrivectorProduct<Bivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Bivector<T>) -> Self::Output {
         Zero
     }
 }
 impl<T> TrivectorProduct<Trivector<T>> for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Trivector<T>) -> Self::Output {
         Zero
     }
@@ -8117,7 +8525,7 @@ where
 impl<T, G0Rhs, G1Rhs, G2Rhs, G3Rhs, G3_0> TrivectorProduct<Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>>
     for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
     Trivector<T>: TrivectorProduct<G0Rhs, Output = G3_0>,
     G0Rhs: Copy,
     G1Rhs: Copy,
@@ -8126,7 +8534,7 @@ where
 {
     type Output = G3_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.trivector_prod(rhs.0)
     }
@@ -8140,7 +8548,7 @@ where
 {
     type Output = Zero;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Zero) -> Self::Output {
         Zero
     }
@@ -8148,7 +8556,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G3_0> TrivectorProduct<T>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G3Lhs: TrivectorProduct<T, Output = G3_0>,
     G0Lhs: Copy,
     G1Lhs: Copy,
@@ -8157,7 +8565,7 @@ where
 {
     type Output = G3_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: T) -> Self::Output {
         self.3.trivector_prod(rhs)
     }
@@ -8165,7 +8573,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G3_0> TrivectorProduct<Vector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G2Lhs: TrivectorProduct<Vector<T>, Output = G3_0>,
     G0Lhs: Copy,
     G1Lhs: Copy,
@@ -8174,7 +8582,7 @@ where
 {
     type Output = G3_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Vector<T>) -> Self::Output {
         self.2.trivector_prod(rhs)
     }
@@ -8182,7 +8590,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G3_0> TrivectorProduct<Bivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G1Lhs: TrivectorProduct<Bivector<T>, Output = G3_0>,
     G0Lhs: Copy,
     G1Lhs: Copy,
@@ -8191,7 +8599,7 @@ where
 {
     type Output = G3_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Bivector<T>) -> Self::Output {
         self.1.trivector_prod(rhs)
     }
@@ -8199,7 +8607,7 @@ where
 impl<T, G0Lhs, G1Lhs, G2Lhs, G3Lhs, G3_0> TrivectorProduct<Trivector<T>>
     for Multivector<G0Lhs, G1Lhs, G2Lhs, G3Lhs>
 where
-    T: Scalar,
+    T: num_traits::Float,
     G0Lhs: TrivectorProduct<Trivector<T>, Output = G3_0>,
     G0Lhs: Copy,
     G1Lhs: Copy,
@@ -8208,7 +8616,7 @@ where
 {
     type Output = G3_0;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Trivector<T>) -> Self::Output {
         self.0.trivector_prod(rhs)
     }
@@ -8250,7 +8658,7 @@ where
 {
     type Output = G3_6;
     #[inline]
-    #[allow(unused_variables)]
+    #[allow(unused_variables, unused_unsafe)]
     fn trivector_prod(self, rhs: Multivector<G0Rhs, G1Rhs, G2Rhs, G3Rhs>) -> Self::Output {
         self.0.trivector_prod(rhs.3)
             + self.1.trivector_prod(rhs.2)
@@ -8267,7 +8675,7 @@ impl std::ops::Neg for Zero {
 }
 impl<T> std::ops::Neg for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
@@ -8281,7 +8689,7 @@ where
 }
 impl<T> std::ops::Neg for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
@@ -8295,7 +8703,7 @@ where
 }
 impl<T> std::ops::Neg for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
@@ -8330,7 +8738,7 @@ impl Reverse for Zero {
 }
 impl<T> Reverse for T
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]
@@ -8340,7 +8748,7 @@ where
 }
 impl<T> Reverse for Vector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
@@ -8354,7 +8762,7 @@ where
 }
 impl<T> Reverse for Bivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
@@ -8368,7 +8776,7 @@ where
 }
 impl<T> Reverse for Trivector<T>
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
@@ -8403,7 +8811,7 @@ impl Dual for Zero {
 }
 impl<T> Dual for T
 where
-    T: Scalar,
+    T: num_traits::Float,
 {
     type Output = Trivector<T>;
     #[inline]
@@ -8413,7 +8821,7 @@ where
 }
 impl<T> Dual for Vector<T>
 where
-    T: std::ops::Neg<Output = T>,
+    T: num_traits::Float,
 {
     type Output = Bivector<T>;
     #[inline]
@@ -8427,7 +8835,7 @@ where
 }
 impl<T> Dual for Bivector<T>
 where
-    T: std::ops::Neg<Output = T>,
+    T: num_traits::Float,
 {
     type Output = Vector<T>;
     #[inline]
@@ -8441,7 +8849,7 @@ where
 }
 impl<T> Dual for Trivector<T>
 where
-    T: std::ops::Neg<Output = T>,
+    T: num_traits::Float,
 {
     type Output = T;
     #[inline]

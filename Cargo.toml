@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 proc_macros = { path = "./proc_macros" }
 num-traits = "0.2.15"
+num-sqrt = { path = "../num-sqrt" }
 
 [[test]]
 name = "cga_3d_tests"

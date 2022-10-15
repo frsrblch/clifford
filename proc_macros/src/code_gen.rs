@@ -87,7 +87,13 @@ impl Algebra {
             .flat_map(|op| AlgebraType::iter(self).map(move |lhs| (op, lhs)))
             .flat_map(|(op, ty)| op.impl_item(ty));
 
-        let norm_ops = NormOps::iter(self).map(NormOps::define_and_blanket);
+        let norm_ops = NormOps::iter(self).flat_map(|op| {
+            std::iter::once(op.define()).chain(
+                self.grades()
+                    .filter_map(move |g| op.item_impl(g))
+                    .map(|i| i.to_token_stream()),
+            )
+        });
 
         let float_conversion_definitions = FloatConvert::iter().map(FloatConvert::define);
 
@@ -212,7 +218,7 @@ impl UnaryOp {
             generics
                 .make_where_clause()
                 .predicates
-                .push(parse_quote!(T: num_traits::Float));
+                .push(parse_quote!(T: num_traits::Float + std::ops::Neg<Output = T> + Copy));
         }
 
         if !ty.is_generic() {
@@ -415,7 +421,7 @@ impl SumOp {
             generics
                 .make_where_clause()
                 .predicates
-                .push(parse_quote!(T: num_traits::Float));
+                .push(parse_quote!(T: num_traits::Float + std::ops::Neg<Output = T> + Copy));
         }
 
         if lhs.is_generic() {
@@ -724,7 +730,7 @@ impl ProductOp {
             generics
                 .make_where_clause()
                 .predicates
-                .push(parse_quote!(T: num_traits::Float));
+                .push(parse_quote!(T: num_traits::Float + std::ops::Neg<Output = T> + Copy));
         }
 
         if !is_generic(lhs, rhs) {
@@ -922,83 +928,116 @@ impl ProductOp {
 }
 
 impl NormOps {
-    pub fn define_and_blanket(self) -> TokenStream {
+    pub fn define(self) -> TokenStream {
+        let ty_ = self.trait_ty();
+        let fn_ = self.trait_fn();
+        parse_quote! {
+            pub trait #ty_ {
+                type Output;
+                fn #fn_(self) -> Self::Output;
+            }
+        }
+    }
+
+    pub fn item_impl(self, grade: Grade) -> Option<ItemImpl> {
+        if grade.is_scalar() {
+            return None;
+        }
+
+        Some(ItemImpl {
+            attrs: vec![],
+            defaultness: None,
+            unsafety: None,
+            impl_token: Default::default(),
+            generics: self.generics(grade),
+            trait_: {
+                let trait_ty = self.trait_ty();
+                Some((None, parse_quote!(#trait_ty), For::default()))
+            },
+            self_ty: Box::new(grade.ty_with_float(None)),
+            brace_token: Default::default(),
+            items: vec![self.output_for_grade(grade), self.fn_item()],
+        })
+    }
+
+    fn generics(self, grade: Grade) -> Generics {
+        let ty = grade.ty_with_float(None);
+        let mut generics = Generics::default();
+
+        generics.params.push(parse_quote!(T));
+
+        let predicates = &mut generics.make_where_clause().predicates;
+
+        predicates.push(parse_quote!(T: num_traits::Float + std::ops::Neg<Output = T> + Copy));
+
         match self {
-            Self::Norm2 => quote! {
-                pub trait Norm2 {
-                    type Output;
-                    fn norm2(self) -> Self::Output;
-                }
+            Self::Norm2 => {
+                let sp = ProductOp::Grade(grade.1.grade(0)).trait_ty();
+                predicates.push(parse_quote!(#ty: #sp <#ty, Output = T>));
+            }
+            Self::Norm => {
+                let sp = ProductOp::Grade(grade.1.grade(0)).trait_ty();
+                predicates.push(parse_quote!(T: num_sqrt::Sqrt<Output = T>));
+                predicates.push(parse_quote!(#ty: #sp <#ty, Output = T>));
+            }
+            Self::Unit => {
+                let norm = Self::Norm.trait_ty();
+                predicates.push(parse_quote!(#ty: #norm <Output = T>));
+            }
+            Self::Inverse => {
+                let norm2 = Self::Norm2.trait_ty();
+                predicates.push(parse_quote!(#ty: #norm2 <Output = T>));
+            }
+        }
 
-                impl<T, S> Norm2 for T
-                where
-                    T: ScalarProduct<T, Output = S> + Reverse<Output = T> + Copy,
-                {
-                    type Output = S;
-                    #[inline]
-                    fn norm2(self) -> Self::Output {
-                        self.scalar_prod(self.rev())
-                    }
-                }
-            },
-            Self::Norm => quote! {
-                pub trait Norm {
-                    type Output;
-                    fn norm(self) -> Self::Output;
-                }
+        generics
+    }
 
-                impl<T, S> Norm for T
-                where
-                    T: Norm2<Output = S>,
-                    S: num_traits::Float,
-                {
-                    type Output = S;
-                    #[inline]
-                    fn norm(self) -> Self::Output {
-                        self.norm2().sqrt()
-                    }
-                }
-            },
-            Self::Inverse => quote! {
-                pub trait Inverse {
-                    fn inv(self) -> Self;
-                }
+    fn trait_ty(self) -> syn::Type {
+        match self {
+            Self::Norm => parse_quote!(Norm),
+            Self::Norm2 => parse_quote!(Norm2),
+            Self::Unit => parse_quote!(Unit),
+            Self::Inverse => parse_quote!(Inverse),
+        }
+    }
 
-                impl<T, S> Inverse for T
-                where
-                    T: Reverse<Output = T> + Norm2<Output = S> + std::ops::Div<S, Output = T> + Copy,
-                    S: num_traits::Float,
-                {
-                    #[inline]
-                    fn inv(self) -> Self {
-                        let norm2 = self.norm2();
-                        if norm2 == S::zero() {
-                            panic!("div by zero");
-                        }
-                        self.rev() / norm2
-                    }
-                }
-            },
-            Self::Unit => quote! {
-                pub trait Unit {
-                    fn unit(self) -> Self;
-                }
+    fn trait_fn(self) -> syn::Type {
+        match self {
+            Self::Norm => parse_quote!(norm),
+            Self::Norm2 => parse_quote!(norm2),
+            Self::Unit => parse_quote!(unit),
+            Self::Inverse => parse_quote!(inv),
+        }
+    }
 
-                impl<T, S> Unit for T
-                where
-                    T: Reverse<Output = T> + Norm<Output = S> + std::ops::Div<S, Output = T> + Copy,
-                    S: num_traits::Float,
-                {
-                    #[inline]
-                    fn unit(self) -> Self {
-                        let norm = self.norm();
-                        if norm == S::zero() {
-                            panic!("div by zero");
-                        }
-                        self.rev() / norm
-                    }
-                }
-            },
+    fn output_for_grade(self, grade: Grade) -> syn::ImplItem {
+        let ty = match self {
+            Self::Unit | Self::Inverse => grade.ty_with_float(None),
+            Self::Norm | Self::Norm2 => parse_quote!(T),
+        };
+        parse_quote!(type Output = #ty;)
+    }
+
+    fn fn_item(self) -> syn::ImplItem {
+        let track_caller =
+            matches!(self, Self::Inverse | Self::Unit).then(|| quote!(#[track_caller]));
+
+        let fn_ = self.trait_fn();
+
+        let content = match self {
+            Self::Norm2 => quote!(self.scalar_prod(self.rev())),
+            Self::Norm => quote!(num_sqrt::Sqrt::sqrt(self.scalar_prod(self.rev()))),
+            Self::Unit => quote!(self / self.norm()),
+            Self::Inverse => quote!(self / self.norm2()),
+        };
+
+        parse_quote! {
+            #[inline]
+            #track_caller
+            fn #fn_(self) -> Self::Output {
+                #content
+            }
         }
     }
 }
@@ -1417,7 +1456,7 @@ mod tests {
         let expected = parse_quote! {
             impl<T> VectorProduct < Vector<T> > for Vector<T>
             where
-                T: num_traits::Float
+                T: num_traits::Float + std::ops::Neg<Output = T> + Copy
             {
                 type Output = Zero ;
                 # [inline]
@@ -1440,7 +1479,7 @@ mod tests {
         let expected = parse_quote! {
             impl<T> VectorProduct < Bivector<T> > for Vector<T>
             where
-                T: num_traits::Float
+                T: num_traits::Float + std::ops::Neg<Output = T> + Copy
             {
                 type Output = Vector<T> ;
                 # [inline]
@@ -1467,7 +1506,7 @@ mod tests {
         let expected = parse_quote! {
             impl<T> std::ops::Mul<Vector<T>> for Vector<T>
             where
-                T: num_traits::Float
+                T: num_traits::Float + std::ops::Neg<Output = T> + Copy
             {
                 type Output = Multivector<T, Zero, Bivector<T>, Zero>;
                 #[inline]
@@ -1659,7 +1698,7 @@ mod tests {
         let expected = parse_quote! {
             impl<T> std::ops::Add<Vector<T>> for Vector<T>
             where
-                T: num_traits::Float
+                T: num_traits::Float + std::ops::Neg<Output = T> + Copy
             {
                 type Output = Vector<T>;
                 #[inline]
@@ -1686,7 +1725,7 @@ mod tests {
         let expected = parse_quote! {
             impl<T> std::ops::Sub<Vector<T>> for Vector<T>
             where
-                T: num_traits::Float
+                T: num_traits::Float + std::ops::Neg<Output = T> + Copy
             {
                 type Output = Vector<T>;
                 #[inline]
@@ -1714,7 +1753,7 @@ mod tests {
         let expected = parse_quote! {
             impl<T> std::ops::Sub<Zero> for Vector<T>
             where
-                T: num_traits::Float
+                T: num_traits::Float + std::ops::Neg<Output = T> + Copy
             {
                 type Output = Vector<T>;
                 #[inline]
@@ -1738,7 +1777,7 @@ mod tests {
         let expected = parse_quote! {
             impl<T> std::ops::Sub<Vector<T>> for Zero
             where
-                T: num_traits::Float
+                T: num_traits::Float + std::ops::Neg<Output = T> + Copy
             {
                 type Output = Vector<T>;
                 #[inline]
@@ -1762,7 +1801,7 @@ mod tests {
         let expected = parse_quote! {
             impl<T> std::ops::Add<Bivector<T>> for Vector<T>
             where
-                T: num_traits::Float
+                T: num_traits::Float + std::ops::Neg<Output = T> + Copy
             {
                 type Output = Multivector<Zero, Vector<T>, Bivector<T>, Zero>;
                 #[inline]
@@ -1817,7 +1856,7 @@ mod tests {
             impl<T, G0Lhs, G1Lhs, G2Lhs, G1Out> std::ops::Add<Vector<T>>
             for Multivector<G0Lhs, G1Lhs, G2Lhs>
             where
-                T: num_traits::Float,
+                T: num_traits::Float + std::ops::Neg<Output = T> + Copy,
                 G1Lhs: GradeAdd<Vector<T>, Output = G1Out>
             {
                 type Output = Multivector<G0Lhs, G1Out, G2Lhs>;
@@ -1858,7 +1897,7 @@ mod tests {
         let expected = parse_quote! {
             impl<T> GradeAdd<Vector<T>> for Vector<T>
             where
-                T: num_traits::Float
+                T: num_traits::Float + std::ops::Neg<Output = T> + Copy
             {
                 type Output = Vector<T>;
                 #[inline]
@@ -1886,7 +1925,7 @@ mod tests {
         let expected = parse_quote! {
             impl<T> std::ops::Sub<Vector<T>> for Zero
             where
-                T: num_traits::Float
+                T: num_traits::Float + std::ops::Neg<Output = T> + Copy
             {
                 type Output = Vector<T>;
                 #[inline]
@@ -1911,7 +1950,7 @@ mod tests {
         let expected = parse_quote! {
             impl<T> GradeSub<Vector<T>> for Zero
             where
-                T: num_traits::Float
+                T: num_traits::Float + std::ops::Neg<Output = T> + Copy
             {
                 type Output = Vector<T>;
                 #[inline]
@@ -2163,7 +2202,7 @@ mod tests {
         let expected = parse_quote! {
             impl<T> std::ops::Add<T> for Vector<T>
             where
-                T: num_traits::Float
+                T: num_traits::Float + std::ops::Neg<Output = T> + Copy
             {
                 type Output = Multivector<T, Vector<T>, Zero, Zero, Zero, Zero>;
                 #[inline]
