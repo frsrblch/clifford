@@ -9,6 +9,12 @@ edition = "2021"
 proc_macros = { path = "./proc_macros" }
 num-traits = "0.2.15"
 num-sqrt = { path = "../num-sqrt" }
+macros = { path = "./macros" }
+
+[dev-dependencies]
+criterion = "0.4.0"
+rand = "0.8"
+num-dual = { path = "../num-dual" }
 
 [[test]]
 name = "cga_3d_tests"
@@ -19,3 +25,7 @@ ga_3d = []
 pga_3d = []
 cga_2d = []
 cga_3d = []
+
+[[bench]]
+name = "inverse"
+harness = false

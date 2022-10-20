@@ -15,8 +15,10 @@
 //   lets us use any Float type, including num-dual
 //   Option 1 :: Scalar<T>
 //     allows standard operators but requires wrapping the value
+//     problem: still can't define generic ops for generic types and f0/Zero
 //   Option 2 :: Mul: BinaryOp<Lhs, Rhs>
 //     prevents using the standard operators, but allows generics as the Lhs type
+//   Option 3 :: impl Mul only for scalar multiplication, Geo/Dot/Wedge for geometric transformations
 
 // TODO Unit -> UnitOp, add Unit<T> with Norm and Norm2 == 1
 
@@ -27,58 +29,54 @@
 //  - is this unique to G{3,0,1} ?
 //  - allow manual blade ordering
 
-// TODO compare plane-based and point-based algebras,
-//  - can objects in one be converted to the other through the dual?
-//      - point-based point: x e1 + y e2 + z e3 + 1 e4
-//      - plane-based plane: x e1 + y e2 + z e3 + δ e4
-
 //! Proc macros for defining Clifford algebras of arbitrary dimension
 //!
 //! [`Feature set`]
 //!
 //! Models of geometry:
-//! - [ ] Generic types
-//!     - [ ] f32/f64 conversions
-//!     - [ ] dimensional analysis
+//! - [x] Generic types
+//!     - [x] f32/f64 conversions
+//!     - [x] flexible generics
 //! - [ ] Euclidean
 //!     - [ ] Meet
 //!     - [ ] Join
 //! - [ ] Homogeneous
-//!     - [x] Weight
-//!     - [x] Bulk
+//!     - [ ] Weight
+//!     - [ ] Bulk
 //!     - [ ] IsIdeal
 //!     - [ ] Projection
 //!     - [ ] Antiprojection
 //! - [ ] Conformal
 //!     - [ ] Meet
 //!     - [ ] Join
-//!     - [x] Origin
-//!     - [x] Infinity
-//!     - [x] IsFlat
+//!     - [ ] Origin
+//!     - [ ] Infinity
+//!     - [ ] IsFlat
 //! - [ ] Minkowski
 //!
 //! Types:
-//! - [x] Zero
 //! - [x] Grades
-//! - [x] Multivector
+//!
+//! Functions:
+//! - [x] Grade selection (e.g., Motor::bivector() -> Bivector)
 //!
 //! Main products:
-//! - [x] Mul
-//! - [x] Div
+//! - [x] Mul scalar
+//! - [x] Div scalar
 //! - [x] Geometric
-//! - [x] Antigeometric
+//! - [ ] Antigeometric
 //! - [x] Grade products
 //! - [ ] Grade antiproducts
 //!
 //! Inner products:
 //! - [x] Dot
-//! - [x] Antidot
-//! - [x] Left contraction
-//! - [x] Right contraction
+//! - [ ] Antidot
+//! - [ ] Left contraction
+//! - [ ] Right contraction
 //!
 //! Outer products:
 //! - [x] Wedge
-//! - [x] Antiwedge
+//! - [ ] Antiwedge
 //!
 //! Interior products:
 //! - [ ] Right interior product
@@ -91,15 +89,17 @@
 //! - [x] Subtraction
 //!
 //! Assignment:
-//! - [ ] Add/SubAssign
-//! - [ ] Mul/DivAssign
+//! - [x] AddAssign
+//! - [x] SubAssign
+//! - [x] MulAssign scalar
+//! - [x] DivAssign scalar
 //!
 //! Unary operations:
 //! - [x] Neg
 //! - [x] Left complement
 //! - [x] Right complement
 //! - [x] Reverse
-//! - [x] Antireverse
+//! - [ ] Antireverse
 //!
 //! Norm-based operations:
 //! - [x] Norm
@@ -108,12 +108,12 @@
 //! - [x] Unitize
 //!
 //! Compound products:
-//! - [ ] Sandwich
+//! - [x] Sandwich
 //! - [ ] Antisandwich
 //! - [ ] Commutator
 //!
 //! Num Traits:
-//! - [ ] Zero
+//! - [x] Zero
 //!
 //! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features.html
 
@@ -121,6 +121,76 @@ pub use proc_macros::clifford;
 
 #[cfg(feature = "ga_3d")]
 pub mod ga_3d;
+
+pub mod pga3 {
+    macros::pga3!();
+
+    pub fn unit_sandwich(motor: Motor<f64>, vector: Vector<f64>) -> Vector<f64> {
+        let intermediate: Flector<f64> = Geo::<Vector<f64>>::geo(motor, vector);
+        <Vector<f64> as GradeProduct<Flector<f64>, Motor<f64>>>::product(
+            intermediate,
+            Reverse::rev(motor),
+        )
+    }
+
+    impl<Lhs, Rhs, Int> Sandwich<Rhs> for Unit<Lhs>
+    where
+        Lhs: Geo<Rhs, Output = Int> + Reverse + Copy,
+        Rhs: GradeProduct<Int, Lhs>,
+    {
+        type Output = Rhs;
+        #[inline]
+        fn sandwich(self, rhs: Rhs) -> Self::Output {
+            let int = self.value().geo(rhs);
+            Rhs::product(int, self.value().rev())
+        }
+    }
+
+    impl<T> num_sqrt::Sqrt for Motor<T>
+    where
+        T: num_sqrt::Sqrt<Output = T> + num_traits::One,
+        Motor<T>: std::ops::Add<Scalar<T>, Output = Motor<T>>
+            + Norm2<Output = T>
+            + Unitize<Output = Unit<Motor<T>>>,
+    {
+        type Output = Motor<T>;
+
+        fn sqrt(self) -> Self::Output {
+            let sqrt = self.unit().value() + Scalar { s: T::one() };
+            sqrt.unit().value()
+        }
+    }
+
+    #[test]
+    fn rotor_sqrt() {
+        let motor = Motor {
+            s: 0.,
+            xy: -1.,
+            ..Default::default()
+        };
+        let v = Vector {
+            x: 2.,
+            y: 3.,
+            z: 5.,
+            w: 1.,
+        };
+        let v_ = Vector {
+            x: -3.,
+            y: 2.,
+            z: 5.,
+            w: 1.,
+        };
+
+        use num_sqrt::Sqrt;
+        let sqrt = motor.sqrt();
+        let sqrt2 = sqrt.sqrt();
+        dbg!(sqrt, sqrt.sandwich(v));
+        dbg!(sqrt2, sqrt2.sandwich(v));
+
+        assert_eq!(v_, sqrt.sandwich(v));
+        // panic!("done");
+    }
+}
 
 // #[cfg(feature = "pga_3d")]
 // pub mod pga_3d;
