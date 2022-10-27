@@ -11,17 +11,22 @@ impl Algebra {
     pub fn define(self) -> TokenStream {
         let traits = ProductOp::define_all()
             .chain(Complement::iter(self).map(Complement::define))
-            .chain([Reverse::define()])
+            .chain([Reverse::define(), Antireverse::define()])
             .chain([GradeProduct::define()])
+            .chain([GradeAntiproduct::define()])
             .chain(NormOps::iter().map(NormOps::define))
-            .chain([Sandwich::define()])
+            .chain([Sandwich::define(), Antisandwich::define()])
             .chain(InverseOps::iter().map(InverseOps::define));
 
         let structs = self.types().map(move |ty| ty.define(self));
 
+        let impl_new_fns = self.types().map(|ty| ty.impl_new_fns(self));
         let impl_grade_fns = self.types().filter_map(|ty| ty.impl_grade_fns(self));
+        let impl_from = self.types().flat_map(|ty| ty.impl_from(self));
 
         let impl_zero = self.types().map(|ty| ty.impl_zero(self));
+        // Cannot impl num_traits::One because it requires Mul<Self, Output = Self>
+        // This would clash with generic scalar multiplication (Scalar<T> * U = Scalar<V>)
 
         let impl_product_ops = ProductOp::iter()
             .flat_map(|op| self.types().map(move |ty| (op, ty)))
@@ -36,6 +41,7 @@ impl Algebra {
         let impl_neg = self.types().map(|ty| Neg::impl_for(ty, self));
 
         let impl_rev = self.types().map(|ty| Reverse::impl_for(ty, self));
+        let impl_antirev = self.types().map(|ty| Antireverse::impl_for(ty, self));
 
         let impl_complements = Complement::iter(self)
             .flat_map(|comp| self.types().map(move |ty| ty.impl_complement(self, comp)));
@@ -64,6 +70,11 @@ impl Algebra {
                 .map(move |(lhs, rhs)| GradeProduct::impl_for(lhs, rhs, out, self))
         });
 
+        let grade_antiproducts = self.grades().flat_map(|out| {
+            self.type_tuples()
+                .map(move |(lhs, rhs)| GradeAntiproduct::impl_for(lhs, rhs, out, self))
+        });
+
         let norm_ops =
             NormOps::iter().flat_map(|op| self.types().map(move |ty| op.impl_for(ty, self)));
 
@@ -71,23 +82,35 @@ impl Algebra {
             .type_tuples()
             .map(|(lhs, rhs)| Sandwich::impl_for(lhs, rhs, self));
 
+        let antisandwich_ops = self
+            .type_tuples()
+            .map(|(lhs, rhs)| Antisandwich::impl_for(lhs, rhs, self));
+
         let unit_items = Unit::define();
 
         let inverse_ops = InverseOps::iter()
             .flat_map(|op| self.types().filter_map(move |ty| op.impl_for(ty, self)));
 
+        let impl_sqrt = self.types().map(move |ty| Sqrt::impl_for(ty, self));
+
         let test_unit_inv =
             InverseOps::iter().flat_map(|op| self.types().filter_map(move |ty| op.tests(ty, self)));
+
+        let dynamic_types = self.dynamic_types();
 
         quote!(
             #(#traits)*
             #(#structs)*
+            #(#impl_new_fns)*
             #(#impl_grade_fns)*
+            #(#impl_from)*
             #(#impl_zero)*
             #(#impl_product_ops)*
             #(#impl_sum_ops)*
             #(#impl_neg)*
             #(#impl_rev)*
+            #(#impl_antirev)*
+            #(#impl_sqrt)*
             #(#impl_complements)*
             #(#scalar_ops)*
             #(#explicit_scalar_ops)*
@@ -95,8 +118,10 @@ impl Algebra {
             #(#sum_assign_ops)*
             #(#float_conversion)*
             #(#grade_products)*
+            #(#grade_antiproducts)*
             #(#norm_ops)*
             #(#sandwich_ops)*
+            #(#antisandwich_ops)*
             #(#inverse_ops)*
             #(#unit_items)*
 
@@ -105,6 +130,8 @@ impl Algebra {
                 use super::*;
                 #(#test_unit_inv)*
             }
+
+            #dynamic_types
         )
     }
 }
@@ -180,12 +207,59 @@ impl Reverse {
         }
     }
 
-    fn trait_ty() -> syn::Type {
+    pub fn trait_ty() -> syn::Type {
         parse_quote!(Reverse)
     }
 
-    fn trait_fn() -> Ident {
+    pub fn trait_fn() -> Ident {
         parse_quote!(rev)
+    }
+}
+
+pub struct Antireverse;
+
+impl Antireverse {
+    fn define() -> ItemTrait {
+        let trait_ty = Self::trait_ty();
+        let trait_fn = Self::trait_fn();
+        parse_quote! {
+            pub trait #trait_ty {
+                fn #trait_fn(self) -> Self;
+            }
+        }
+    }
+
+    fn impl_for(ty: Type, algebra: Algebra) -> ItemImpl {
+        let trait_ty = Self::trait_ty();
+        let trait_fn = Self::trait_fn();
+
+        let fields = ty.iter_blades_unsorted(algebra).map(|blade| {
+            let f = blade.field(algebra);
+            let rev = algebra.antirev(blade);
+            if rev.is_positive() {
+                quote! { #f: self.#f, }
+            } else {
+                quote! { #f: -self.#f, }
+            }
+        });
+
+        parse_quote! {
+            impl<T> #trait_ty for #ty<T> where T: std::ops::Neg<Output = T> {
+                fn #trait_fn(self) -> Self {
+                    #ty {
+                        #(#fields)*
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn trait_ty() -> syn::Type {
+        parse_quote!(Antireverse)
+    }
+
+    pub fn trait_fn() -> Ident {
+        parse_quote!(antirev)
     }
 }
 
@@ -197,7 +271,8 @@ impl GradeProduct {
         let trait_fn = Self::trait_fn();
         parse_quote! {
             pub trait #trait_ty<Lhs, Rhs> {
-                fn #trait_fn(lhs: Lhs, rhs: Rhs) -> Self;
+                type Output;
+                fn #trait_fn(lhs: Lhs, rhs: Rhs) -> Self::Output;
             }
         }
     }
@@ -210,12 +285,114 @@ impl GradeProduct {
         parse_quote!(product)
     }
 
+    fn iter_blades(
+        lhs: Type,
+        rhs: Type,
+        out: Type,
+        algebra: Algebra,
+    ) -> impl Iterator<Item = (Blade, Blade, Blade)> {
+        lhs.iter_blades_unsorted(algebra)
+            .flat_map(move |lhs| {
+                rhs.iter_blades_unsorted(algebra)
+                    .map(move |rhs| (lhs, rhs, algebra.geo(lhs, rhs)))
+            })
+            .filter(move |(_l, _r, o)| out.contains(*o))
+    }
+
+    pub fn contains(lhs: Type, rhs: Type, out: Type, algebra: Algebra) -> bool {
+        Self::iter_blades(lhs, rhs, out, algebra).any(|_| true)
+    }
+
+    pub fn impl_for(lhs: Type, rhs: Type, out: Type, algebra: Algebra) -> Option<ItemImpl> {
+        let blades = Self::iter_blades(lhs, rhs, out, algebra).fold(
+            HashMap::<Blade, Vec<(Blade, Blade, Blade)>>::new(),
+            |mut map, (l, r, o)| {
+                map.entry(o.unsigned()).or_default().push((l, r, o));
+                map
+            },
+        );
+
+        if blades.is_empty() {
+            return None;
+        }
+
+        let fields = out.iter_blades_unsorted(algebra).map(|blade| {
+            let f = blade.field(algebra);
+            let mut sum = quote!();
+
+            if let Some(vec) = blades.get(&blade) {
+                for (l, r, o) in vec {
+                    let lf = l.field(algebra);
+                    let rf = r.field(algebra);
+                    match (sum.is_empty(), o.is_positive()) {
+                        (true, true) => sum.extend(quote! { lhs.#lf * rhs.#rf }),
+                        (true, false) => sum.extend(quote! { -(lhs.#lf * rhs.#rf) }),
+                        (false, true) => sum.extend(quote! { + lhs.#lf * rhs.#rf }),
+                        (false, false) => sum.extend(quote! { - lhs.#lf * rhs.#rf }),
+                    }
+                }
+            } else {
+                sum = quote! { num_traits::Zero::zero() };
+            }
+
+            quote! {
+                #f: #sum,
+            }
+        });
+
+        let fn_attrs = fn_attrs();
+        let trait_ty = Self::trait_ty();
+        let trait_fn = Self::trait_fn();
+
+        Some(parse_quote! {
+            impl<T, U, V> #trait_ty<#lhs<T>, #rhs<U>> for #out<V>
+            where
+                T: std::ops::Mul<U, Output = V> + Copy,
+                U: Copy,
+                V: std::ops::Add<Output = V>
+                    + std::ops::Sub<Output = V>
+                    + std::ops::Neg<Output = V>
+                    + num_traits::Zero,
+            {
+                type Output = #out<V>;
+                #fn_attrs
+                fn #trait_fn(lhs: #lhs<T>, rhs: #rhs<U>) -> Self::Output {
+                    #out {
+                        #(#fields)*
+                    }
+                }
+            }
+        })
+    }
+}
+
+pub struct GradeAntiproduct;
+
+impl GradeAntiproduct {
+    pub fn define() -> ItemTrait {
+        let trait_ty = Self::trait_ty();
+        let trait_fn = Self::trait_fn();
+        parse_quote! {
+            pub trait #trait_ty<Lhs, Rhs> {
+                fn #trait_fn(lhs: Lhs, rhs: Rhs) -> Self;
+            }
+        }
+    }
+
+    pub fn trait_ty() -> syn::Type {
+        parse_quote!(GradeAntiproduct)
+    }
+
+    pub fn trait_fn() -> Ident {
+        parse_quote!(antiproduct)
+    }
+
     pub fn impl_for(lhs: Type, rhs: Type, out: Type, algebra: Algebra) -> Option<ItemImpl> {
         let blades = lhs
             .iter_blades_unsorted(algebra)
             .flat_map(|lhs| {
                 rhs.iter_blades_unsorted(algebra)
-                    .map(move |rhs| (lhs, rhs, algebra.mul(lhs, rhs)))
+                    .map(move |rhs| (lhs, rhs, algebra.antigeo(lhs, rhs)))
             })
             .filter(|(_l, _r, o)| out.contains(*o))
             .fold(
@@ -246,7 +423,7 @@ impl GradeProduct {
                     }
                 }
             } else {
-                sum = quote! { Default::default() };
+                sum = quote! { num_traits::Zero::zero() };
             }
 
             quote! {
@@ -266,7 +443,7 @@ impl GradeProduct {
                 V: std::ops::Add<Output = V>
                     + std::ops::Sub<Output = V>
                     + std::ops::Neg<Output = V>
-                    + Default,
+                    + num_traits::Zero,
             {
                 #fn_attrs
                 fn #trait_fn(lhs: #lhs<T>, rhs: #rhs<U>) -> Self {
@@ -335,13 +512,67 @@ impl Type {
         })
     }
 
+    fn impl_new_fns(self, algebra: Algebra) -> ItemImpl {
+        let params = self.iter_blades_sorted(algebra).map(|blade| {
+            let f = blade.field(algebra);
+            quote!(#f: T)
+        });
+
+        let fields = self.iter_blades_unsorted(algebra).map(|blade| {
+            let f = blade.field(algebra);
+            quote! {
+                #f: {
+                    debug_assert!(#f.is_finite());
+                    #f
+                }
+            }
+        });
+
+        parse_quote! {
+            impl<T: num_traits::Float> #self<T> {
+                #[inline]
+                pub fn new(#(#params),*) -> #self<T> {
+                    #self {
+                        #(#fields),*
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn impl_from(self, algebra: Algebra) -> impl Iterator<Item = ItemImpl> {
+        algebra.types().filter_map(move |target| {
+            if self != target && target.contains_ty(self) {
+                let fields = self.iter_blades_unsorted(algebra).map(|blade| {
+                    let f = blade.field(algebra);
+                    quote!(#f: value.#f,)
+                });
+                Some(parse_quote! {
+                    impl<T> From<#self<T>> for #target<T>
+                    where
+                        #target<T>: num_traits::Zero,
+                    {
+                        fn from(value: #self<T>) -> #target<T> {
+                            #target {
+                                #(#fields)*
+                                ..num_traits::Zero::zero()
+                            }
+                        }
+                    }
+                })
+            } else {
+                None
+            }
+        })
+    }
+
     fn ident(self) -> Ident {
         Ident::new(self.name(), Span::mixed_site())
     }
 
     fn impl_complement(self, algebra: Algebra, op: Complement) -> ItemImpl {
-        let ident = op.ident();
-        let fn_ident = op.fn_ident();
+        let ident = op.trait_ty();
+        let fn_ident = op.trait_fn();
         let comp = self.complement(algebra);
         let fn_attrs = fn_attrs();
         let fields = self.iter_blades_unsorted(algebra).map(|blade| {
@@ -401,7 +632,7 @@ impl Type {
 }
 
 impl Complement {
-    fn ident(self) -> Ident {
+    pub fn trait_ty(self) -> Ident {
         match self {
             Self::Dual => parse_quote!(Dual),
             Self::LeftComp => parse_quote!(LeftComp),
@@ -409,7 +640,7 @@ impl Complement {
         }
     }
 
-    fn fn_ident(self) -> Ident {
+    pub fn trait_fn(self) -> Ident {
         match self {
             Self::Dual => parse_quote!(dual),
             Self::LeftComp => parse_quote!(left_comp),
@@ -418,8 +649,8 @@ impl Complement {
     }
 
     fn define(self) -> ItemTrait {
-        let ident = self.ident();
-        let fn_ident = self.fn_ident();
+        let ident = self.trait_ty();
+        let fn_ident = self.trait_fn();
         parse_quote! {
             pub trait #ident {
                 type Output;
@@ -464,19 +695,25 @@ impl ProductOp {
         }
     }
 
-    fn trait_ty(self) -> syn::Type {
+    pub fn trait_ty(self) -> syn::Type {
         match self {
-            Self::Geo => parse_quote!(Geo),
-            Self::Wedge => parse_quote!(Wedge),
-            Self::Dot => parse_quote!(Dot),
+            ProductOp::Geo => parse_quote!(Geo),
+            ProductOp::Wedge => parse_quote!(Wedge),
+            ProductOp::Dot => parse_quote!(Dot),
+            ProductOp::Antigeo => parse_quote!(Antigeo),
+            ProductOp::Antidot => parse_quote!(Antidot),
+            ProductOp::Antiwedge => parse_quote!(Antiwedge),
         }
     }
 
-    fn trait_fn(self) -> Ident {
+    pub fn trait_fn(self) -> Ident {
         match self {
-            Self::Geo => parse_quote!(geo),
-            Self::Wedge => parse_quote!(wedge),
-            Self::Dot => parse_quote!(dot),
+            ProductOp::Geo => parse_quote!(geo),
+            ProductOp::Wedge => parse_quote!(wedge),
+            ProductOp::Dot => parse_quote!(dot),
+            ProductOp::Antigeo => parse_quote!(antigeo),
+            ProductOp::Antidot => parse_quote!(antidot),
+            ProductOp::Antiwedge => parse_quote!(antiwedge),
         }
     }
 
@@ -603,7 +840,7 @@ impl SumOp {
                     }
                 }
             } else {
-                sum.extend(quote!(Default::default()));
+                sum.extend(quote!(num_traits::Zero::zero()));
             }
             quote! { #field: #sum, }
         });
@@ -633,7 +870,7 @@ impl SumOp {
                     T: std::ops::Add<Output = T>
                         + std::ops::Sub<Output = T>
                         + std::ops::Neg<Output = T>
-                        + Default,
+                        + num_traits::Zero,
                 {
                     type Output = #output<T>;
                     #fn_attrs
@@ -647,14 +884,14 @@ impl SumOp {
         }
     }
 
-    fn trait_ty(self) -> syn::Type {
+    pub fn trait_ty(self) -> syn::Type {
         match self {
             SumOp::Add => parse_quote! { std::ops::Add },
             SumOp::Sub => parse_quote! { std::ops::Sub },
         }
     }
 
-    fn trait_fn(self) -> Ident {
+    pub fn trait_fn(self) -> Ident {
         match self {
             SumOp::Add => parse_quote! { add },
             SumOp::Sub => parse_quote! { sub },
@@ -810,14 +1047,14 @@ impl SumAssignOps {
         }
     }
 
-    fn trait_ty(self) -> syn::Type {
+    pub fn trait_ty(self) -> syn::Type {
         match self {
             Self::AddAssign => parse_quote!(std::ops::AddAssign),
             Self::SubAssign => parse_quote!(std::ops::SubAssign),
         }
     }
 
-    fn trait_fn(self) -> syn::Type {
+    pub fn trait_fn(self) -> syn::Type {
         match self {
             Self::AddAssign => parse_quote!(add_assign),
             Self::SubAssign => parse_quote!(sub_assign),
@@ -830,20 +1067,10 @@ impl FloatConversion {
         let from = self.type_from();
         let to = self.type_to();
         let fn_ident = self.fn_ident();
-        let fields = ty.iter_blades_unsorted(algebra).map(|blade| {
+        let fields1 = ty.iter_blades_unsorted(algebra).map(|blade| {
             let f = blade.field(algebra);
-            if matches!(self, Self::ToF32) {
-                quote! {
-                    #f: {
-                        let value = self.#f as #to;
-                        debug_assert!(value.is_finite());
-                        value
-                    },
-                }
-            } else {
-                quote! {
-                    #f: self.#f as #to,
-                }
+            quote! {
+                self.#f as #to
             }
         });
         let fn_attrs = fn_attrs();
@@ -851,9 +1078,7 @@ impl FloatConversion {
             impl #ty<#from> {
                 #fn_attrs
                 pub fn #fn_ident(self) -> #ty<#to> {
-                    #ty {
-                        #(#fields)*
-                    }
+                    #ty::new(#(#fields1),*)
                 }
             }
         }
@@ -901,12 +1126,12 @@ impl NormOps {
         let where_clause = match self {
             NormOps::Norm2 => quote! {
                 where
-                    Scalar<T>: GradeProduct<#ty<T>, #ty<T>>,
+                    Scalar<T>: GradeProduct<#ty<T>, #ty<T>, Output = Scalar<T>>,
                     #ty<T>: Reverse + Copy,
             },
             NormOps::Norm => quote! {
                 where
-                    Scalar<T>: GradeProduct<#ty<T>, #ty<T>>,
+                    Scalar<T>: GradeProduct<#ty<T>, #ty<T>, Output = Scalar<T>>,
                     #ty<T>: Reverse + Copy,
                     T: num_sqrt::Sqrt<Output = T>,
             },
@@ -932,14 +1157,14 @@ impl NormOps {
         }
     }
 
-    fn trait_ty(self) -> syn::Type {
+    pub fn trait_ty(self) -> syn::Type {
         match self {
             NormOps::Norm => parse_quote!(Norm),
             NormOps::Norm2 => parse_quote!(Norm2),
         }
     }
 
-    fn trait_fn(self) -> Ident {
+    pub fn trait_fn(self) -> Ident {
         match self {
             NormOps::Norm => parse_quote!(norm),
             NormOps::Norm2 => parse_quote!(norm2),
@@ -978,7 +1203,7 @@ impl Sandwich {
                 #lhs<T>: #geo_ty<#rhs<U>, Output = #intermediate<V>>
                     + #inv_ty<Output = #lhs<T>>
                     + Copy,
-                #rhs<W>: #grade_prod_ty<#intermediate<V>, #lhs<T>>,
+                #rhs<W>: #grade_prod_ty<#intermediate<V>, #lhs<T>, Output = #rhs<W>>,
                 V: std::ops::Mul<T, Output = W>,
             {
                 type Output = #rhs<W>;
@@ -991,12 +1216,65 @@ impl Sandwich {
         })
     }
 
-    fn trait_ty() -> syn::Type {
+    pub fn trait_ty() -> syn::Type {
         parse_quote!(Sandwich)
     }
 
-    fn trait_fn() -> Ident {
+    pub fn trait_fn() -> Ident {
         parse_quote!(sandwich)
+    }
+}
+
+pub struct Antisandwich;
+
+impl Antisandwich {
+    pub fn define() -> ItemTrait {
+        let trait_ty = Self::trait_ty();
+        let trait_fn = Self::trait_fn();
+        parse_quote! {
+            pub trait #trait_ty<Rhs> {
+                type Output;
+                fn #trait_fn(self, rhs: Rhs) -> Self::Output;
+            }
+        }
+    }
+
+    pub fn impl_for(lhs: Type, rhs: Type, algebra: Algebra) -> Option<ItemImpl> {
+        let intermediate = ProductOp::Geo.output(algebra, lhs, rhs)?;
+        let trait_ty = Self::trait_ty();
+        let trait_fn = Self::trait_fn();
+        let fn_attrs = fn_attrs();
+        let geo_ty = ProductOp::Antigeo.trait_ty();
+        let geo_fn = ProductOp::Antigeo.trait_fn();
+        let inv_ty = InverseOps::Inverse.trait_ty();
+        let inv_fn = InverseOps::Inverse.trait_fn();
+        let grade_prod_ty = GradeProduct::trait_ty();
+        let grade_prod_fn = GradeProduct::trait_fn();
+        Some(parse_quote! {
+            impl<T, U, V, W> #trait_ty<#rhs<U>> for #lhs<T>
+            where
+                #lhs<T>: #geo_ty<#rhs<U>, Output = #intermediate<V>>
+                    + #inv_ty<Output = #lhs<T>>
+                    + Copy,
+                #rhs<W>: #grade_prod_ty<#intermediate<V>, #lhs<T>, Output = #rhs<W>>,
+                V: std::ops::Mul<T, Output = W>,
+            {
+                type Output = #rhs<W>;
+                #fn_attrs
+                fn #trait_fn(self, rhs: #rhs<U>) -> Self::Output {
+                    let intermediate: #intermediate<V> = #geo_ty::#geo_fn(self, rhs);
+                    #rhs::<W>::#grade_prod_fn(intermediate, #inv_ty::#inv_fn(self))
+                }
+            }
+        })
+    }
+
+    pub fn trait_ty() -> syn::Type {
+        parse_quote!(Antisandwich)
+    }
+
+    pub fn trait_fn() -> Ident {
+        parse_quote!(antisandwich)
     }
 }
 
@@ -1026,8 +1304,10 @@ impl InverseOps {
         }
     }
 
-    fn inapplicable(self, ty: Type, algebra: Algebra) -> bool {
-        algebra.has_negative_bases() || ty == Type::Mv || ty.single_blade(algebra)
+    pub fn inapplicable(self, ty: Type, algebra: Algebra) -> bool {
+        algebra.has_negative_bases()
+            || ty == Type::Mv
+            || (ty.single_blade(algebra) && ty != Type::Grade(0))
     }
 
     pub fn impl_for(self, ty: Type, algebra: Algebra) -> Option<ItemImpl> {
@@ -1194,13 +1474,98 @@ impl Unit {
                 }
             }
         };
+        let sandwich_impl = parse_quote! {
+            impl<Lhs, Rhs, Int> Sandwich<Rhs> for Unit<Lhs>
+            where
+                Lhs: Geo<Rhs, Output = Int> + Reverse + Copy,
+                Rhs: GradeProduct<Int, Lhs, Output = Rhs>,
+            {
+                type Output = Rhs;
+                #[inline]
+                fn sandwich(self, rhs: Rhs) -> Self::Output {
+                    let int = self.value().geo(rhs);
+                    Rhs::product(int, self.value().rev())
+                }
+            }
+        };
+        let antisandwich_impl = parse_quote! {
+            impl<Lhs, Rhs, Int> Antisandwich<Rhs> for Unit<Lhs>
+            where
+                Lhs: Antigeo<Rhs, Output = Int> + Reverse + Copy,
+                Rhs: GradeProduct<Int, Lhs, Output = Rhs>,
+            {
+                type Output = Rhs;
+                #[inline]
+                fn antisandwich(self, rhs: Rhs) -> Self::Output {
+                    let int = self.value().antigeo(rhs);
+                    Rhs::product(int, self.value().rev())
+                }
+            }
+        };
         use syn::Item::*;
-        vec![
+
+        IntoIterator::into_iter([
             Struct(item_struct),
             Impl(item_impl),
             Impl(unitize_impl),
             Impl(inverse_impl),
-        ]
+            Impl(sandwich_impl),
+            Impl(antisandwich_impl),
+        ])
+        .chain(ProductOp::iter().map(|op| {
+            let trait_ty = op.trait_ty();
+            let trait_fn = op.trait_fn();
+            parse_quote! {
+                impl<Lhs, Rhs, Output> #trait_ty<Rhs> for Unit<Lhs>
+                where
+                    Lhs: #trait_ty<Rhs, Output = Output>
+                {
+                    type Output = Output;
+                    #[inline]
+                    fn #trait_fn(self, rhs: Rhs) -> Self::Output {
+                        #trait_ty::#trait_fn(self.value(), rhs)
+                    }
+                }
+            }
+        }))
+        .collect()
+    }
+}
+
+pub struct Sqrt;
+
+impl Sqrt {
+    pub fn impl_for(ty: Type, _algebra: Algebra) -> Option<syn::ItemImpl> {
+        let trait_ty = Self::trait_ty();
+        let trait_fn = Self::trait_fn();
+        match ty {
+            Type::Grade(0) => Some(parse_quote! {
+                impl<T> #trait_ty for #ty<T>
+                where
+                    T: #trait_ty<Output = T>,
+                {
+                    type Output = #ty<T>;
+                    #[inline]
+                    fn #trait_fn(self) -> Self::Output {
+                        Scalar {
+                            s: self.s.sqrt()
+                        }
+                    }
+                }
+            }),
+            // TODO pin these down for Bivectors and Motors
+            //    does it require a unitized type?
+            //    can we just add Scalar { s: self.norm2() } and then unitize?
+            _ => None,
+        }
+    }
+
+    pub fn trait_ty() -> syn::Type {
+        parse_quote!(num_sqrt::Sqrt)
+    }
+
+    pub fn trait_fn() -> Ident {
+        parse_quote!(sqrt)
     }
 }
 
@@ -1240,7 +1605,7 @@ mod tests {
     #[test]
     fn define_type() {
         let tokens = Type::Grade(2)
-            .define(Algebra::g3())
+            .define(Algebra::ga3())
             .to_token_stream()
             .to_string();
         let expected = quote! {

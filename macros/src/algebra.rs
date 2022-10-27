@@ -6,7 +6,7 @@ pub struct Algebra {
 }
 
 impl Algebra {
-    pub fn g2() -> Self {
+    pub fn ga2() -> Self {
         Self {
             bases: &[
                 Basis {
@@ -21,7 +21,7 @@ impl Algebra {
         }
     }
 
-    pub fn g3() -> Self {
+    pub fn ga3() -> Self {
         Self {
             bases: &[
                 Basis {
@@ -120,7 +120,10 @@ impl Algebra {
             .filter_map(move |(i, b)| set.contains(i as u32).then_some(*b))
     }
 
-    pub fn mul(self, lhs: Blade, rhs: Blade) -> Blade {
+    pub fn geo(self, lhs: Blade, rhs: Blade) -> Blade {
+        if Blade::is_zero(lhs | rhs) {
+            return Blade::zero();
+        }
         let overlap = lhs & rhs;
         let mut product = lhs.product(rhs);
         for basis in self.iter_bases(overlap) {
@@ -132,7 +135,7 @@ impl Algebra {
     pub fn dot(self, lhs: Blade, rhs: Blade) -> Blade {
         let max = lhs.grade().max(rhs.grade());
         let min = lhs.grade().min(rhs.grade());
-        let product = self.mul(lhs, rhs);
+        let product = self.geo(lhs, rhs);
         if product.grade() == max - min {
             product
         } else {
@@ -140,14 +143,41 @@ impl Algebra {
         }
     }
 
+    pub fn antigeo(self, lhs: Blade, rhs: Blade) -> Blade {
+        let lhs = self.left_comp(lhs);
+        let rhs = self.left_comp(rhs);
+        let output = self.geo(lhs, rhs);
+        self.right_comp(output)
+    }
+
+    pub fn antidot(self, lhs: Blade, rhs: Blade) -> Blade {
+        let lhs = self.left_comp(lhs);
+        let rhs = self.left_comp(rhs);
+        let output = self.dot(lhs, rhs);
+        self.right_comp(output)
+    }
+
+    pub fn antiwedge(self, lhs: Blade, rhs: Blade) -> Blade {
+        let lhs = self.left_comp(lhs);
+        let rhs = self.left_comp(rhs);
+        let output = self.wedge(lhs, rhs);
+        self.right_comp(output)
+    }
+
     pub fn wedge(self, lhs: Blade, rhs: Blade) -> Blade {
         let sum = lhs.grade() + rhs.grade();
-        let product = self.mul(lhs, rhs);
+        let product = self.geo(lhs, rhs);
         if product.grade() == sum {
             product
         } else {
             Blade::zero()
         }
+    }
+
+    pub fn antirev(self, blade: Blade) -> Blade {
+        let comp = self.left_comp(blade);
+        let rev = comp.rev();
+        self.right_comp(rev)
     }
 
     pub fn blades_by_grade(self) -> impl Iterator<Item = Blade> {
@@ -168,9 +198,12 @@ impl Algebra {
     }
 
     pub fn right_comp(self, blade: Blade) -> Blade {
+        if blade.is_zero() {
+            return Blade::zero();
+        }
         let i = self.pseudoscalar();
         let comp = i ^ blade;
-        if self.mul(blade, comp).is_positive() {
+        if self.geo(blade, comp).is_positive() {
             comp
         } else {
             -comp
@@ -178,9 +211,12 @@ impl Algebra {
     }
 
     pub fn left_comp(self, blade: Blade) -> Blade {
+        if blade.is_zero() {
+            return Blade::zero();
+        }
         let i = self.pseudoscalar();
         let comp = i ^ blade;
-        if self.mul(comp, blade).is_positive() {
+        if self.geo(comp, blade).is_positive() {
             comp
         } else {
             -comp
@@ -200,7 +236,7 @@ impl Algebra {
         self.grade_range().map(Type::Grade)
     }
 
-    fn grade_range(self) -> std::ops::RangeInclusive<u32> {
+    pub fn grade_range(self) -> std::ops::RangeInclusive<u32> {
         0..=(self.bases.len() as u32)
     }
 
@@ -587,11 +623,21 @@ pub enum ProductOp {
     Geo,
     Dot,
     Wedge,
+    Antigeo,
+    Antidot,
+    Antiwedge,
 }
 
 impl ProductOp {
     pub fn iter() -> impl Iterator<Item = Self> {
-        IntoIterator::into_iter([Self::Geo, Self::Wedge, Self::Dot])
+        IntoIterator::into_iter([
+            Self::Geo,
+            Self::Wedge,
+            Self::Dot,
+            Self::Antigeo,
+            Self::Antidot,
+            Self::Antiwedge,
+        ])
     }
 
     pub fn output(self, algebra: Algebra, lhs: Type, rhs: Type) -> Option<Type> {
@@ -605,9 +651,12 @@ impl ProductOp {
 
     pub fn product(self, algebra: Algebra, lhs: Blade, rhs: Blade) -> Blade {
         match self {
-            ProductOp::Geo => algebra.mul(lhs, rhs),
+            ProductOp::Geo => algebra.geo(lhs, rhs),
             ProductOp::Dot => algebra.dot(lhs, rhs),
             ProductOp::Wedge => algebra.wedge(lhs, rhs),
+            ProductOp::Antigeo => algebra.antigeo(lhs, rhs),
+            ProductOp::Antidot => algebra.antidot(lhs, rhs),
+            ProductOp::Antiwedge => algebra.antiwedge(lhs, rhs),
         }
     }
 }
@@ -755,9 +804,9 @@ mod tests {
 
     #[test]
     fn scalar_closed_mul() {
-        let a = Algebra::g2();
+        let a = Algebra::ga2();
         let s = Blade(0);
-        assert_eq!(s, a.mul(s, s));
+        assert_eq!(s, a.geo(s, s));
 
         assert!(s.is_positive());
         assert!(!s.is_negative());
@@ -765,15 +814,15 @@ mod tests {
 
     #[test]
     fn vector_mul_scalar() {
-        let a = Algebra::g3();
+        let a = Algebra::ga3();
         let s = Blade(0);
         let e1 = Blade(0b001);
         let e2 = Blade(0b010);
         let e3 = Blade(0b100);
 
-        assert_eq!(s, a.mul(e1, e1));
-        assert_eq!(s, a.mul(e2, e2));
-        assert_eq!(s, a.mul(e3, e3));
+        assert_eq!(s, a.geo(e1, e1));
+        assert_eq!(s, a.geo(e2, e2));
+        assert_eq!(s, a.geo(e3, e3));
     }
 
     #[test]
@@ -836,35 +885,35 @@ mod tests {
 
     #[test]
     fn bivector_mul_neg_scalar() {
-        let a = Algebra::g3();
+        let a = Algebra::ga3();
         let s = Blade(0);
         let e12 = Blade(0b011);
         let e23 = Blade(0b110);
         let e31 = -Blade(0b101);
 
-        assert_eq!(-s, a.mul(e12, e12));
-        assert_eq!(-s, a.mul(e23, e23));
-        assert_eq!(-s, a.mul(e31, e31));
+        assert_eq!(-s, a.geo(e12, e12));
+        assert_eq!(-s, a.geo(e23, e23));
+        assert_eq!(-s, a.geo(e31, e31));
     }
 
     #[test]
     fn bivector_mul_e12_e23() {
-        let a = Algebra::g3();
+        let a = Algebra::ga3();
         let e12 = Blade(0b011);
         let e23 = Blade(0b110);
         let e13 = Blade(0b101);
 
-        assert_eq!(e13, a.mul(e12, e23));
+        assert_eq!(e13, a.geo(e12, e23));
     }
 
     #[test]
     fn bivector_mul_e23_e12() {
-        let a = Algebra::g3();
+        let a = Algebra::ga3();
         let e12 = Blade(0b011);
         let e23 = Blade(0b110);
         let e13 = Blade(0b101);
 
-        assert_eq!(-e13, a.mul(e23, e12));
+        assert_eq!(-e13, a.geo(e23, e12));
     }
 
     #[test]
@@ -901,13 +950,13 @@ mod tests {
 
     #[test]
     fn vector_wedge_bivector() {
-        let a = Algebra::g3();
+        let a = Algebra::ga3();
         let e12 = Blade(0b11);
         let e3 = Blade(0b100);
         let e123 = Blade(0b111);
 
-        assert_eq!(e123, a.mul(e12, e3));
-        assert_eq!(e123, a.mul(e3, e12));
+        assert_eq!(e123, a.geo(e12, e3));
+        assert_eq!(e123, a.geo(e3, e12));
     }
 
     #[test]
@@ -919,9 +968,9 @@ mod tests {
 
     #[test]
     fn blade_set_mul_zero() {
-        let a = Algebra::g2();
-        assert_eq!(Blade::zero(), a.mul(Blade(1), Blade::zero()));
-        assert_eq!(Blade::zero(), a.mul(Blade::zero(), Blade(1)));
+        let a = Algebra::ga2();
+        assert_eq!(Blade::zero(), a.geo(Blade(1), Blade::zero()));
+        assert_eq!(Blade::zero(), a.geo(Blade::zero(), Blade(1)));
     }
 
     #[test]
@@ -931,7 +980,7 @@ mod tests {
 
     #[test]
     fn dot_vectors() {
-        let a = Algebra::g2();
+        let a = Algebra::ga2();
         let s = Blade(0);
         let e1 = Blade(1);
         let e2 = Blade(0b10);
@@ -942,7 +991,7 @@ mod tests {
 
     #[test]
     fn wedge_vectors() {
-        let a = Algebra::g2();
+        let a = Algebra::ga2();
         let e12 = Blade(0b11);
         let e1 = Blade(1);
         let e2 = Blade(0b10);
@@ -962,7 +1011,7 @@ mod tests {
         };
         let e1 = Blade(1);
 
-        assert!(a.mul(e1, e1).is_zero());
+        assert!(a.geo(e1, e1).is_zero());
     }
 
     #[test]
@@ -976,7 +1025,7 @@ mod tests {
         let e1 = Blade(1);
         let neg_s = -Blade(0);
 
-        assert_eq!(neg_s, a.mul(e1, e1));
+        assert_eq!(neg_s, a.geo(e1, e1));
     }
 
     #[test]
@@ -1023,7 +1072,7 @@ mod tests {
 
     #[test]
     fn algebra_grades() {
-        let a = Algebra::g2();
+        let a = Algebra::ga2();
         assert_eq!(3, a.grades().count());
 
         let a = Algebra::cga3();
@@ -1048,7 +1097,7 @@ mod tests {
 
     #[test]
     fn skip_versors_with_one_grade() {
-        let types = Algebra::g2()
+        let types = Algebra::ga2()
             .types()
             .collect::<std::collections::HashSet<_>>();
 
@@ -1058,7 +1107,7 @@ mod tests {
 
     #[test]
     fn add_scalar_bivector_to_motor() {
-        let algebra = Algebra::g3();
+        let algebra = Algebra::ga3();
 
         assert_eq!(
             Some(Type::Motor),
@@ -1072,13 +1121,13 @@ mod tests {
         let i = a.pseudoscalar();
         for blade in a.blades() {
             let comp = a.right_comp(blade);
-            assert_eq!(i, a.mul(blade, comp));
+            assert_eq!(i, a.geo(blade, comp));
         }
     }
 
     #[test]
     fn symmetrical_complements() {
-        let g3 = Algebra::g3();
+        let g3 = Algebra::ga3();
         let pga3 = Algebra::pga3();
 
         assert!(g3.symmetrical_complements());
@@ -1087,7 +1136,7 @@ mod tests {
 
     #[test]
     fn complements() {
-        let a = Algebra::g3();
+        let a = Algebra::ga3();
         assert_eq!(Type::Grade(2), Type::Grade(1).complement(a));
         assert_eq!(Type::Grade(1), Type::Grade(2).complement(a));
         assert_eq!(Type::Flector, Type::Motor.complement(a));
@@ -1097,5 +1146,59 @@ mod tests {
     #[test]
     fn type_does_not_contain_zero() {
         assert!(!Type::Grade(0).contains(Blade::zero()));
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn antidot() {
+        let a = Algebra::pga3();
+
+        let s = Blade(0);
+        let I = Blade(0b1111);
+        let e1 = Blade(0b0001);
+        let e4 = Blade(0b1000);
+        let e124 = Blade(0b1011);
+        let e123 = Blade(0b0111);
+
+        assert_eq!(e123, a.antidot(e4, s));
+        assert_eq!(-I, a.antidot(e4, e4));
+        assert_eq!(I, a.antidot(e124, e124));
+        assert_eq!(I, a.antidot(I, I));
+        assert_eq!(Blade::zero(), a.antidot(e1, e1));
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn antiwedge() {
+        let a = Algebra::pga3();
+
+        let z = Blade::zero();
+        let s = Blade(0);
+        let e1 = Blade(0b0001);
+        let e4 = Blade(0b1000);
+        let e14 = Blade(0b1001);
+        let e23 = Blade(0b0110);
+        let e234 = Blade(0b1110);
+
+        assert_eq!(s, a.antiwedge(e14, e23));
+        assert_eq!(-s, a.antiwedge(e234, e1));
+        assert_eq!(s, a.antiwedge(e1, e234));
+        assert_eq!(z, a.antiwedge(e1, e1));
+        assert_eq!(z, a.antiwedge(e1, e4));
+    }
+
+    #[test]
+    fn antirev() {
+        let a = Algebra::pga3();
+        let s = Blade(0);
+        let e1 = Blade(1);
+        let e12 = Blade(0b11);
+        let e123 = Blade(0b111);
+        let e1234 = Blade(0b1111);
+        assert_eq!(s, a.antirev(s));
+        assert_eq!(-e1, a.antirev(e1));
+        assert_eq!(-e12, a.antirev(e12));
+        assert_eq!(e123, a.antirev(e123));
+        assert_eq!(e1234, a.antirev(e1234));
     }
 }

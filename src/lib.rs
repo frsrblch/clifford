@@ -1,10 +1,3 @@
-#![feature(
-    const_trait_impl,
-    const_fn_floating_point_arithmetic,
-    const_default_impls,
-    const_convert,
-    core_intrinsics
-)]
 // IDEA if I cant impl Mul<*> for T, I can convert all to Mul<T> for *
 //   scalar ops are all commutative
 
@@ -56,27 +49,30 @@
 //!
 //! Types:
 //! - [x] Grades
+//! - [x] Unit
 //!
 //! Functions:
 //! - [x] Grade selection (e.g., Motor::bivector() -> Bivector)
+//! - [x] fn new(...) -> Self { ... }
+//! - [x] From<Grade> for Versor/Multivector
 //!
 //! Main products:
 //! - [x] Mul scalar
 //! - [x] Div scalar
 //! - [x] Geometric
-//! - [ ] Antigeometric
+//! - [x] Antigeometric
 //! - [x] Grade products
-//! - [ ] Grade antiproducts
+//! - [x] Grade antiproducts
 //!
 //! Inner products:
 //! - [x] Dot
-//! - [ ] Antidot
+//! - [x] Antidot
 //! - [ ] Left contraction
 //! - [ ] Right contraction
 //!
 //! Outer products:
 //! - [x] Wedge
-//! - [ ] Antiwedge
+//! - [x] Antiwedge
 //!
 //! Interior products:
 //! - [ ] Right interior product
@@ -99,7 +95,7 @@
 //! - [x] Left complement
 //! - [x] Right complement
 //! - [x] Reverse
-//! - [ ] Antireverse
+//! - [x] Antireverse
 //!
 //! Norm-based operations:
 //! - [x] Norm
@@ -109,7 +105,7 @@
 //!
 //! Compound products:
 //! - [x] Sandwich
-//! - [ ] Antisandwich
+//! - [x] Antisandwich
 //! - [ ] Commutator
 //!
 //! Num Traits:
@@ -120,31 +116,25 @@
 pub use proc_macros::clifford;
 
 #[cfg(feature = "ga_3d")]
-pub mod ga_3d;
+pub mod ga_3d {
+    macros::g3!();
 
+    #[test]
+    fn value_geo() {
+        let v = Value::Vector(Vector::new(1., 0., 0.));
+        assert_eq!(
+            Value::Motor(Motor {
+                s: 1.,
+                ..Motor::default()
+            }),
+            v.geo(v).unwrap()
+        );
+    }
+}
+
+#[cfg(feature = "pga_3d")]
 pub mod pga3 {
     macros::pga3!();
-
-    pub fn unit_sandwich(motor: Motor<f64>, vector: Vector<f64>) -> Vector<f64> {
-        let intermediate: Flector<f64> = Geo::<Vector<f64>>::geo(motor, vector);
-        <Vector<f64> as GradeProduct<Flector<f64>, Motor<f64>>>::product(
-            intermediate,
-            Reverse::rev(motor),
-        )
-    }
-
-    impl<Lhs, Rhs, Int> Sandwich<Rhs> for Unit<Lhs>
-    where
-        Lhs: Geo<Rhs, Output = Int> + Reverse + Copy,
-        Rhs: GradeProduct<Int, Lhs>,
-    {
-        type Output = Rhs;
-        #[inline]
-        fn sandwich(self, rhs: Rhs) -> Self::Output {
-            let int = self.value().geo(rhs);
-            Rhs::product(int, self.value().rev())
-        }
-    }
 
     impl<T> num_sqrt::Sqrt for Motor<T>
     where
@@ -190,13 +180,26 @@ pub mod pga3 {
         assert_eq!(v_, sqrt.sandwich(v));
         // panic!("done");
     }
+
+    #[test]
+    fn motor_from_scalar() {
+        let s = Scalar { s: 1. };
+        let _m = Motor::from(s);
+    }
+
+    #[test]
+    fn rotation_and_unit_rotation() {
+        let (sin, cos) = std::f64::consts::FRAC_PI_4.sin_cos();
+        let motor = Motor::new(sin, cos, 0., 0., 0., 0., 0., 0.) * 2.;
+        let unit = motor.unit();
+
+        let v = Vector::new(1., 2., 3., 0.);
+
+        let v1 = motor.sandwich(v);
+        let v2 = unit.sandwich(v); // interestingly, the sqrt adds inaccuracy
+
+        dbg!(v1, v2);
+        assert!((v1 - v2).norm2() < 1e-10);
+        // panic!();
+    }
 }
-
-// #[cfg(feature = "pga_3d")]
-// pub mod pga_3d;
-
-// #[cfg(feature = "cga_2d")]
-// pub mod cga_2d;
-
-#[cfg(feature = "cga_3d")]
-pub mod cga_3d;

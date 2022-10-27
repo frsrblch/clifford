@@ -16,9 +16,9 @@ criterion = "0.4.0"
 rand = "0.8"
 num-dual = { path = "../num-dual" }
 
-[[test]]
-name = "cga_3d_tests"
-required-features = ["cga_3d"]
+#[[test]]
+#name = "cga_3d_tests"
+#required-features = ["cga_3d"]
 
 [features]
 ga_3d = []
@@ -28,4 +28,8 @@ cga_3d = []
 
 [[bench]]
 name = "inverse"
+harness = false
+
+[[bench]]
+name = "sandwich"
 harness = false
