@@ -297,7 +297,7 @@ impl Algebra {
                     .any(|squared| !squared.is_zero());
                 if scalar_blades {
                     Some(quote! {
-                        Value::#ty(value) => Some(Value::Scalar(Scalar{ s: #op_ty::#op_fn(value)})),
+                        Value::#ty(value) => Some(Value::Scalar(#op_ty::#op_fn(value))),
                     })
                 } else {
                     None

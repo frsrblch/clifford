@@ -1123,35 +1123,39 @@ impl NormOps {
         let trait_fn = self.trait_fn();
         let fn_attrs = fn_attrs();
 
-        let where_clause = match self {
-            NormOps::Norm2 => quote! {
-                where
-                    Scalar<T>: GradeProduct<#ty<T>, #ty<T>, Output = Scalar<T>>,
-                    #ty<T>: Reverse + Copy,
-            },
-            NormOps::Norm => quote! {
-                where
-                    Scalar<T>: GradeProduct<#ty<T>, #ty<T>, Output = Scalar<T>>,
-                    #ty<T>: Reverse + Copy,
-                    T: num_sqrt::Sqrt<Output = T>,
-            },
-        };
-
-        let expr = match self {
-            NormOps::Norm2 => quote! {
-                Scalar::product(self, self.rev()).s
-            },
-            NormOps::Norm => quote! {
-                Scalar::product(self, self.rev()).s.sqrt()
-            },
-        };
-
-        parse_quote! {
-            impl<T> #trait_ty for #ty<T> #where_clause {
-                type Output = T;
-                #fn_attrs
-                fn #trait_fn(self) -> Self::Output {
-                    #expr
+        match self {
+            NormOps::Norm2 => {
+                parse_quote! {
+                    impl<T, U> #trait_ty for #ty<T>
+                    where
+                        Scalar<U>: GradeProduct<#ty<T>, #ty<T>, Output = Scalar<U>>,
+                        #ty<T>: Reverse + Copy,
+                        T: std::ops::Mul<Output = U>,
+                    {
+                        type Output = Scalar<U>;
+                        #fn_attrs
+                        fn #trait_fn(self) -> Self::Output {
+                            Scalar::product(self, self.rev())
+                        }
+                    }
+                }
+            }
+            NormOps::Norm => {
+                parse_quote! {
+                    impl<T, U, V> #trait_ty for #ty<T>
+                    where
+                        Scalar<U>: GradeProduct<#ty<T>, #ty<T>, Output = Scalar<U>>,
+                        #ty<T>: Reverse + Copy,
+                        T: std::ops::Mul<Output = U>,
+                        U: num_sqrt::Sqrt<Output = V>,
+                    {
+                        type Output = Scalar<V>;
+                        #fn_attrs
+                        fn #trait_fn(self) -> Self::Output {
+                            let scalar = Scalar::product(self, self.rev());
+                            num_sqrt::Sqrt::sqrt(scalar)
+                        }
+                    }
                 }
             }
         }
@@ -1329,58 +1333,55 @@ impl InverseOps {
             #fn_attrs
         };
 
-        let expr = match self {
-            InverseOps::Inverse => {
-                quote! {
-                    let norm2 = self.norm2();
-                    if norm2.is_zero() {
-                        panic!("divide by zero")
-                    }
-                    let mult = T::one() / norm2;
-                    self.rev() * mult
-                }
-            }
-            InverseOps::Unitize => {
-                quote! {
-                    let norm = self.norm();
-                    if norm.is_zero() {
-                        panic!("divide by zero")
-                    }
-                    let mult = T::one() / norm;
-                    Unit(self * mult)
-                }
-            }
-        };
-
-        let type_bounds = match self {
-            InverseOps::Unitize => {
-                let norm = NormOps::Norm.trait_ty();
-                quote! {
-                    #ty<T>: #norm<Output = T>,
-                }
-            }
+        Some(match self {
             InverseOps::Inverse => {
                 let norm2 = NormOps::Norm2.trait_ty();
-                quote! {
-                    #ty<T>: #norm2<Output = T>,
+                parse_quote! {
+                    impl<T> #trait_ty for #ty<T>
+                    where
+                        T: num_traits::Zero
+                            + num_traits::One
+                            + std::ops::Neg<Output = T>
+                            + std::ops::Div<Output = T>
+                            + Copy,
+                        #ty<T>: #norm2<Output = Scalar<T>>,
+                    {
+                        type Output = #output;
+                        #fn_attrs
+                        fn #trait_fn(self) -> Self::Output {
+                            let Scalar { s: norm2 } = self.norm2();
+                            if norm2.is_zero() {
+                                panic!("divide by zero")
+                            }
+                            let mult = T::one() / norm2;
+                            self.rev() * mult
+                        }
+                    }
                 }
             }
-        };
-
-        Some(parse_quote! {
-            impl<T> #trait_ty for #ty<T>
-            where
-                T: num_traits::Zero
-                    + num_traits::One
-                    + std::ops::Neg<Output = T>
-                    + std::ops::Div<Output = T>
-                    + Copy,
-                #type_bounds
-            {
-                type Output = #output;
-                #fn_attrs
-                fn #trait_fn(self) -> Self::Output {
-                    #expr
+            InverseOps::Unitize => {
+                let norm = NormOps::Norm.trait_ty();
+                parse_quote! {
+                    impl<T> #trait_ty for #ty<T>
+                    where
+                        T: num_traits::Zero
+                            + num_traits::One
+                            + std::ops::Neg<Output = T>
+                            + std::ops::Div<Output = T>
+                            + Copy,
+                        #ty<T>: #norm<Output = Scalar<T>>,
+                    {
+                        type Output = #output;
+                        #fn_attrs
+                        fn #trait_fn(self) -> Self::Output {
+                            let Scalar { s: norm } = self.norm();
+                            if norm.is_zero() {
+                                panic!("divide by zero")
+                            }
+                            let mult = T::one() / norm;
+                            Unit(self * mult)
+                        }
+                    }
                 }
             }
         })
@@ -1410,14 +1411,14 @@ impl InverseOps {
                 let product = value.geo(inv);
                 let remainder = (product - Scalar { s: 1. }).norm2();
                 dbg!(value, inv, product);
-                assert!(remainder < 1e-10);
+                assert!(remainder.s < 1e-10);
             },
             InverseOps::Unitize => quote! {
                 let unit = value.unit().value();
                 let product = unit.geo(unit.rev());
                 let remainder = (product - Scalar { s: 1. }).norm2();
                 dbg!(value, unit, product);
-                assert!(remainder < 1e-10);
+                assert!(remainder.s < 1e-10);
             },
         };
 
@@ -1536,19 +1537,19 @@ pub struct Sqrt;
 
 impl Sqrt {
     pub fn impl_for(ty: Type, _algebra: Algebra) -> Option<syn::ItemImpl> {
-        let trait_ty = Self::trait_ty();
-        let trait_fn = Self::trait_fn();
+        let sqrt_ty = Self::trait_ty();
+        let sqrt_fn = Self::trait_fn();
         match ty {
             Type::Grade(0) => Some(parse_quote! {
-                impl<T> #trait_ty for #ty<T>
+                impl<T, U> #sqrt_ty for #ty<T>
                 where
-                    T: #trait_ty<Output = T>,
+                    T: #sqrt_ty<Output = U>,
                 {
-                    type Output = #ty<T>;
+                    type Output = Scalar<U>;
                     #[inline]
-                    fn #trait_fn(self) -> Self::Output {
+                    fn #sqrt_fn(self) -> Self::Output {
                         Scalar {
-                            s: self.s.sqrt()
+                            s: num_sqrt::Sqrt::sqrt(self.s)
                         }
                     }
                 }

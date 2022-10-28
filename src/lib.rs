@@ -140,7 +140,7 @@ pub mod pga3 {
     where
         T: num_sqrt::Sqrt<Output = T> + num_traits::One,
         Motor<T>: std::ops::Add<Scalar<T>, Output = Motor<T>>
-            + Norm2<Output = T>
+            + Norm2<Output = Scalar<T>>
             + Unitize<Output = Unit<Motor<T>>>,
     {
         type Output = Motor<T>;
@@ -153,7 +153,9 @@ pub mod pga3 {
 
     #[test]
     fn rotor_sqrt() {
-        let motor = Motor {
+        use num_sqrt::Sqrt;
+
+        let rot_180 = Motor {
             s: 0.,
             xy: -1.,
             ..Default::default()
@@ -164,20 +166,17 @@ pub mod pga3 {
             z: 5.,
             w: 1.,
         };
-        let v_ = Vector {
+        let v_90 = Vector {
             x: -3.,
             y: 2.,
             z: 5.,
             w: 1.,
         };
 
-        use num_sqrt::Sqrt;
-        let sqrt = motor.sqrt();
-        let sqrt2 = sqrt.sqrt();
-        dbg!(sqrt, sqrt.sandwich(v));
-        dbg!(sqrt2, sqrt2.sandwich(v));
+        let rot_90 = rot_180.sqrt();
+        dbg!(rot_90, rot_90.sandwich(v));
 
-        assert_eq!(v_, sqrt.sandwich(v));
+        assert_eq!(v_90, rot_90.sandwich(v));
         // panic!("done");
     }
 
@@ -199,7 +198,7 @@ pub mod pga3 {
         let v2 = unit.sandwich(v); // interestingly, the sqrt adds inaccuracy
 
         dbg!(v1, v2);
-        assert!((v1 - v2).norm2() < 1e-10);
+        assert!((v1 - v2).norm2().s < 1e-10);
         // panic!();
     }
 }
