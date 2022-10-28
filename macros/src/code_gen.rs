@@ -20,7 +20,8 @@ impl Algebra {
 
         let structs = self.types().map(move |ty| ty.define(self));
 
-        let impl_new_fns = self.types().map(|ty| ty.impl_new_fns(self));
+        let impl_new_fn = self.types().map(|ty| ty.impl_new_fn(self));
+        let impl_map_fn = self.types().map(|ty| ty.impl_map(self));
         let impl_grade_fns = self.types().filter_map(|ty| ty.impl_grade_fns(self));
         let impl_from = self.types().flat_map(|ty| ty.impl_from(self));
 
@@ -28,7 +29,7 @@ impl Algebra {
         // Cannot impl num_traits::One because it requires Mul<Self, Output = Self>
         // This would clash with generic scalar multiplication (Scalar<T> * U = Scalar<V>)
 
-        let impl_product_ops = ProductOp::iter()
+        let impl_product_ops = ProductOp::iter_all()
             .flat_map(|op| self.types().map(move |ty| (op, ty)))
             .flat_map(|(op, lhs)| self.types().map(move |rhs| (op, lhs, rhs)))
             .filter_map(|(op, lhs, rhs)| op.impl_for(self, lhs, rhs));
@@ -46,8 +47,8 @@ impl Algebra {
         let impl_complements = Complement::iter(self)
             .flat_map(|comp| self.types().map(move |ty| ty.impl_complement(self, comp)));
 
-        let scalar_ops =
-            ScalarOps::iter().flat_map(|op| self.types().map(move |ty| op.impl_for(ty, self)));
+        // let scalar_ops =
+        //     ScalarOps::iter().flat_map(|op| self.types().map(move |ty| op.impl_for(ty, self)));
 
         let explicit_scalar_ops = ScalarOps::iter()
             .flat_map(|op| {
@@ -101,7 +102,8 @@ impl Algebra {
         quote!(
             #(#traits)*
             #(#structs)*
-            #(#impl_new_fns)*
+            #(#impl_new_fn)*
+            #(#impl_map_fn)*
             #(#impl_grade_fns)*
             #(#impl_from)*
             #(#impl_zero)*
@@ -112,7 +114,6 @@ impl Algebra {
             #(#impl_antirev)*
             #(#impl_sqrt)*
             #(#impl_complements)*
-            #(#scalar_ops)*
             #(#explicit_scalar_ops)*
             #(#scalar_assign_ops)*
             #(#sum_assign_ops)*
@@ -512,7 +513,7 @@ impl Type {
         })
     }
 
-    fn impl_new_fns(self, algebra: Algebra) -> ItemImpl {
+    fn impl_new_fn(self, algebra: Algebra) -> ItemImpl {
         let params = self.iter_blades_sorted(algebra).map(|blade| {
             let f = blade.field(algebra);
             quote!(#f: T)
@@ -534,6 +535,24 @@ impl Type {
                 pub fn new(#(#params),*) -> #self<T> {
                     #self {
                         #(#fields),*
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn impl_map(self, algebra: Algebra) -> ItemImpl {
+        let fields = self.iter_blades_unsorted(algebra).map(|blade| {
+            let f = blade.field(algebra);
+            quote! {
+                #f: f(self.#f),
+            }
+        });
+        parse_quote! {
+            impl<T> #self<T> {
+                pub fn map<U, F: Fn(T) -> U>(self, f: F) -> #self<U> {
+                    #self {
+                        #(#fields)*
                     }
                 }
             }
@@ -681,7 +700,7 @@ impl Blade {
 
 impl ProductOp {
     fn define_all() -> impl Iterator<Item = ItemTrait> {
-        Self::iter().map(Self::define)
+        Self::iter_local().map(Self::define)
     }
 
     fn define(self) -> ItemTrait {
@@ -703,6 +722,7 @@ impl ProductOp {
             ProductOp::Antigeo => parse_quote!(Antigeo),
             ProductOp::Antidot => parse_quote!(Antidot),
             ProductOp::Antiwedge => parse_quote!(Antiwedge),
+            ProductOp::Mul => parse_quote!(std::ops::Mul),
         }
     }
 
@@ -714,6 +734,7 @@ impl ProductOp {
             ProductOp::Antigeo => parse_quote!(antigeo),
             ProductOp::Antidot => parse_quote!(antidot),
             ProductOp::Antiwedge => parse_quote!(antiwedge),
+            ProductOp::Mul => parse_quote!(mul),
         }
     }
 
@@ -900,32 +921,32 @@ impl SumOp {
 }
 
 impl ScalarOps {
-    pub fn impl_for(self, ty: Type, algebra: Algebra) -> ItemImpl {
-        let trait_ty = self.trait_ty();
-        let trait_fn = self.trait_fn();
-        let fn_attrs = fn_attrs();
-        let fields = ty.iter_blades_unsorted(algebra).map(|blade| {
-            let f = blade.field(algebra);
-            quote! { #f: #trait_ty::#trait_fn(self.#f, rhs), }
-        });
-        parse_quote! {
-            impl<T, U, V> #trait_ty<U> for #ty<T>
-            where
-                T: #trait_ty<U, Output = V>,
-                U: Copy,
-            {
-                type Output = #ty<V>;
-                #fn_attrs
-                fn #trait_fn(self, rhs: U) -> Self::Output {
-                    #ty {
-                        #(#fields)*
-                    }
-                }
-            }
-        }
-    }
+    // pub fn impl_for(self, ty: Type, algebra: Algebra) -> ItemImpl {
+    //     let trait_ty = self.trait_ty();
+    //     let trait_fn = self.trait_fn();
+    //     let fn_attrs = fn_attrs();
+    //     let fields = ty.iter_blades_unsorted(algebra).map(|blade| {
+    //         let f = blade.field(algebra);
+    //         quote! { #f: #trait_ty::#trait_fn(self.#f, rhs), }
+    //     });
+    //     parse_quote! {
+    //         impl<T, U, V> #trait_ty<U> for #ty<T>
+    //         where
+    //             T: #trait_ty<U, Output = V>,
+    //             U: Copy,
+    //         {
+    //             type Output = #ty<V>;
+    //             #fn_attrs
+    //             fn #trait_fn(self, rhs: U) -> Self::Output {
+    //                 #ty {
+    //                     #(#fields)*
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 
-    pub fn impl_for_scalar(self, ty: Type, algebra: Algebra) -> Option<[ItemImpl; 2]> {
+    pub fn impl_for_scalar(self, ty: Type, algebra: Algebra) -> Option<[ItemImpl; 4]> {
         if self == Self::Div {
             return None;
         }
@@ -938,6 +959,11 @@ impl ScalarOps {
             quote! { #f: #trait_ty::<U>::#trait_fn(self, rhs.#f), }
         });
         let fields1 = fields.clone();
+        let fields2 = ty.iter_blades_unsorted(algebra).map(|blade| {
+            let f = blade.field(algebra);
+            quote! { #f: #trait_ty::#trait_fn(self.#f, rhs), }
+        });
+        let fields3 = fields2.clone();
         Some([
             parse_quote! {
                 impl<U, V> #trait_ty<#ty<U>> for f32
@@ -965,6 +991,34 @@ impl ScalarOps {
                     fn #trait_fn(self, rhs: #ty<U>) -> Self::Output {
                         #ty {
                             #(#fields1)*
+                        }
+                    }
+                }
+            },
+            parse_quote! {
+                impl<T, U> #trait_ty<f32> for #ty<T>
+                where
+                    T: #trait_ty<f32, Output = U>,
+                {
+                    type Output = #ty<U>;
+                    #fn_attrs
+                    fn #trait_fn(self, rhs: f32) -> Self::Output {
+                        #ty {
+                            #(#fields2)*
+                        }
+                    }
+                }
+            },
+            parse_quote! {
+                impl<T, U> #trait_ty<f64> for #ty<T>
+                where
+                    T: #trait_ty<f64, Output = U>,
+                {
+                    type Output = #ty<U>;
+                    #fn_attrs
+                    fn #trait_fn(self, rhs: f64) -> Self::Output {
+                        #ty {
+                            #(#fields3)*
                         }
                     }
                 }
@@ -1344,7 +1398,8 @@ impl InverseOps {
                             + std::ops::Neg<Output = T>
                             + std::ops::Div<Output = T>
                             + Copy,
-                        #ty<T>: #norm2<Output = Scalar<T>>,
+                        #ty<T>: #norm2<Output = Scalar<T>>
+                            + std::ops::Mul<Scalar<T>, Output = #ty<T>>,
                     {
                         type Output = #output;
                         #fn_attrs
@@ -1353,7 +1408,7 @@ impl InverseOps {
                             if norm2.is_zero() {
                                 panic!("divide by zero")
                             }
-                            let mult = T::one() / norm2;
+                            let mult = Scalar { s: T::one() / norm2 };
                             self.rev() * mult
                         }
                     }
@@ -1369,7 +1424,8 @@ impl InverseOps {
                             + std::ops::Neg<Output = T>
                             + std::ops::Div<Output = T>
                             + Copy,
-                        #ty<T>: #norm<Output = Scalar<T>>,
+                        #ty<T>: #norm<Output = Scalar<T>>
+                            + std::ops::Mul<Scalar<T>, Output = #ty<T>>,
                     {
                         type Output = #output;
                         #fn_attrs
@@ -1378,7 +1434,7 @@ impl InverseOps {
                             if norm.is_zero() {
                                 panic!("divide by zero")
                             }
-                            let mult = T::one() / norm;
+                            let mult = Scalar { s: T::one() / norm };
                             Unit(self * mult)
                         }
                     }
@@ -1513,7 +1569,7 @@ impl Unit {
             Impl(sandwich_impl),
             Impl(antisandwich_impl),
         ])
-        .chain(ProductOp::iter().map(|op| {
+        .chain(ProductOp::iter_all().map(|op| {
             let trait_ty = op.trait_ty();
             let trait_fn = op.trait_fn();
             parse_quote! {

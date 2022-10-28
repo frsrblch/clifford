@@ -626,10 +626,11 @@ pub enum ProductOp {
     Antigeo,
     Antidot,
     Antiwedge,
+    Mul,
 }
 
 impl ProductOp {
-    pub fn iter() -> impl Iterator<Item = Self> {
+    pub fn iter_local() -> impl Iterator<Item = Self> {
         IntoIterator::into_iter([
             Self::Geo,
             Self::Wedge,
@@ -637,6 +638,18 @@ impl ProductOp {
             Self::Antigeo,
             Self::Antidot,
             Self::Antiwedge,
+        ])
+    }
+
+    pub fn iter_all() -> impl Iterator<Item = Self> {
+        IntoIterator::into_iter([
+            Self::Geo,
+            Self::Wedge,
+            Self::Dot,
+            Self::Antigeo,
+            Self::Antidot,
+            Self::Antiwedge,
+            Self::Mul,
         ])
     }
 
@@ -651,7 +664,7 @@ impl ProductOp {
 
     pub fn product(self, algebra: Algebra, lhs: Blade, rhs: Blade) -> Blade {
         match self {
-            ProductOp::Geo => algebra.geo(lhs, rhs),
+            ProductOp::Geo | ProductOp::Mul => algebra.geo(lhs, rhs),
             ProductOp::Dot => algebra.dot(lhs, rhs),
             ProductOp::Wedge => algebra.wedge(lhs, rhs),
             ProductOp::Antigeo => algebra.antigeo(lhs, rhs),

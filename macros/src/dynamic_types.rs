@@ -225,7 +225,7 @@ impl Algebra {
     }
 
     fn define_product_ops(self) -> impl Iterator<Item = syn::ItemImpl> {
-        ProductOp::iter().map(move |op| {
+        ProductOp::iter_all().map(move |op| {
             let op_ty = op.trait_ty();
             let op_fn = op.trait_fn();
             let variant_tuples = self.type_tuples().filter_map(|(lhs, rhs)| {
