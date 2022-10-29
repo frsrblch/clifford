@@ -72,7 +72,7 @@
 //!
 //! Outer products:
 //! - [x] Wedge
-//! - [x] Antiwedge
+//! - [x] Antiwedge (regressive)
 //!
 //! Interior products:
 //! - [ ] Right interior product
@@ -107,6 +107,11 @@
 //! - [x] Sandwich
 //! - [x] Antisandwich
 //! - [ ] Commutator
+//!
+//! Operator overloading:
+//! - [ ] Dot product: a | b
+//! - [ ] Wedge product: a ^ b
+//! - [ ] Antiwedge (regressive) product: a & b
 //!
 //! Num Traits:
 //! - [x] Zero

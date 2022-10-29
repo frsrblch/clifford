@@ -47,9 +47,6 @@ impl Algebra {
         let impl_complements = Complement::iter(self)
             .flat_map(|comp| self.types().map(move |ty| ty.impl_complement(self, comp)));
 
-        // let scalar_ops =
-        //     ScalarOps::iter().flat_map(|op| self.types().map(move |ty| op.impl_for(ty, self)));
-
         let explicit_scalar_ops = ScalarOps::iter()
             .flat_map(|op| {
                 self.types()
@@ -1362,6 +1359,7 @@ impl InverseOps {
         }
     }
 
+    /// No implementation if there's only one blade, or mv which are not easily inverted
     pub fn inapplicable(self, ty: Type, algebra: Algebra) -> bool {
         algebra.has_negative_bases()
             || ty == Type::Mv
@@ -1376,66 +1374,76 @@ impl InverseOps {
         let trait_ty = self.trait_ty();
         let trait_fn = self.trait_fn();
 
-        let output = match self {
-            InverseOps::Inverse => quote!(#ty<T>),
-            InverseOps::Unitize => quote!(Unit<#ty<T>>),
-        };
-
         let fn_attrs = fn_attrs();
         let fn_attrs = quote! {
             #[track_caller]
             #fn_attrs
         };
 
-        Some(match self {
-            InverseOps::Inverse => {
-                let norm2 = NormOps::Norm2.trait_ty();
+        Some(match (self, ty) {
+            (InverseOps::Inverse, Type::Grade(0)) => {
                 parse_quote! {
                     impl<T> #trait_ty for #ty<T>
                     where
-                        T: num_traits::Zero
-                            + num_traits::One
-                            + std::ops::Neg<Output = T>
-                            + std::ops::Div<Output = T>
-                            + Copy,
-                        #ty<T>: #norm2<Output = Scalar<T>>
-                            + std::ops::Mul<Scalar<T>, Output = #ty<T>>,
+                        #ty<T>: Norm2<Output = #ty<T>>,
+                        T: num_traits::One
+                            + std::ops::Div<Output = T>,
                     {
-                        type Output = #output;
+                        type Output = #ty<T>;
                         #fn_attrs
                         fn #trait_fn(self) -> Self::Output {
-                            let Scalar { s: norm2 } = self.norm2();
-                            if norm2.is_zero() {
-                                panic!("divide by zero")
-                            }
-                            let mult = Scalar { s: T::one() / norm2 };
-                            self.rev() * mult
+                            Scalar { s: T::one() / self.s }
                         }
                     }
                 }
             }
-            InverseOps::Unitize => {
+            (InverseOps::Inverse, _) => {
+                let norm2 = NormOps::Norm2.trait_ty();
+                parse_quote! {
+                    impl<T> #trait_ty for #ty<T>
+                    where
+                        #ty<T>: #norm2<Output = Scalar<T>>
+                            + Reverse
+                            + std::ops::Mul<Scalar<T>, Output = #ty<T>>
+                            + Copy,
+                        Scalar<T>: Inverse<Output = Scalar<T>>,
+                    {
+                        type Output = #ty<T>;
+                        #fn_attrs
+                        fn #trait_fn(self) -> Self::Output {
+                            self.rev() * self.norm2().inv()
+                        }
+                    }
+                }
+            }
+            (InverseOps::Unitize, Type::Grade(0)) => {
+                parse_quote! {
+                    impl<T> #trait_ty for #ty<T>
+                    where
+                        T: num_traits::One,
+                    {
+                        type Output = Unit<#ty<T>>;
+                        #fn_attrs
+                        fn #trait_fn(self) -> Self::Output {
+                            Unit(Scalar { s: T::one() })
+                        }
+                    }
+                }
+            }
+            (InverseOps::Unitize, _) => {
                 let norm = NormOps::Norm.trait_ty();
                 parse_quote! {
                     impl<T> #trait_ty for #ty<T>
                     where
-                        T: num_traits::Zero
-                            + num_traits::One
-                            + std::ops::Neg<Output = T>
-                            + std::ops::Div<Output = T>
-                            + Copy,
                         #ty<T>: #norm<Output = Scalar<T>>
-                            + std::ops::Mul<Scalar<T>, Output = #ty<T>>,
+                            + std::ops::Mul<Scalar<T>, Output = #ty<T>>
+                            + Copy,
+                        Scalar<T>: Inverse<Output = Scalar<T>>,
                     {
-                        type Output = #output;
+                        type Output = Unit<#ty<T>>;
                         #fn_attrs
                         fn #trait_fn(self) -> Self::Output {
-                            let Scalar { s: norm } = self.norm();
-                            if norm.is_zero() {
-                                panic!("divide by zero")
-                            }
-                            let mult = Scalar { s: T::one() / norm };
-                            Unit(self * mult)
+                            Unit(self * self.norm().inv())
                         }
                     }
                 }
@@ -1444,17 +1452,17 @@ impl InverseOps {
     }
 
     pub fn tests(self, ty: Type, algebra: Algebra) -> Option<syn::ItemFn> {
-        // skip if there's only one blade, and mv which are not easily inverted
         if self.inapplicable(ty, algebra) {
             return None;
         }
 
-        let name = ty.name_lowercase();
-        let fn_name = match self {
-            InverseOps::Inverse => format!("{}_inv_test", name),
-            InverseOps::Unitize => format!("{}_unit_test", name),
+        let fn_ident = {
+            let fn_name = match self {
+                InverseOps::Inverse => format!("{}_inv_test", ty.name_lowercase()),
+                InverseOps::Unitize => format!("{}_unit_test", ty.name_lowercase()),
+            };
+            Ident::new(&fn_name, Span::mixed_site())
         };
-        let fn_ident = Ident::new(&fn_name, Span::mixed_site());
 
         let fields = ty.iter_blades_unsorted(algebra).map(|blade| {
             let f = blade.field(algebra);
