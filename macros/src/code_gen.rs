@@ -34,6 +34,10 @@ impl Algebra {
             .flat_map(|(op, lhs)| self.types().map(move |rhs| (op, lhs, rhs)))
             .filter_map(|(op, lhs, rhs)| op.impl_for(self, lhs, rhs));
 
+        let div_ops = self
+            .type_tuples()
+            .filter_map(|(lhs, rhs)| Div::impl_for(lhs, rhs, self));
+
         let impl_sum_ops = SumOp::iter()
             .flat_map(|op| self.types().map(move |lhs| (op, lhs)))
             .flat_map(|(op, lhs)| self.types().map(move |rhs| (op, lhs, rhs)))
@@ -130,6 +134,7 @@ impl Algebra {
             }
 
             #dynamic_types
+            #(#div_ops)*
         )
     }
 }
@@ -275,32 +280,6 @@ impl GradeProduct {
         }
     }
 
-    pub fn trait_ty() -> syn::Type {
-        parse_quote!(GradeProduct)
-    }
-
-    pub fn trait_fn() -> Ident {
-        parse_quote!(product)
-    }
-
-    fn iter_blades(
-        lhs: Type,
-        rhs: Type,
-        out: Type,
-        algebra: Algebra,
-    ) -> impl Iterator<Item = (Blade, Blade, Blade)> {
-        lhs.iter_blades_unsorted(algebra)
-            .flat_map(move |lhs| {
-                rhs.iter_blades_unsorted(algebra)
-                    .map(move |rhs| (lhs, rhs, algebra.geo(lhs, rhs)))
-            })
-            .filter(move |(_l, _r, o)| out.contains(*o))
-    }
-
-    pub fn contains(lhs: Type, rhs: Type, out: Type, algebra: Algebra) -> bool {
-        Self::iter_blades(lhs, rhs, out, algebra).any(|_| true)
-    }
-
     pub fn impl_for(lhs: Type, rhs: Type, out: Type, algebra: Algebra) -> Option<ItemImpl> {
         let blades = Self::iter_blades(lhs, rhs, out, algebra).fold(
             HashMap::<Blade, Vec<(Blade, Blade, Blade)>>::new(),
@@ -361,6 +340,32 @@ impl GradeProduct {
                 }
             }
         })
+    }
+
+    pub fn trait_ty() -> syn::Type {
+        parse_quote!(GradeProduct)
+    }
+
+    pub fn trait_fn() -> Ident {
+        parse_quote!(product)
+    }
+
+    fn iter_blades(
+        lhs: Type,
+        rhs: Type,
+        out: Type,
+        algebra: Algebra,
+    ) -> impl Iterator<Item = (Blade, Blade, Blade)> {
+        lhs.iter_blades_unsorted(algebra)
+            .flat_map(move |lhs| {
+                rhs.iter_blades_unsorted(algebra)
+                    .map(move |rhs| (lhs, rhs, algebra.geo(lhs, rhs)))
+            })
+            .filter(move |(_l, _r, o)| out.contains(*o))
+    }
+
+    pub fn contains(lhs: Type, rhs: Type, out: Type, algebra: Algebra) -> bool {
+        Self::iter_blades(lhs, rhs, out, algebra).any(|_| true)
     }
 }
 
@@ -1631,6 +1636,40 @@ impl Sqrt {
 
     pub fn trait_fn() -> Ident {
         parse_quote!(sqrt)
+    }
+}
+
+pub struct Div;
+
+impl Div {
+    pub fn impl_for(lhs: Type, rhs: Type, algebra: Algebra) -> Option<ItemImpl> {
+        if InverseOps::Inverse.inapplicable(rhs, algebra) {
+            return None;
+        }
+
+        let output = lhs
+            .iter_blades_unsorted(algebra)
+            .flat_map(|lhs| {
+                rhs.iter_blades_unsorted(algebra)
+                    .map(move |rhs| algebra.geo(lhs, rhs))
+            })
+            .collect::<Option<Type>>()?;
+
+        let fn_attrs = fn_attrs();
+
+        Some(parse_quote! {
+            impl<T, U, V> std::ops::Div<#rhs<U>> for #lhs<T>
+            where
+                #lhs<T>: std::ops::Mul<#rhs<U>, Output = #output<V>>,
+                #rhs<U>: Inverse<Output = #rhs<U>>,
+            {
+                type Output = #output<V>;
+                #fn_attrs
+                fn div(self, rhs: #rhs<U>) -> Self::Output {
+                    self * rhs.inv()
+                }
+            }
+        })
     }
 }
 
