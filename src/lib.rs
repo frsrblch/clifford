@@ -115,6 +115,7 @@
 //!
 //! Num Traits:
 //! - [x] Zero
+//! - [x] One
 //!
 //! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features.html
 

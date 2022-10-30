@@ -26,8 +26,7 @@ impl Algebra {
         let impl_from = self.types().flat_map(|ty| ty.impl_from(self));
 
         let impl_zero = self.types().map(|ty| ty.impl_zero(self));
-        // Cannot impl num_traits::One because it requires Mul<Self, Output = Self>
-        // This would clash with generic scalar multiplication (Scalar<T> * U = Scalar<V>)
+        let impl_one = self.types().filter_map(|ty| ty.impl_one(self));
 
         let impl_product_ops = ProductOp::iter_all()
             .flat_map(|op| self.types().map(move |ty| (op, ty)))
@@ -108,6 +107,7 @@ impl Algebra {
             #(#impl_grade_fns)*
             #(#impl_from)*
             #(#impl_zero)*
+            #(#impl_one)*
             #(#impl_product_ops)*
             #(#div_ops)*
             #(#impl_sum_ops)*
@@ -649,6 +649,32 @@ impl Type {
                 }
             }
         }
+    }
+
+    fn impl_one(self, algebra: Algebra) -> Option<ItemImpl> {
+        if self != Type::Grade(0) {
+            return None;
+        }
+
+        let f = self
+            .iter_blades_unsorted(algebra)
+            .map(|blade| blade.field(algebra))
+            .next()
+            .unwrap();
+
+        Some(parse_quote! {
+            impl<T> num_traits::One for #self<T>
+            where
+                T: num_traits::One,
+                #self<T>: std::ops::Mul<Output = #self<T>>,
+            {
+                fn one() -> Self {
+                    #self {
+                        #f: num_traits::One::one(),
+                    }
+                }
+            }
+        })
     }
 
     pub fn fn_ident(self) -> Ident {
