@@ -75,7 +75,7 @@ impl Algebra {
         });
         quote! {
             #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-            enum BinaryOp {
+            pub enum BinaryOp {
                 Add,
                 Sub,
                 Geo,
