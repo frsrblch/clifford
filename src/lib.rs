@@ -206,4 +206,19 @@ pub mod pga3 {
         assert!((v1 - v2).norm2().s < 1e-10);
         // panic!();
     }
+
+    #[test]
+    fn f0_ops() {
+        use f_zero::f0;
+        let vector: Value<f0> = Value::Vector(Default::default());
+        let bivector: Value<f0> = Value::Bivector(Default::default());
+        assert_eq!(
+            Some(Value::Flector(Default::default())),
+            vector.geo(bivector)
+        );
+        assert_eq!(
+            Some(Value::Vector(Default::default())),
+            vector.dot(bivector)
+        );
+    }
 }

@@ -19,6 +19,7 @@ impl Algebra {
         let dual_ops = self.define_duals();
         let rev_ops = self.define_rev();
         let neg_ops = self.define_neg();
+        let sin_cos = self.define_sin_cos();
         quote! {
             #define_enum
             #binary_op
@@ -32,6 +33,7 @@ impl Algebra {
             #rev_ops
             #neg_ops
             #unary_op
+            #(#sin_cos)*
         }
     }
 
@@ -165,20 +167,22 @@ impl Algebra {
             UnaryOp::RightComp => quote! { UnaryOp::RightComp => Some(value.right_comp()) },
             UnaryOp::Rev => quote! { UnaryOp::Rev => Some(value.rev()) },
             UnaryOp::Neg => quote! { UnaryOp::Neg => Some(-value) },
+            UnaryOp::Sin => quote! { UnaryOp::Sin => num_trig::Sin::sin(value) },
+            UnaryOp::Cos => quote! { UnaryOp::Cos => num_trig::Cos::cos(value) },
         });
 
         let fn_values = if self.symmetrical_complements() {
             quote! {
-                pub fn values() -> [Self; 8] {
+                pub fn values() -> [Self; 10] {
                     use UnaryOp::*;
-                    [Norm2, Norm, Unit, Inv, Sqrt, Dual, Rev, Neg]
+                    [Norm2, Norm, Unit, Inv, Sqrt, Dual, Rev, Neg, Sin, Cos]
                 }
             }
         } else {
             quote! {
-                pub fn values() -> [Self; 9] {
+                pub fn values() -> [Self; 11] {
                     use UnaryOp::*;
-                    [Norm2, Norm, Unit, Inv, Sqrt, LeftComp, RightComp, Rev, Neg]
+                    [Norm2, Norm, Unit, Inv, Sqrt, LeftComp, RightComp, Rev, Neg, Sin, Cos]
                 }
             }
         };
@@ -194,6 +198,8 @@ impl Algebra {
                 #(#dual_variants,)*
                 Rev,
                 Neg,
+                Sin,
+                Cos,
             }
 
             impl UnaryOp {
@@ -214,6 +220,8 @@ impl Algebra {
                         + num_traits::Zero
                         + num_traits::One
                         + num_sqrt::Sqrt<Output = T>
+                        + num_trig::Sin<Output = T>
+                        + num_trig::Cos<Output = T>
                         + Copy,
                 {
                     match self {
@@ -481,6 +489,41 @@ impl Algebra {
             }
         }
     }
+
+    fn define_sin_cos(self) -> [syn::ItemImpl; 2] {
+        [
+            parse_quote! {
+                impl<T> num_trig::Sin for Value<T>
+                where
+                    T: num_trig::Sin<Output = T>
+                {
+                    type Output = Option<Self>;
+                    #[inline]
+                    fn sin(self) -> Self::Output {
+                        match self {
+                            Value::Scalar(Scalar { s }) => Some(Value::Scalar(Scalar { s: num_trig::Sin::sin(s) })),
+                            _ => None,
+                        }
+                    }
+                }
+            },
+            parse_quote! {
+                impl<T> num_trig::Cos for Value<T>
+                where
+                    T: num_trig::Cos<Output = T>
+                {
+                    type Output = Option<Self>;
+                    #[inline]
+                    fn cos(self) -> Self::Output {
+                        match self {
+                            Value::Scalar(Scalar { s }) => Some(Value::Scalar(Scalar { s: num_trig::Cos::cos(s) })),
+                            _ => None,
+                        }
+                    }
+                }
+            },
+        ]
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -519,21 +562,25 @@ pub enum UnaryOp {
     RightComp,
     Rev,
     Neg,
+    Sin,
+    Cos,
 }
 
 impl UnaryOp {
     pub fn iter(algebra: Algebra) -> impl Iterator<Item = Self> {
         use UnaryOp::*;
         if algebra.symmetrical_complements() {
-            [Norm2, Norm, Unit, Inv, Sqrt, Dual, Rev, Neg]
+            [Norm2, Norm, Unit, Inv, Sqrt, Dual, Rev, Neg, Sin, Cos]
                 .as_slice()
                 .iter()
                 .copied()
         } else {
-            [Norm2, Norm, Unit, Inv, Sqrt, LeftComp, RightComp, Rev, Neg]
-                .as_slice()
-                .iter()
-                .copied()
+            [
+                Norm2, Norm, Unit, Inv, Sqrt, LeftComp, RightComp, Rev, Neg, Sin, Cos,
+            ]
+            .as_slice()
+            .iter()
+            .copied()
         }
     }
 }

@@ -9,12 +9,14 @@ edition = "2021"
 proc_macros = { path = "./proc_macros" }
 num-traits = "0.2.15"
 num-sqrt = { path = "../num-sqrt" }
+num-trig = { path = "../num-trig" }
 macros = { path = "./macros" }
 
 [dev-dependencies]
 criterion = "0.4.0"
 rand = "0.8"
 num-dual = { path = "../num-dual" }
+f_zero = { path = "../f_zero" }
 
 #[[test]]
 #name = "cga_3d_tests"

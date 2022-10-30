@@ -109,6 +109,7 @@ impl Algebra {
             #(#impl_from)*
             #(#impl_zero)*
             #(#impl_product_ops)*
+            #(#div_ops)*
             #(#impl_sum_ops)*
             #(#impl_neg)*
             #(#impl_rev)*
@@ -134,7 +135,6 @@ impl Algebra {
             }
 
             #dynamic_types
-            #(#div_ops)*
         )
     }
 }
@@ -495,7 +495,7 @@ impl Type {
         }
 
         let fns = contained_types().map(|rhs| {
-            let grade_fn = Ident::new(rhs.name_lowercase(), Span::mixed_site());
+            let grade_fn = rhs.fn_ident();
             let fields = rhs.iter_blades_unsorted(algebra).map(|blade| {
                 let f = blade.field(algebra);
                 quote!( #f: self.#f, )
@@ -650,6 +650,10 @@ impl Type {
             }
         }
     }
+
+    pub fn fn_ident(self) -> Ident {
+        Ident::new(self.name_lowercase(), Span::mixed_site())
+    }
 }
 
 impl Complement {
@@ -688,7 +692,7 @@ impl ToTokens for Type {
 }
 
 impl Blade {
-    fn field(self, algebga: Algebra) -> Ident {
+    pub fn field(self, algebga: Algebra) -> Ident {
         let mut output = String::new();
         for basis in algebga.iter_bases(self) {
             output.push(basis.char);
@@ -923,31 +927,6 @@ impl SumOp {
 }
 
 impl ScalarOps {
-    // pub fn impl_for(self, ty: Type, algebra: Algebra) -> ItemImpl {
-    //     let trait_ty = self.trait_ty();
-    //     let trait_fn = self.trait_fn();
-    //     let fn_attrs = fn_attrs();
-    //     let fields = ty.iter_blades_unsorted(algebra).map(|blade| {
-    //         let f = blade.field(algebra);
-    //         quote! { #f: #trait_ty::#trait_fn(self.#f, rhs), }
-    //     });
-    //     parse_quote! {
-    //         impl<T, U, V> #trait_ty<U> for #ty<T>
-    //         where
-    //             T: #trait_ty<U, Output = V>,
-    //             U: Copy,
-    //         {
-    //             type Output = #ty<V>;
-    //             #fn_attrs
-    //             fn #trait_fn(self, rhs: U) -> Self::Output {
-    //                 #ty {
-    //                     #(#fields)*
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
     pub fn impl_for_scalar(self, ty: Type, algebra: Algebra) -> Option<[ItemImpl; 4]> {
         if self == Self::Div {
             return None;
