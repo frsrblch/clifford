@@ -140,10 +140,10 @@ impl Algebra {
 }
 
 fn fn_attrs() -> TokenStream {
-    quote! {
+    quote!(
         #[inline]
         #[allow(unused_variables)]
-    }
+    )
 }
 
 pub struct Neg;
@@ -953,84 +953,115 @@ impl SumOp {
 }
 
 impl ScalarOps {
-    pub fn impl_for_scalar(self, ty: Type, algebra: Algebra) -> Option<[ItemImpl; 4]> {
-        if self == Self::Div {
-            return None;
-        }
-
+    pub fn impl_for_scalar(self, ty: Type, algebra: Algebra) -> Option<Vec<ItemImpl>> {
         let trait_ty = self.trait_ty();
         let trait_fn = self.trait_fn();
         let fn_attrs = fn_attrs();
-        let fields = ty.iter_blades_unsorted(algebra).map(|blade| {
-            let f = blade.field(algebra);
-            quote! { #f: #trait_ty::<U>::#trait_fn(self, rhs.#f), }
-        });
-        let fields1 = fields.clone();
-        let fields2 = ty.iter_blades_unsorted(algebra).map(|blade| {
-            let f = blade.field(algebra);
-            quote! { #f: #trait_ty::#trait_fn(self.#f, rhs), }
-        });
-        let fields3 = fields2.clone();
-        Some([
-            parse_quote! {
-                impl<U, V> #trait_ty<#ty<U>> for f32
-                where
-                    f32: #trait_ty<U, Output = V>,
-                    U: Copy,
-                {
-                    type Output = #ty<V>;
-                    #fn_attrs
-                    fn #trait_fn(self, rhs: #ty<U>) -> Self::Output {
-                        #ty {
-                            #(#fields)*
+
+        if self == Self::Div {
+            let inv_ty = InverseOps::Inverse.trait_ty();
+            Some(vec![
+                parse_quote! {
+                    impl<U, V> #trait_ty<#ty<U>> for f32
+                    where
+                        #ty<U>: #inv_ty<Output = #ty<U>>,
+                        f32: std::ops::Mul<#ty<U>, Output = #ty<V>>,
+                        U: Copy,
+                    {
+                        type Output = #ty<V>;
+                        #fn_attrs
+                        fn #trait_fn(self, rhs: #ty<U>) -> Self::Output {
+                            self * rhs.inv()
                         }
                     }
-                }
-            },
-            parse_quote! {
-                impl<U, V> #trait_ty<#ty<U>> for f64
-                where
-                    f64: #trait_ty<U, Output = V>,
-                    U: Copy,
-                {
-                    type Output = #ty<V>;
-                    #fn_attrs
-                    fn #trait_fn(self, rhs: #ty<U>) -> Self::Output {
-                        #ty {
-                            #(#fields1)*
+                },
+                parse_quote! {
+                    impl<U, V> #trait_ty<#ty<U>> for f64
+                    where
+                        #ty<U>: #inv_ty<Output = #ty<U>>,
+                        f64: std::ops::Mul<#ty<U>, Output = #ty<V>>,
+                        U: Copy,
+                    {
+                        type Output = #ty<V>;
+                        #fn_attrs
+                        fn #trait_fn(self, rhs: #ty<U>) -> Self::Output {
+                            self * rhs.inv()
                         }
                     }
-                }
-            },
-            parse_quote! {
-                impl<T, U> #trait_ty<f32> for #ty<T>
-                where
-                    T: #trait_ty<f32, Output = U>,
-                {
-                    type Output = #ty<U>;
-                    #fn_attrs
-                    fn #trait_fn(self, rhs: f32) -> Self::Output {
-                        #ty {
-                            #(#fields2)*
+                },
+            ])
+        } else {
+            let fields = ty.iter_blades_unsorted(algebra).map(|blade| {
+                let f = blade.field(algebra);
+                quote! { #f: #trait_ty::<U>::#trait_fn(self, rhs.#f), }
+            });
+            let fields1 = fields.clone();
+            let fields2 = ty.iter_blades_unsorted(algebra).map(|blade| {
+                let f = blade.field(algebra);
+                quote! { #f: #trait_ty::#trait_fn(self.#f, rhs), }
+            });
+            let fields3 = fields2.clone();
+            Some(vec![
+                parse_quote! {
+                    impl<U, V> #trait_ty<#ty<U>> for f32
+                    where
+                        f32: #trait_ty<U, Output = V>,
+                        U: Copy,
+                    {
+                        type Output = #ty<V>;
+                        #fn_attrs
+                        fn #trait_fn(self, rhs: #ty<U>) -> Self::Output {
+                            #ty {
+                                #(#fields)*
+                            }
                         }
                     }
-                }
-            },
-            parse_quote! {
-                impl<T, U> #trait_ty<f64> for #ty<T>
-                where
-                    T: #trait_ty<f64, Output = U>,
-                {
-                    type Output = #ty<U>;
-                    #fn_attrs
-                    fn #trait_fn(self, rhs: f64) -> Self::Output {
-                        #ty {
-                            #(#fields3)*
+                },
+                parse_quote! {
+                    impl<U, V> #trait_ty<#ty<U>> for f64
+                    where
+                        f64: #trait_ty<U, Output = V>,
+                        U: Copy,
+                    {
+                        type Output = #ty<V>;
+                        #fn_attrs
+                        fn #trait_fn(self, rhs: #ty<U>) -> Self::Output {
+                            #ty {
+                                #(#fields1)*
+                            }
                         }
                     }
-                }
-            },
-        ])
+                },
+                parse_quote! {
+                    impl<T, U> #trait_ty<f32> for #ty<T>
+                    where
+                        T: #trait_ty<f32, Output = U>,
+                    {
+                        type Output = #ty<U>;
+                        #fn_attrs
+                        fn #trait_fn(self, rhs: f32) -> Self::Output {
+                            #ty {
+                                #(#fields2)*
+                            }
+                        }
+                    }
+                },
+                parse_quote! {
+                    impl<T, U> #trait_ty<f64> for #ty<T>
+                    where
+                        T: #trait_ty<f64, Output = U>,
+                    {
+                        type Output = #ty<U>;
+                        #fn_attrs
+                        fn #trait_fn(self, rhs: f64) -> Self::Output {
+                            #ty {
+                                #(#fields3)*
+                            }
+                        }
+                    }
+                },
+            ])
+        }
     }
 
     pub fn trait_ty(self) -> syn::Type {

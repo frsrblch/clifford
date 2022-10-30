@@ -136,6 +136,12 @@ pub mod ga_3d {
             v.geo(v).unwrap()
         );
     }
+
+    #[test]
+    fn vector_inv() {
+        let v = Vector::new(2., 3., 5.);
+        assert_eq!(v.inv(), 1. / v);
+    }
 }
 
 #[cfg(feature = "pga_3d")]
