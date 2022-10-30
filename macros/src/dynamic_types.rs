@@ -44,7 +44,7 @@ impl Algebra {
             }
         });
         parse_quote! {
-            #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+            #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
             pub enum Value<T> {
                 #(#variants)*
             }

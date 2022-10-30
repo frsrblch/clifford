@@ -466,12 +466,12 @@ impl Type {
         let attr = if self.single_blade(algebra) {
             quote! {
                 #[repr(C)]
-                #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+                #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
             }
         } else {
             quote! {
                 #[repr(C)]
-                #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+                #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Hash)]
             }
         };
 
