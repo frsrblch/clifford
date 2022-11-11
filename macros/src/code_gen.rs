@@ -653,25 +653,43 @@ impl Type {
     }
 
     fn impl_one(self, algebra: Algebra) -> Option<ItemImpl> {
-        if self != Type::Grade(0) {
+        if !self.contains(Blade::scalar()) {
             return None;
         }
 
-        let f = self
+        let other_blades = self
             .iter_blades_unsorted(algebra)
-            .map(|blade| blade.field(algebra))
-            .next()
-            .unwrap();
+            .any(|b| b != Blade::scalar());
+
+        let where_clause = if other_blades {
+            quote! {
+                where
+                    T: num_traits::One + num_traits::Zero,
+                    #self<T>: std::ops::Mul<Output = #self<T>>,
+            }
+        } else {
+            quote! {
+                where
+                    T: num_traits::One,
+                    #self<T>: std::ops::Mul<Output = #self<T>>,
+            }
+        };
+
+        let fields = self.iter_blades_unsorted(algebra).map(|b| {
+            let field = b.field(algebra);
+            let value = if b == Blade::scalar() {
+                quote! { num_traits::One::one() }
+            } else {
+                quote! { num_traits::Zero::zero() }
+            };
+            quote! { #field: #value }
+        });
 
         Some(parse_quote! {
-            impl<T> num_traits::One for #self<T>
-            where
-                T: num_traits::One,
-                #self<T>: std::ops::Mul<Output = #self<T>>,
-            {
+            impl<T> num_traits::One for #self<T> #where_clause {
                 fn one() -> Self {
                     #self {
-                        #f: num_traits::One::one(),
+                        #(#fields,)*
                     }
                 }
             }

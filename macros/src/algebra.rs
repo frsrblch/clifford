@@ -503,6 +503,10 @@ impl Blade {
     const SIGN: u32 = 1 << 31;
     const ZERO: u32 = 1 << 30;
 
+    pub fn scalar() -> Self {
+        Self(0)
+    }
+
     pub fn zero() -> Self {
         Self(Self::ZERO)
     }
