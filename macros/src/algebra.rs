@@ -174,6 +174,19 @@ impl Algebra {
         }
     }
 
+    /// P × Q = 1/2 (PQ - QP)
+    pub fn commutator(self, lhs: Blade, rhs: Blade) -> Blade {
+        let lr_product = self.geo(lhs, rhs);
+        let rl_product = self.geo(rhs, lhs);
+        if lr_product == rl_product {
+            Blade::zero()
+        } else if lr_product == -rl_product {
+            lr_product
+        } else {
+            unreachable!("commutator product")
+        }
+    }
+
     pub fn antirev(self, blade: Blade) -> Blade {
         let comp = self.left_comp(blade);
         let rev = comp.rev();
@@ -627,6 +640,7 @@ pub enum ProductOp {
     Antidot,
     Antiwedge,
     Mul,
+    Commutator,
 }
 
 impl ProductOp {
@@ -638,6 +652,7 @@ impl ProductOp {
             Self::Antigeo,
             Self::Antidot,
             Self::Antiwedge,
+            Self::Commutator,
         ])
     }
 
@@ -650,6 +665,7 @@ impl ProductOp {
             Self::Antidot,
             Self::Antiwedge,
             Self::Mul,
+            Self::Commutator,
         ])
     }
 
@@ -670,6 +686,7 @@ impl ProductOp {
             ProductOp::Antigeo => algebra.antigeo(lhs, rhs),
             ProductOp::Antidot => algebra.antidot(lhs, rhs),
             ProductOp::Antiwedge => algebra.antiwedge(lhs, rhs),
+            ProductOp::Commutator => algebra.commutator(lhs, rhs),
         }
     }
 }
@@ -1213,5 +1230,44 @@ mod tests {
         assert_eq!(-e12, a.antirev(e12));
         assert_eq!(e123, a.antirev(e123));
         assert_eq!(e1234, a.antirev(e1234));
+    }
+
+    #[test]
+    fn commutator_products() {
+        let algebra = Algebra::pga3();
+        let _all_pga_products = algebra
+            .blades()
+            .flat_map(|lhs| {
+                algebra
+                    .blades()
+                    .map(move |rhs| algebra.commutator(lhs, rhs))
+            })
+            .collect::<Vec<_>>();
+
+        let bivector = Type::Grade(2)
+            .iter_blades_unsorted(algebra)
+            .collect::<Vec<_>>();
+
+        let product = bivector
+            .iter()
+            .flat_map(|lhs| {
+                bivector
+                    .iter()
+                    .map(move |rhs| algebra.commutator(*lhs, *rhs))
+            })
+            .collect::<Option<Type>>();
+
+        assert_eq!(Some(Type::Grade(2)), product);
+
+        let vector = Type::Grade(2)
+            .iter_blades_unsorted(algebra)
+            .collect::<Vec<_>>();
+
+        let product = vector
+            .iter()
+            .flat_map(|lhs| vector.iter().map(move |rhs| algebra.commutator(*lhs, *rhs)))
+            .collect::<Option<Type>>();
+
+        assert_eq!(Some(Type::Grade(2)), product);
     }
 }

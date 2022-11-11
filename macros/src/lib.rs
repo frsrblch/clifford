@@ -12,6 +12,16 @@ pub fn pga3(_: proc_macro::TokenStream) -> proc_macro::TokenStream {
 }
 
 #[proc_macro]
-pub fn g3(_: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn dyn_pga3(_: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    Algebra::pga3().dynamic_types().into()
+}
+
+#[proc_macro]
+pub fn ga3(_: proc_macro::TokenStream) -> proc_macro::TokenStream {
     Algebra::ga3().define().into()
+}
+
+#[proc_macro]
+pub fn dyn_ga3(_: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    Algebra::ga3().dynamic_types().into()
 }

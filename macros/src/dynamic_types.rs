@@ -1,13 +1,14 @@
 use crate::algebra::{Complement, InverseOps, NormOps, ProductOp, SumOp, Type};
-use crate::code_gen::{GradeProduct, Reverse, Sqrt};
+use crate::code_gen::{GradeProduct, Reverse, Sandwich, Sqrt};
 use crate::Algebra;
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{parse_quote, ItemEnum, ItemImpl};
+use syn::{parse_quote, ItemEnum, ItemFn, ItemImpl};
 
 impl Algebra {
     pub fn dynamic_types(self) -> TokenStream {
         let define_enum = self.define_enum();
+        let impl_variant_fns = self.define_variant_fns();
         let binary_op = self.define_binary_op();
         let unary_op = self.define_unary_op();
         let product_ops = self.define_product_ops();
@@ -22,6 +23,7 @@ impl Algebra {
         let sin_cos = self.define_sin_cos();
         quote! {
             #define_enum
+            #(#impl_variant_fns)*
             #binary_op
             #(#product_ops)*
             #(#grade_products)*
@@ -44,7 +46,7 @@ impl Algebra {
             }
         });
         parse_quote! {
-            #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+            #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
             pub enum Value<T> {
                 #(#variants)*
             }
@@ -52,7 +54,7 @@ impl Algebra {
     }
 
     fn define_binary_op(self) -> TokenStream {
-        let len = proc_macro2::Literal::usize_unsuffixed(8 + self.grades().count());
+        let len = proc_macro2::Literal::usize_unsuffixed(5 + self.grades().count());
         let grade_values = self.grades();
         let grade_products = self.grades();
         let call_variants = BinaryOp::iter(self).map(|op| match op {
@@ -61,11 +63,6 @@ impl Algebra {
             BinaryOp::Geo => quote! { BinaryOp::Geo => Geo::geo(lhs, rhs), },
             BinaryOp::Dot => quote! { BinaryOp::Dot => Dot::dot(lhs, rhs), },
             BinaryOp::Wedge => quote! { BinaryOp::Wedge => Wedge::wedge(lhs, rhs), },
-            BinaryOp::Antigeo => quote! { BinaryOp::Antigeo => Antigeo::antigeo(lhs, rhs), },
-            BinaryOp::Antidot => quote! { BinaryOp::Antidot => Antidot::antidot(lhs, rhs), },
-            BinaryOp::Antiwedge => {
-                quote! { BinaryOp::Antiwedge => Antiwedge::antiwedge(lhs, rhs), }
-            }
             BinaryOp::Grade(g) => {
                 let grade = Type::Grade(g);
                 quote! {
@@ -78,12 +75,10 @@ impl Algebra {
             pub enum BinaryOp {
                 Add,
                 Sub,
+                // Sandwich,
                 Geo,
                 Dot,
                 Wedge,
-                Antigeo,
-                Antidot,
-                Antiwedge,
                 #(#grade_products,)*
             }
 
@@ -91,7 +86,7 @@ impl Algebra {
                 pub fn values() -> [Self; #len] {
                     use BinaryOp::*;
                     [
-                        Add, Sub, Geo, Dot, Wedge, Antigeo, Antidot, Antiwedge,
+                        Add, Sub, Geo, Dot, Wedge,
                         #(#grade_values,)*
                     ]
                 }
@@ -117,12 +112,52 @@ impl Algebra {
         }
     }
 
+    fn impl_sandwich_product(self) -> ItemImpl {
+        let trait_ty = Sandwich::trait_ty();
+        let trait_fn = Sandwich::trait_fn();
+
+        let arms = self.type_tuples().filter_map(|(lhs, rhs)| {
+            if ProductOp::Geo.output(self, lhs, rhs).is_none()
+                || InverseOps::Inverse.inapplicable(lhs, self)
+            {
+                None
+            } else {
+                Some(quote! {
+                    (Value::#lhs(lhs), Value::#rhs(rhs)) => Some(Value::#rhs(lhs.sandwich(rhs))),
+                })
+            }
+        });
+
+        parse_quote! {
+            impl<T> #trait_ty<Value<T>> for Value<T>
+            where
+                T: std::ops::Mul<Output = T>
+                    + std::ops::Div<Output = T>
+                    + std::ops::Add<Output = T>
+                    + std::ops::Sub<Output = T>
+                    + std::ops::Neg<Output = T>
+                    + num_traits::Zero
+                    + num_traits::One
+                    + Copy,
+            {
+                type Output = Option<Value<T>>;
+                #[inline]
+                fn #trait_fn(self, rhs: Value<T>) -> Self::Output {
+                    match (self, rhs) {
+                        #(#arms)*
+                        _ => None,
+                    }
+                }
+            }
+        }
+    }
+
     fn impl_grade_products(self) -> impl Iterator<Item = ItemImpl> {
         let trait_ty = GradeProduct::trait_ty();
         let trait_fn = GradeProduct::trait_fn();
         self.grades().map(move |grade| {
             let match_variants = self.type_tuples().filter_map(|(lhs, rhs)| {
-                if GradeProduct::contains(lhs, rhs, grade, self) {
+                if GradeProduct::contains(lhs, rhs, grade, self) && ProductOp::Geo.output(self, lhs, rhs) != Some(grade) {
                     Some(quote! {
                          (Value::#lhs(lhs), Value::#rhs(rhs)) => Some(Value::#grade(#grade::<T>::#trait_fn(lhs, rhs))),
                     })
@@ -165,7 +200,7 @@ impl Algebra {
             UnaryOp::Dual => quote! { UnaryOp::Dual => Some(value.dual()) },
             UnaryOp::LeftComp => quote! { UnaryOp::LeftComp => Some(value.left_comp()) },
             UnaryOp::RightComp => quote! { UnaryOp::RightComp => Some(value.right_comp()) },
-            UnaryOp::Rev => quote! { UnaryOp::Rev => Some(value.rev()) },
+            UnaryOp::Rev => quote! { UnaryOp::Rev => value.rev() },
             UnaryOp::Neg => quote! { UnaryOp::Neg => Some(-value) },
             UnaryOp::Sin => quote! { UnaryOp::Sin => num_trig::Sin::sin(value) },
             UnaryOp::Cos => quote! { UnaryOp::Cos => num_trig::Cos::cos(value) },
@@ -188,7 +223,7 @@ impl Algebra {
         };
 
         quote! {
-            #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+            #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
             pub enum UnaryOp {
                 Norm2,
                 Norm,
@@ -237,7 +272,12 @@ impl Algebra {
             let op_ty = op.trait_ty();
             let op_fn = op.trait_fn();
             let variant_tuples = self.type_tuples().filter_map(|(lhs, rhs)| {
-                op.output(self, lhs, rhs).map(|output| quote! {
+                let output = op.output(self, lhs, rhs)?;
+                // skip redundant ops (scalar dot scalar, etc)
+                if matches!(op, ProductOp::Dot | ProductOp::Wedge) && ProductOp::Geo.output(self, lhs, rhs) == Some(output) {
+                    return None;
+                }
+                Some(quote! {
                     (Value::#lhs(lhs), Value::#rhs(rhs)) => Some(Value::#output(#op_ty::#op_fn(lhs, rhs))),
                 })
             });
@@ -299,10 +339,15 @@ impl Algebra {
             let op_ty = op.trait_ty();
             let op_fn = op.trait_fn();
             let variants = self.types().filter_map(|ty| {
+                if ty == Type::Grade(0) && op == NormOps::Norm {
+                    return None;
+                }
+
                 let scalar_blades = ty
                     .iter_blades_unsorted(self)
                     .map(|b| self.geo(b, b))
                     .any(|squared| !squared.is_zero());
+
                 if scalar_blades {
                     Some(quote! {
                         Value::#ty(value) => Some(Value::Scalar(#op_ty::#op_fn(value))),
@@ -323,6 +368,8 @@ impl Algebra {
                         + Copy,
                 {
                     type Output = Option<Self>;
+                    #[inline]
+                    #[allow(unreachable_patterns)]
                     fn #op_fn(self) -> Self::Output {
                         match self {
                             #(#variants)*
@@ -342,15 +389,19 @@ impl Algebra {
                 if op.inapplicable(ty, self) {
                     None
                 } else if op == InverseOps::Unitize {
-                    Some(quote! {
-                        Value::#ty(value) => {
-                            if num_traits::Zero::is_zero(&value) {
-                                None
-                            } else {
-                                Some(Value::#ty(#op_ty::#op_fn(value).value()))
-                            }
-                        },
-                    })
+                    if ty == Type::Grade(0) {
+                        None
+                    } else {
+                        Some(quote! {
+                            Value::#ty(value) => {
+                                if num_traits::Zero::is_zero(&value) {
+                                    None
+                                } else {
+                                    Some(Value::#ty(#op_ty::#op_fn(value).value()))
+                                }
+                            },
+                        })
+                    }
                 } else {
                     Some(quote! {
                         Value::#ty(value) => {
@@ -446,20 +497,25 @@ impl Algebra {
     fn define_rev(self) -> syn::ItemImpl {
         let rev_ty = Reverse::trait_ty();
         let rev_fn = Reverse::trait_fn();
-        let variants = self.types().map(|ty| {
-            quote! {
-                Value::#ty(value) => Value::#ty(#rev_ty::#rev_fn(value)),
+        let variants = self.types().filter_map(|ty| {
+            if matches!(ty, Type::Grade(0) | Type::Grade(1)) {
+                return None;
             }
+            Some(quote! {
+                Value::#ty(value) => Some(Value::#ty(#rev_ty::#rev_fn(value))),
+            })
         });
         parse_quote! {
             impl<T> #rev_ty for Value<T>
             where
                 T: std::ops::Neg<Output = T>,
             {
+                type Output = Option<Self>;
                 #[inline]
-                fn #rev_fn(self) -> Self {
+                fn #rev_fn(self) -> Self::Output {
                     match self {
                         #(#variants)*
+                        _ => None,
                     }
                 }
             }
@@ -524,6 +580,41 @@ impl Algebra {
             },
         ]
     }
+
+    fn define_variant_fns(&self) -> [ItemImpl; 2] {
+        let fns = self.types().map(|ty| -> ItemFn {
+            let ident = ty.fn_ident();
+            parse_quote! {
+                pub fn #ident() -> Value<f_zero::f0> {
+                    Value::#ty(#ty::default())
+                }
+            }
+        });
+
+        let vars = self.types().map(|ty| {
+            let ident = ty.fn_ident();
+            quote! {
+                Value::#ty(_) => Value::#ident(),
+            }
+        });
+
+        [
+            parse_quote! {
+                impl Value<f_zero::f0> {
+                    #(#fns)*
+                }
+            },
+            parse_quote! {
+                impl<T> Value<T> {
+                    pub fn ty(&self) -> Value<f_zero::f0> {
+                        match self {
+                            #(#vars)*
+                        }
+                    }
+                }
+            },
+        ]
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -533,9 +624,6 @@ enum BinaryOp {
     Geo,
     Dot,
     Wedge,
-    Antigeo,
-    Antidot,
-    Antiwedge,
     Grade(u32),
 }
 
@@ -545,8 +633,7 @@ impl BinaryOp {
         let grade_products = (0..=algebra.bases.len())
             .into_iter()
             .map(|g| Grade(g as u32));
-        IntoIterator::into_iter([Add, Sub, Geo, Dot, Wedge, Antigeo, Antidot, Antiwedge])
-            .chain(grade_products)
+        IntoIterator::into_iter([Add, Sub, Geo, Dot, Wedge]).chain(grade_products)
     }
 }
 
