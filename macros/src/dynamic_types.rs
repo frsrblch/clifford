@@ -2,7 +2,7 @@ use crate::algebra::{Complement, InverseOps, NormOps, ProductOp, SumOp, Type};
 use crate::code_gen::{GradeProduct, Reverse, Sandwich, Sqrt};
 use crate::Algebra;
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{quote, ToTokens};
 use syn::{parse_quote, ItemEnum, ItemFn, ItemImpl};
 
 impl Algebra {
@@ -13,6 +13,7 @@ impl Algebra {
         let unary_op = self.define_unary_op();
         let product_ops = self.define_product_ops();
         let grade_products = self.impl_grade_products();
+        let sandwich_ops = self.impl_sandwich_product();
         let sum_ops = self.define_sum_ops();
         let norm_ops = self.define_norm_ops();
         let inv_ops = self.define_inv_ops();
@@ -27,6 +28,7 @@ impl Algebra {
             #binary_op
             #(#product_ops)*
             #(#grade_products)*
+            #sandwich_ops
             #(#sum_ops)*
             #(#norm_ops)*
             #(#inv_ops)*
@@ -54,40 +56,32 @@ impl Algebra {
     }
 
     fn define_binary_op(self) -> TokenStream {
-        let len = proc_macro2::Literal::usize_unsuffixed(5 + self.grades().count());
-        let grade_values = self.grades();
-        let grade_products = self.grades();
+        let variants = BinaryOp::iter(self);
+        let variants1 = BinaryOp::iter(self);
+        let len = proc_macro2::Literal::usize_unsuffixed(BinaryOp::iter(self).count());
         let call_variants = BinaryOp::iter(self).map(|op| match op {
             BinaryOp::Add => quote! { BinaryOp::Add => std::ops::Add::add(lhs, rhs), },
             BinaryOp::Sub => quote! { BinaryOp::Sub => std::ops::Sub::sub(lhs, rhs), },
             BinaryOp::Geo => quote! { BinaryOp::Geo => Geo::geo(lhs, rhs), },
             BinaryOp::Dot => quote! { BinaryOp::Dot => Dot::dot(lhs, rhs), },
             BinaryOp::Wedge => quote! { BinaryOp::Wedge => Wedge::wedge(lhs, rhs), },
+            BinaryOp::Sandwich => quote! { BinaryOp::Sandwich => Sandwich::sandwich(lhs, rhs), },
             BinaryOp::Grade(g) => {
                 let grade = Type::Grade(g);
-                quote! {
-                    BinaryOp::#grade => #grade::product(lhs, rhs),
-                }
+                quote! { BinaryOp::#grade => #grade::product(lhs, rhs), }
             }
         });
         quote! {
             #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
             pub enum BinaryOp {
-                Add,
-                Sub,
-                // Sandwich,
-                Geo,
-                Dot,
-                Wedge,
-                #(#grade_products,)*
+                #(#variants,)*
             }
 
             impl BinaryOp {
                 pub fn values() -> [Self; #len] {
                     use BinaryOp::*;
                     [
-                        Add, Sub, Geo, Dot, Wedge,
-                        #(#grade_values,)*
+                        #(#variants1,)*
                     ]
                 }
 
@@ -98,9 +92,11 @@ impl Algebra {
                 pub fn call<T>(self, lhs: Value<T>, rhs: Value<T>) -> Option<Value<T>>
                 where
                     T: std::ops::Mul<Output = T>
+                        + std::ops::Div<Output = T>
                         + std::ops::Add<Output = T>
                         + std::ops::Sub<Output = T>
                         + std::ops::Neg<Output = T>
+                        + num_traits::One
                         + num_traits::Zero
                         + Copy,
                 {
@@ -118,6 +114,7 @@ impl Algebra {
 
         let arms = self.type_tuples().filter_map(|(lhs, rhs)| {
             if ProductOp::Geo.output(self, lhs, rhs).is_none()
+                || !matches!(rhs, Type::Grade(_))
                 || InverseOps::Inverse.inapplicable(lhs, self)
             {
                 None
@@ -189,7 +186,9 @@ impl Algebra {
     }
 
     fn define_unary_op(self) -> TokenStream {
-        let dual_variants = Complement::iter(self).map(|op| op.trait_ty());
+        let variants = UnaryOp::iter(self);
+        let values = UnaryOp::iter(self).map(|op| quote!(Self::#op));
+        let len = proc_macro2::Literal::usize_unsuffixed(UnaryOp::iter(self).count());
 
         let call_variants = UnaryOp::iter(self).map(|op| match op {
             UnaryOp::Norm2 => quote! { UnaryOp::Norm2 => value.norm2() },
@@ -206,39 +205,18 @@ impl Algebra {
             UnaryOp::Cos => quote! { UnaryOp::Cos => num_trig::Cos::cos(value) },
         });
 
-        let fn_values = if self.symmetrical_complements() {
-            quote! {
-                pub fn values() -> [Self; 10] {
-                    use UnaryOp::*;
-                    [Norm2, Norm, Unit, Inv, Sqrt, Dual, Rev, Neg, Sin, Cos]
-                }
-            }
-        } else {
-            quote! {
-                pub fn values() -> [Self; 11] {
-                    use UnaryOp::*;
-                    [Norm2, Norm, Unit, Inv, Sqrt, LeftComp, RightComp, Rev, Neg, Sin, Cos]
-                }
-            }
-        };
-
         quote! {
             #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
             pub enum UnaryOp {
-                Norm2,
-                Norm,
-                Unit,
-                Inv,
-                Sqrt,
-                #(#dual_variants,)*
-                Rev,
-                Neg,
-                Sin,
-                Cos,
+                #(#variants,)*
             }
 
             impl UnaryOp {
-                #fn_values
+                pub fn values() -> [Self; #len] {
+                    [
+                        #(#values,)*
+                    ]
+                }
 
                 pub fn len() -> usize {
                     Self::values().len()
@@ -448,6 +426,11 @@ impl Algebra {
                 T: num_sqrt::Sqrt<Output = T>
                     + PartialOrd
                     + num_traits::Zero,
+                Scalar<T>: num_sqrt::Sqrt<Output = Scalar<T>>,
+                Bivector<T>: num_sqrt::Sqrt<Output = Motor<T>>
+                    + num_traits::Zero,
+                Motor<T>: num_sqrt::Sqrt<Output = Motor<T>>
+                    + num_traits::Zero,
             {
                 type Output = Option<Self>;
                 #[inline]
@@ -458,6 +441,28 @@ impl Algebra {
                                 Some(Value::Scalar(Scalar { s: value.s.sqrt() }))
                             } else {
                                 None
+                            }
+                        }
+                        Value::Bivector(value) => {
+                            if num_traits::Zero::is_zero(&value) {
+                                None
+                            } else {
+                                Some(
+                                    Value::Motor(
+                                        num_sqrt::Sqrt::sqrt(value)
+                                    )
+                                )
+                            }
+                        }
+                        Value::Motor(value) => {
+                            if num_traits::Zero::is_zero(&value) {
+                                None
+                            } else {
+                                Some(
+                                    Value::Motor(
+                                        num_sqrt::Sqrt::sqrt(value)
+                                    )
+                                )
                             }
                         }
                         _ => None,
@@ -624,6 +629,7 @@ enum BinaryOp {
     Geo,
     Dot,
     Wedge,
+    Sandwich,
     Grade(u32),
 }
 
@@ -633,7 +639,21 @@ impl BinaryOp {
         let grade_products = (0..=algebra.bases.len())
             .into_iter()
             .map(|g| Grade(g as u32));
-        IntoIterator::into_iter([Add, Sub, Geo, Dot, Wedge]).chain(grade_products)
+        IntoIterator::into_iter([Add, Sub, Geo, Dot, Wedge, Sandwich]).chain(grade_products)
+    }
+}
+
+impl ToTokens for BinaryOp {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        match self {
+            Self::Add => quote!(Add).to_tokens(tokens),
+            Self::Sub => quote!(Sub).to_tokens(tokens),
+            Self::Geo => ProductOp::Geo.trait_ty().to_tokens(tokens),
+            Self::Dot => ProductOp::Dot.trait_ty().to_tokens(tokens),
+            Self::Wedge => ProductOp::Wedge.trait_ty().to_tokens(tokens),
+            Self::Sandwich => Sandwich::trait_ty().to_tokens(tokens),
+            Self::Grade(g) => Type::Grade(*g).to_tokens(tokens),
+        }
     }
 }
 
@@ -657,17 +677,32 @@ impl UnaryOp {
     pub fn iter(algebra: Algebra) -> impl Iterator<Item = Self> {
         use UnaryOp::*;
         if algebra.symmetrical_complements() {
-            [Norm2, Norm, Unit, Inv, Sqrt, Dual, Rev, Neg, Sin, Cos]
-                .as_slice()
-                .iter()
-                .copied()
+            vec![Norm2, Norm, Unit, Inv, Sqrt, Dual, Rev, Neg, Sin, Cos].into_iter()
         } else {
-            [
+            vec![
                 Norm2, Norm, Unit, Inv, Sqrt, LeftComp, RightComp, Rev, Neg, Sin, Cos,
             ]
-            .as_slice()
-            .iter()
-            .copied()
+            .into_iter()
         }
+    }
+}
+
+impl ToTokens for UnaryOp {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let t = match self {
+            Self::Norm2 => quote!(Norm2),
+            Self::Norm => quote!(Norm),
+            Self::Unit => quote!(Unit),
+            Self::Inv => quote!(Inv),
+            Self::Sqrt => quote!(Sqrt),
+            Self::Dual => quote!(Dual),
+            Self::LeftComp => quote!(LeftComp),
+            Self::RightComp => quote!(RightComp),
+            Self::Rev => quote!(Rev),
+            Self::Neg => quote!(Neg),
+            Self::Sin => quote!(Sin),
+            Self::Cos => quote!(Cos),
+        };
+        t.to_tokens(tokens);
     }
 }
