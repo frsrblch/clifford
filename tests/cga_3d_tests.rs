@@ -26,11 +26,7 @@
 //     const E4: Vector<f64> = Vector::new(0., 0., 0., -1., 0.);
 //     -E4.geo(v).geo(E4).4
 // }
-//
-// pub trait Inverse {
-//     fn inv(self) -> Self;
-// }
-//
+
 // impl Inverse for Vector<f64> {
 //     fn inv(self) -> Vector<f64> {
 //         const E4: Vector<f64> = Vector::new(0., 0., 0., -1., 0.);
@@ -97,123 +93,7 @@
 //     assert_eq!((b * (b / 2.)).4, (b * b / 2.).4);
 //     assert_eq!((b * (b / 2.)).0, (b * b / 2.).0);
 // }
-//
-// pub trait GradeFilter<T> {
-//     type Output;
-//     fn filter(value: T) -> Self::Output;
-// }
-//
-// impl<T> GradeFilter<T> for Zero {
-//     type Output = Zero;
-//     #[inline]
-//     #[allow(unused_variables)]
-//     fn filter(value: T) -> Self::Output {
-//         Zero
-//     }
-// }
-//
-// impl<T, G0, G1, G2, G3, G4, G5> GradeFilter<Multivector<G0, G1, G2, G3, G4, G5>> for Vector<T> {
-//     type Output = G1;
-//
-//     fn filter(value: Multivector<G0, G1, G2, G3, G4, G5>) -> Self::Output {
-//         value.1
-//     }
-// }
-//
-// impl<G0, G1, G2, G3, G4, G5> GradeFilter<Multivector<G0, G1, G2, G3, G4, G5>> for f32 {
-//     type Output = G0;
-//
-//     fn filter(value: Multivector<G0, G1, G2, G3, G4, G5>) -> Self::Output {
-//         value.0
-//     }
-// }
-//
-// impl<G0, G1, G2, G3, G4, G5> GradeFilter<Multivector<G0, G1, G2, G3, G4, G5>> for f64 {
-//     type Output = G0;
-//
-//     fn filter(value: Multivector<G0, G1, G2, G3, G4, G5>) -> Self::Output {
-//         value.0
-//     }
-// }
-//
-// impl<T, G0, G1, G2, G3, G4, G5> GradeFilter<Multivector<G0, G1, G2, G3, G4, G5>> for Bivector<T> {
-//     type Output = G2;
-//
-//     fn filter(value: Multivector<G0, G1, G2, G3, G4, G5>) -> Self::Output {
-//         value.2
-//     }
-// }
-//
-// impl<T, G0, G1, G2, G3, G4, G5> GradeFilter<Multivector<G0, G1, G2, G3, G4, G5>> for Trivector<T> {
-//     type Output = G3;
-//
-//     fn filter(value: Multivector<G0, G1, G2, G3, G4, G5>) -> Self::Output {
-//         value.3
-//     }
-// }
-//
-// impl<T, G0, G1, G2, G3, G4, G5> GradeFilter<Multivector<G0, G1, G2, G3, G4, G5>> for Quadvector<T> {
-//     type Output = G4;
-//
-//     fn filter(value: Multivector<G0, G1, G2, G3, G4, G5>) -> Self::Output {
-//         value.4
-//     }
-// }
-//
-// impl<T, G0, G1, G2, G3, G4, G5> GradeFilter<Multivector<G0, G1, G2, G3, G4, G5>>
-//     for Pentavector<T>
-// {
-//     type Output = G5;
-//
-//     fn filter(value: Multivector<G0, G1, G2, G3, G4, G5>) -> Self::Output {
-//         value.5
-//     }
-// }
-//
-// impl<G0, G1, G2, G3, G4, G5, Rhs> GradeFilter<Rhs> for Multivector<G0, G1, G2, G3, G4, G5>
-// where
-//     Rhs: Copy,
-//     G0: GradeFilter<Rhs>,
-//     G1: GradeFilter<Rhs>,
-//     G2: GradeFilter<Rhs>,
-//     G3: GradeFilter<Rhs>,
-//     G4: GradeFilter<Rhs>,
-//     G5: GradeFilter<Rhs>,
-// {
-//     type Output =
-//         Multivector<G0::Output, G1::Output, G2::Output, G3::Output, G4::Output, G5::Output>;
-//
-//     fn filter(value: Rhs) -> Self::Output {
-//         Multivector(
-//             G0::filter(value),
-//             G1::filter(value),
-//             G2::filter(value),
-//             G3::filter(value),
-//             G4::filter(value),
-//             G5::filter(value),
-//         )
-//     }
-// }
-//
-// pub trait SandwichProduct<Inner> {
-//     type Output;
-//     fn sandwich(self, inner: Inner) -> Self::Output;
-// }
-//
-// impl<Inner, Outer, T0, T1> SandwichProduct<Inner> for Outer
-// where
-//     Outer: Geometric<Inner, Output = T0> + Inverse + Copy,
-//     T0: Geometric<Outer, Output = T1>,
-//     Inner: GradeFilter<T1>,
-// {
-//     type Output = <Inner as GradeFilter<T1>>::Output;
-//
-//     fn sandwich(self, inner: Inner) -> Self::Output {
-//         let output = self.geo(inner).geo(self.inv());
-//         Inner::filter(output)
-//     }
-// }
-//
+
 // #[test]
 // fn sandwich_point() {
 //     let p = point(2., 0., 0.);
