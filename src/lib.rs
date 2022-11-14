@@ -175,6 +175,99 @@ pub mod ga_3d {
             self.value() + num_traits::One::one()
         }
     }
+
+    impl<T> rand::distributions::Distribution<Unit<Vector<T>>> for rand::distributions::Standard
+    where
+        T: num_traits::One
+            + std::ops::Add<Output = T>
+            + std::ops::Sub<Output = T>
+            + std::ops::Mul<Output = T>
+            + PartialOrd
+            + Copy,
+        Vector<T>: Norm2<Output = Scalar<T>> + Unitize<Output = Unit<Vector<T>>>,
+        rand::distributions::Standard: rand::distributions::Distribution<T>,
+    {
+        fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Unit<Vector<T>> {
+            loop {
+                let two = T::one() + T::one();
+
+                let x = rng.gen::<T>() * two - T::one();
+                let y = rng.gen::<T>() * two - T::one();
+                let z = rng.gen::<T>() * two - T::one();
+
+                let v = Vector { x, y, z };
+
+                if v.norm2().s <= T::one() {
+                    return v.unit();
+                }
+            }
+        }
+    }
+
+    impl<T> rand::distributions::Distribution<Unit<Bivector<T>>> for rand::distributions::Standard
+    where
+        rand::distributions::Standard: rand::distributions::Distribution<Unit<Vector<T>>>,
+        Vector<T>: Dual<Output = Bivector<T>>,
+    {
+        fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Unit<Bivector<T>> {
+            Unit(rng.gen::<Unit<Vector<T>>>().value().dual())
+        }
+    }
+
+    impl<T> rand::distributions::Distribution<Unit<Motor<T>>> for rand::distributions::Standard
+    where
+        rand::distributions::Standard: rand::distributions::Distribution<Unit<Bivector<T>>>
+            + rand::distributions::Distribution<T>,
+        T: From<f64>
+            + std::ops::Mul<Output = T>
+            + num_trig::Sin<Output = T>
+            + num_trig::Cos<Output = T>
+            + Copy,
+        Bivector<T>: std::ops::Mul<Scalar<T>, Output = Bivector<T>>
+            + std::ops::Add<Scalar<T>, Output = Motor<T>>,
+    {
+        fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Unit<Motor<T>> {
+            let bivector = rng.gen::<Unit<Bivector<T>>>();
+            let angle = rng.gen::<T>() * T::from(std::f64::consts::PI);
+            let sin = Scalar { s: angle.sin() };
+            let cos = Scalar { s: angle.cos() };
+            Unit(bivector.value() * cos + sin)
+        }
+    }
+
+    #[cfg(test)]
+    mod rand_tests {
+        use rand::{thread_rng, Rng};
+
+        use super::*;
+
+        #[test]
+        fn unit_vector() {
+            let mut rng = thread_rng();
+            for _ in 0..100 {
+                let v = rng.gen::<Unit<Vector<f64>>>();
+                assert_eq!(v.value().norm2().to_f32().s, 1.);
+            }
+        }
+
+        #[test]
+        fn unit_bivector() {
+            let mut rng = thread_rng();
+            for _ in 0..100 {
+                let b = rng.gen::<Unit<Bivector<f64>>>();
+                assert_eq!(b.value().norm2().to_f32().s, 1.);
+            }
+        }
+
+        #[test]
+        fn unit_motor() {
+            let mut rng = thread_rng();
+            for _ in 0..100 {
+                let m = rng.gen::<Unit<Motor<f64>>>();
+                assert_eq!(m.value().norm2().to_f32().s, 1.);
+            }
+        }
+    }
 }
 
 #[cfg(feature = "pga_3d")]
@@ -229,6 +322,111 @@ pub mod pga3 {
 
         fn sqrt(self) -> Self::Output {
             self.value() + num_traits::One::one()
+        }
+    }
+
+    impl<T> rand::distributions::Distribution<Unit<Vector<T>>> for rand::distributions::Standard
+    where
+        T: num_traits::One
+            + num_traits::Zero
+            + std::ops::Add<Output = T>
+            + std::ops::Sub<Output = T>
+            + std::ops::Mul<Output = T>
+            + PartialOrd
+            + Copy,
+        Vector<T>: Norm2<Output = Scalar<T>> + Unitize<Output = Unit<Vector<T>>>,
+        rand::distributions::Standard: rand::distributions::Distribution<T>,
+    {
+        fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Unit<Vector<T>> {
+            loop {
+                let two = T::one() + T::one();
+
+                let x = rng.gen::<T>() * two - T::one();
+                let y = rng.gen::<T>() * two - T::one();
+                let z = rng.gen::<T>() * two - T::one();
+
+                let v = Vector {
+                    x,
+                    y,
+                    z,
+                    w: T::zero(),
+                };
+
+                if v.norm2().s <= T::one() {
+                    return v.unit();
+                }
+            }
+        }
+    }
+
+    impl<T> rand::distributions::Distribution<Unit<Bivector<T>>> for rand::distributions::Standard
+    where
+        rand::distributions::Standard: rand::distributions::Distribution<Unit<Vector<T>>>,
+        T: num_traits::Zero,
+    {
+        fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Unit<Bivector<T>> {
+            let v = rng.gen::<Unit<Vector<T>>>().value();
+            Unit(Bivector {
+                xy: v.z,
+                yz: v.x,
+                xz: v.y,
+                ..num_traits::Zero::zero()
+            })
+        }
+    }
+
+    impl<T> rand::distributions::Distribution<Unit<Motor<T>>> for rand::distributions::Standard
+    where
+        rand::distributions::Standard: rand::distributions::Distribution<Unit<Bivector<T>>>
+            + rand::distributions::Distribution<T>,
+        T: From<f64>
+            + std::ops::Mul<Output = T>
+            + num_trig::Sin<Output = T>
+            + num_trig::Cos<Output = T>
+            + Copy,
+        Bivector<T>: std::ops::Mul<Scalar<T>, Output = Bivector<T>>
+            + std::ops::Add<Scalar<T>, Output = Motor<T>>,
+    {
+        fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Unit<Motor<T>> {
+            let bivector = rng.gen::<Unit<Bivector<T>>>();
+            let angle = rng.gen::<T>() * T::from(std::f64::consts::PI);
+            let sin = Scalar { s: angle.sin() };
+            let cos = Scalar { s: angle.cos() };
+            Unit(bivector.value() * cos + sin)
+        }
+    }
+
+    #[cfg(test)]
+    mod rand_tests {
+        use rand::{thread_rng, Rng};
+
+        use super::*;
+
+        #[test]
+        fn unit_vector() {
+            let mut rng = thread_rng();
+            for _ in 0..100 {
+                let v = rng.gen::<Unit<Vector<f64>>>();
+                assert_eq!(v.value().norm2().to_f32().s, 1.);
+            }
+        }
+
+        #[test]
+        fn unit_bivector() {
+            let mut rng = thread_rng();
+            for _ in 0..100 {
+                let b = rng.gen::<Unit<Bivector<f64>>>();
+                assert_eq!(b.value().norm2().to_f32().s, 1.);
+            }
+        }
+
+        #[test]
+        fn unit_motor() {
+            let mut rng = thread_rng();
+            for _ in 0..100 {
+                let m = rng.gen::<Unit<Motor<f64>>>();
+                assert_eq!(m.value().norm2().to_f32().s, 1.);
+            }
         }
     }
 }
