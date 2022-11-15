@@ -1010,6 +1010,30 @@ impl ScalarOps {
                         }
                     }
                 },
+                parse_quote! {
+                    impl<T> #trait_ty<f32> for #ty<T> 
+                    where
+                        #ty<T>: std::ops::Div<Scalar<f32>, Output = #ty<T>>,
+                    {
+                        type Output = #ty<T>;
+                        #fn_attrs
+                        fn #trait_fn(self, rhs: f32) -> Self::Output {
+                            self / Scalar { s: rhs }
+                        }
+                    }
+                },
+                parse_quote! {
+                    impl<T> #trait_ty<f64> for #ty<T> 
+                    where
+                        #ty<T>: std::ops::Div<Scalar<f64>, Output = #ty<T>>,
+                    {
+                        type Output = #ty<T>;
+                        #fn_attrs
+                        fn #trait_fn(self, rhs: f64) -> Self::Output {
+                            self / Scalar { s: rhs }
+                        }
+                    }
+                }
             ])
         } else {
             let fields = ty.iter_blades_unsorted(algebra).map(|blade| {
