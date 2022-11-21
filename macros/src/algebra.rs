@@ -3,6 +3,7 @@ use std::iter::FromIterator;
 #[derive(Default, Copy, Clone, Eq, PartialEq)]
 pub struct Algebra {
     pub bases: &'static [Basis],
+    pub slim: bool,
 }
 
 impl Algebra {
@@ -18,6 +19,7 @@ impl Algebra {
                     sqr: Square::Pos,
                 },
             ],
+            slim: false,
         }
     }
 
@@ -37,6 +39,7 @@ impl Algebra {
                     sqr: Square::Pos,
                 },
             ],
+            slim: false,
         }
     }
 
@@ -56,6 +59,7 @@ impl Algebra {
                     sqr: Square::Zero,
                 },
             ],
+            slim: false,
         }
     }
 
@@ -79,6 +83,7 @@ impl Algebra {
                     sqr: Square::Zero,
                 },
             ],
+            slim: false,
         }
     }
 
@@ -106,6 +111,7 @@ impl Algebra {
                     sqr: Square::Neg,
                 },
             ],
+            slim: false,
         }
     }
 
@@ -253,25 +259,37 @@ impl Algebra {
         0..=(self.bases.len() as u32)
     }
 
-    pub fn types(self) -> impl Iterator<Item = Type> {
-        let versors = [Type::Motor, Type::Flector, Type::Mv]
-            .iter()
-            .filter(move |ty| {
-                let mut some = None;
-                for blade in ty.iter_blades_unsorted(self) {
-                    match some {
-                        None => some = Some(blade.grade()),
-                        Some(g) => {
-                            if blade.grade() != g {
-                                return true;
+    pub fn types(self) -> Box<dyn Iterator<Item = Type>> {
+        if self.slim {
+            Box::new(self.grades())
+        } else {
+            let versors = [Type::Motor, Type::Flector, Type::Mv]
+                .iter()
+                .filter(move |ty| {
+                    let mut some = None;
+                    for blade in ty.iter_blades_unsorted(self) {
+                        match some {
+                            None => some = Some(blade.grade()),
+                            Some(g) => {
+                                if blade.grade() != g {
+                                    return true;
+                                }
                             }
-                        }
-                    };
-                }
-                false
-            })
-            .copied();
-        self.grades().chain(versors)
+                        };
+                    }
+                    false
+                })
+                .copied();
+            Box::new(self.grades().chain(versors))
+        }
+    }
+
+    pub fn contains(&self, ty: Type) -> bool {
+        if self.slim {
+            matches!(ty, Type::Grade(_))
+        } else {
+            true
+        }
     }
 
     pub fn type_tuples(self) -> impl Iterator<Item = (Type, Type)> {
@@ -316,6 +334,7 @@ impl Type {
                 3 => "Trivector",
                 4 => "Quadvector",
                 5 => "Pentavector",
+                6 => "Hexavector",
                 _ => unimplemented!("grade out of range: {n}"),
             },
             Type::Motor => "Motor",
@@ -333,6 +352,7 @@ impl Type {
                 3 => "trivector",
                 4 => "quadvector",
                 5 => "pentavector",
+                6 => "hexavector",
                 _ => unimplemented!("grade out of range: {n}"),
             },
             Type::Motor => "motor",
@@ -467,6 +487,27 @@ pub struct Basis {
 }
 
 impl Basis {
+    pub fn pos(char: char) -> Self {
+        Self {
+            char,
+            sqr: Square::Pos,
+        }
+    }
+
+    pub fn neg(char: char) -> Self {
+        Self {
+            char,
+            sqr: Square::Neg,
+        }
+    }
+
+    pub fn zero(char: char) -> Self {
+        Self {
+            char,
+            sqr: Square::Zero,
+        }
+    }
+
     fn sqr(self) -> Blade {
         self.sqr.blade()
     }
@@ -660,17 +701,15 @@ impl ProductOp {
         ])
     }
 
-    pub fn iter_all() -> impl Iterator<Item = Self> {
-        IntoIterator::into_iter([
-            Self::Geo,
-            Self::Wedge,
-            Self::Dot,
-            Self::Antigeo,
-            Self::Antidot,
-            Self::Antiwedge,
-            Self::Mul,
-            Self::Commutator,
-        ])
+    pub fn iter_all(algebra: Algebra) -> Box<dyn Iterator<Item = Self>> {
+        if algebra.slim {
+            Box::new(IntoIterator::into_iter([Self::Geo, Self::Wedge, Self::Dot, Self::Mul]))
+        } else {
+            Box::new(IntoIterator::into_iter([Self::Geo, Self::Wedge, Self::Dot, Self::Mul, Self::Antigeo,
+                Self::Antidot,
+                Self::Antiwedge,
+                Self::Commutator,]))
+        }
     }
 
     pub fn output(self, algebra: Algebra, lhs: Type, rhs: Type) -> Option<Type> {
@@ -1042,6 +1081,7 @@ mod tests {
                 char: 'n',
                 sqr: Square::Zero,
             }],
+            slim: false,
         };
         let e1 = Blade(1);
 
@@ -1055,6 +1095,7 @@ mod tests {
                 char: 'n',
                 sqr: Square::Neg,
             }],
+            slim: false,
         };
         let e1 = Blade(1);
         let neg_s = -Blade(0);

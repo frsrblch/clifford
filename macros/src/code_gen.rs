@@ -28,23 +28,22 @@ impl Algebra {
         let impl_zero = self.types().map(|ty| ty.impl_zero(self));
         let impl_one = self.types().filter_map(|ty| ty.impl_one(self));
 
-        let impl_product_ops = ProductOp::iter_all()
-            .flat_map(|op| self.types().map(move |ty| (op, ty)))
-            .flat_map(|(op, lhs)| self.types().map(move |rhs| (op, lhs, rhs)))
-            .filter_map(|(op, lhs, rhs)| op.impl_for(self, lhs, rhs));
+        let impl_product_ops = self.type_tuples().flat_map(|(lhs, rhs)| {
+            ProductOp::iter_all(self).filter_map(move |op| op.impl_for(self, lhs, rhs))
+        });
 
         let operator_overloads = self.type_tuples().flat_map(|(lhs, rhs)| {
-            Overload::iter().filter_map(move |op| op.impl_for(lhs, rhs, self))
+            Overload::iter(self).filter_map(move |op| op.impl_for(lhs, rhs, self))
         });
 
         let div_ops = self
             .type_tuples()
             .filter_map(|(lhs, rhs)| Div::impl_for(lhs, rhs, self));
 
-        let impl_sum_ops = SumOp::iter()
-            .flat_map(|op| self.types().map(move |lhs| (op, lhs)))
-            .flat_map(|(op, lhs)| self.types().map(move |rhs| (op, lhs, rhs)))
-            .filter_map(|(op, lhs, rhs)| op.impl_for(self, lhs, rhs));
+        let impl_sum_ops = SumOp::iter().flat_map(|op| {
+            self.type_tuples()
+                .filter_map(move |(lhs, rhs)| op.impl_for(self, lhs, rhs))
+        });
 
         let impl_neg = self.types().map(|ty| Neg::impl_for(ty, self));
 
@@ -91,7 +90,7 @@ impl Algebra {
             .type_tuples()
             .map(|(lhs, rhs)| Antisandwich::impl_for(lhs, rhs, self));
 
-        let unit_items = Unit::define();
+        let unit_items = Unit::define(self);
 
         let inverse_ops = InverseOps::iter()
             .flat_map(|op| self.types().filter_map(move |ty| op.impl_for(ty, self)));
@@ -133,6 +132,7 @@ impl Algebra {
 
             #[cfg(test)]
             mod tests {
+                #[allow(unused_imports)]
                 use super::*;
                 #(#test_unit_inv)*
             }
@@ -796,6 +796,10 @@ impl ProductOp {
         let op_fn = self.trait_fn();
         let output = self.output(algebra, lhs, rhs)?;
 
+        if !algebra.contains(output) {
+            return None;
+        }
+
         let blades = cartesian_product(
             lhs.iter_blades_unsorted(algebra),
             rhs.iter_blades_unsorted(algebra),
@@ -881,6 +885,10 @@ impl SumOp {
         let trait_ty = self.trait_ty();
         let trait_fn = self.trait_fn();
         let output = Self::sum(algebra, lhs, rhs)?;
+
+        if !algebra.contains(output) {
+            return None;
+        }
 
         let mut blades = HashMap::<Blade, Vec<(Side, Blade)>>::new();
 
@@ -1011,7 +1019,7 @@ impl ScalarOps {
                     }
                 },
                 parse_quote! {
-                    impl<T> #trait_ty<f32> for #ty<T> 
+                    impl<T> #trait_ty<f32> for #ty<T>
                     where
                         #ty<T>: std::ops::Div<Scalar<f32>, Output = #ty<T>>,
                     {
@@ -1023,7 +1031,7 @@ impl ScalarOps {
                     }
                 },
                 parse_quote! {
-                    impl<T> #trait_ty<f64> for #ty<T> 
+                    impl<T> #trait_ty<f64> for #ty<T>
                     where
                         #ty<T>: std::ops::Div<Scalar<f64>, Output = #ty<T>>,
                     {
@@ -1033,7 +1041,7 @@ impl ScalarOps {
                             self / Scalar { s: rhs }
                         }
                     }
-                }
+                },
             ])
         } else {
             let fields = ty.iter_blades_unsorted(algebra).map(|blade| {
@@ -1328,7 +1336,7 @@ impl Sandwich {
     }
 
     pub fn impl_for(lhs: Type, rhs: Type, algebra: Algebra) -> Option<ItemImpl> {
-        if InverseOps::Inverse.inapplicable(lhs, algebra) {
+        if InverseOps::Inverse.inapplicable(lhs, algebra) || algebra.slim {
             return None;
         }
 
@@ -1385,7 +1393,7 @@ impl Antisandwich {
     }
 
     pub fn impl_for(lhs: Type, rhs: Type, algebra: Algebra) -> Option<ItemImpl> {
-        if InverseOps::Inverse.inapplicable(lhs.complement(algebra), algebra) {
+        if InverseOps::Inverse.inapplicable(lhs.complement(algebra), algebra) || algebra.slim {
             return None;
         }
 
@@ -1547,7 +1555,7 @@ impl InverseOps {
     }
 
     pub fn tests(self, ty: Type, algebra: Algebra) -> Option<syn::ItemFn> {
-        if self.inapplicable(ty, algebra) {
+        if self.inapplicable(ty, algebra) || algebra.slim {
             return None;
         }
 
@@ -1598,7 +1606,7 @@ impl InverseOps {
 pub struct Unit;
 
 impl Unit {
-    pub fn define() -> Vec<syn::Item> {
+    pub fn define(algebra: Algebra) -> Vec<syn::Item> {
         let unitize_ty = InverseOps::Unitize.trait_ty();
         let unitize_fn = InverseOps::Unitize.trait_fn();
         let inverse_ty = InverseOps::Inverse.trait_ty();
@@ -1672,7 +1680,7 @@ impl Unit {
             Impl(sandwich_impl),
             Impl(antisandwich_impl),
         ])
-        .chain(ProductOp::iter_all().map(|op| {
+        .chain(ProductOp::iter_all(algebra).map(|op| {
             let trait_ty = op.trait_ty();
             let trait_fn = op.trait_fn();
             parse_quote! {
@@ -1745,6 +1753,10 @@ impl Div {
             })
             .collect::<Option<Type>>()?;
 
+        if !algebra.contains(output) {
+            return None;
+        }
+
         let fn_attrs = fn_attrs();
 
         Some(parse_quote! {
@@ -1771,8 +1783,12 @@ pub enum Overload {
 }
 
 impl Overload {
-    pub fn iter() -> impl Iterator<Item = Self> {
-        IntoIterator::into_iter([Overload::BitAnd, Overload::BitOr, Overload::BitXor])
+    pub fn iter(algebra: Algebra) -> impl Iterator<Item = Self> {
+        if algebra.slim {
+            IntoIterator::into_iter(vec![Overload::BitOr, Overload::BitXor])
+        } else {
+            IntoIterator::into_iter(vec![Overload::BitAnd, Overload::BitOr, Overload::BitXor])
+        }
     }
 
     pub fn impl_for(self, lhs: Type, rhs: Type, algebra: Algebra) -> Option<ItemImpl> {
@@ -1782,6 +1798,9 @@ impl Overload {
         let inner_ty = inner.trait_ty();
         let inner_fn = inner.trait_fn();
         let output = inner.output(algebra, lhs, rhs)?;
+        if !algebra.contains(output) {
+            return None;
+        }
         Some(parse_quote! {
             impl<T, U, V> #trait_ty<#rhs<U>> for #lhs<T>
             where
@@ -1843,6 +1862,7 @@ mod tests {
                         sqr: Square::Neg,
                     },
                 ],
+                slim: false,
             }
         }
     }
@@ -1850,7 +1870,9 @@ mod tests {
     #[test]
     fn write_to_file() {
         let path = "../output.rs";
-        let output = Algebra::pga3().define().to_string();
+        let mut algebra = Algebra::pga3();
+        algebra.slim = true;
+        let output = algebra.define().to_string();
         std::fs::write(path, output).unwrap();
     }
 

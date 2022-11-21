@@ -65,7 +65,9 @@ impl Algebra {
             BinaryOp::Geo => quote! { BinaryOp::Geo => Geo::geo(lhs, rhs), },
             BinaryOp::Dot => quote! { BinaryOp::Dot => Dot::dot(lhs, rhs), },
             BinaryOp::Wedge => quote! { BinaryOp::Wedge => Wedge::wedge(lhs, rhs), },
-            BinaryOp::Sandwich => quote! { BinaryOp::Sandwich => Sandwich::sandwich(lhs, rhs), },
+            BinaryOp::Sandwich => {
+                quote! { BinaryOp::Sandwich => Sandwich::sandwich(lhs, rhs), }
+            }
             BinaryOp::Grade(g) => {
                 let grade = Type::Grade(g);
                 quote! { BinaryOp::#grade => #grade::product(lhs, rhs), }
@@ -246,15 +248,15 @@ impl Algebra {
     }
 
     fn define_product_ops(self) -> impl Iterator<Item = syn::ItemImpl> {
-        ProductOp::iter_all().map(move |op| {
+        ProductOp::iter_all(self).map(move |op| {
             let op_ty = op.trait_ty();
             let op_fn = op.trait_fn();
             let variant_tuples = self.type_tuples().filter_map(|(lhs, rhs)| {
                 let output = op.output(self, lhs, rhs)?;
                 // skip redundant ops (scalar dot scalar, etc)
-                if matches!(op, ProductOp::Dot | ProductOp::Wedge) && ProductOp::Geo.output(self, lhs, rhs) == Some(output) {
-                    return None;
-                }
+                // if matches!(op, ProductOp::Dot | ProductOp::Wedge) && ProductOp::Geo.output(self, lhs, rhs) == Some(output) {
+                //     return None;
+                // }
                 Some(quote! {
                     (Value::#lhs(lhs), Value::#rhs(rhs)) => Some(Value::#output(#op_ty::#op_fn(lhs, rhs))),
                 })
