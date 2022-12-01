@@ -1,4 +1,4 @@
-use clifford::pga3::*;
+use clifford::pga_3d::*;
 use geo_traits::*;
 
 #[test]
@@ -66,4 +66,14 @@ fn f0_ops() {
         Some(Value::Vector(Default::default())),
         vector.dot(bivector)
     );
+}
+
+#[test]
+fn unit_motor_has_norm_1() {
+    use rand::{thread_rng, Rng};
+    let mut rng = thread_rng();
+    for _ in 0..100 {
+        let m = rng.gen::<Unit<Motor<f64>>>();
+        assert_eq!(m.value().norm2().to_f32().s, 1.);
+    }
 }

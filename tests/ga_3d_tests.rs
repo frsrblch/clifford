@@ -65,3 +65,35 @@ fn f64_mul_vector() {
 
     assert_eq!(a * v, v * a);
 }
+
+#[test]
+fn unit_motor_has_norm_1() {
+    use rand::{thread_rng, Rng};
+    let mut rng = thread_rng();
+    for _ in 0..100 {
+        let m = rng.gen::<Unit<Motor<f64>>>();
+        assert_eq!(m.value().norm2().to_f32().s, 1.);
+    }
+}
+
+#[test]
+fn sandwich_shr_overload() {
+    let m = Bivector {
+        xy: 1.,
+        ..Default::default()
+    };
+    let v = Vector {
+        x: 1.,
+        y: 2.,
+        z: 3.,
+    };
+
+    let expected = Vector {
+        x: -1.,
+        y: -2.,
+        z: 3.,
+    };
+    let actual = m >> v;
+
+    assert_eq!(expected, actual);
+}
