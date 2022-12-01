@@ -127,6 +127,8 @@
 pub use proc_macros::clifford;
 #[cfg(feature = "ga_3d")]
 pub mod ga_3d {
+    use geo_traits::*;
+    
     macros::ga3!();
 
     #[cfg(feature = "dyn")]
@@ -248,6 +250,8 @@ pub mod pos_vel_ga {
 
 #[cfg(feature = "pga_3d")]
 pub mod pga3 {
+    use geo_traits::*;
+    
     macros::pga3!();
 
     #[cfg(feature = "dyn")]

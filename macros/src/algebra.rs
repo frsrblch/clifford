@@ -691,29 +691,16 @@ pub enum ProductOp {
 }
 
 impl ProductOp {
-    pub fn iter_local() -> impl Iterator<Item = Self> {
-        // TODO finish moving these to geo_traits
-        IntoIterator::into_iter([
-            // Self::Geo,
-            // Self::Wedge,
-            // Self::Dot,
-            // Self::Antigeo,
-            // Self::Antidot,
-            // Self::Antiwedge,
-            // Self::Commutator,
-        ])
-    }
-
-    pub fn iter_all(algebra: Algebra) -> Box<dyn Iterator<Item = Self>> {
+    pub fn iter_all(algebra: Algebra) -> impl Iterator<Item = Self> {
         if algebra.slim {
-            Box::new(IntoIterator::into_iter([
+            vec![
                 Self::Geo,
                 Self::Wedge,
                 Self::Dot,
                 Self::Mul,
-            ]))
+            ].into_iter()
         } else {
-            Box::new(IntoIterator::into_iter([
+            vec![
                 Self::Geo,
                 Self::Wedge,
                 Self::Dot,
@@ -722,7 +709,7 @@ impl ProductOp {
                 Self::Antidot,
                 Self::Antiwedge,
                 Self::Commutator,
-            ]))
+            ].into_iter()
         }
     }
 
