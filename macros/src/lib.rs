@@ -35,6 +35,7 @@ pub fn pos_vel_ga(_: proc_macro::TokenStream) -> proc_macro::TokenStream {
         Basis::pos('t'),
         Basis::pos('u'),
         Basis::pos('v'),
+        Basis::pos('w'),
     ]);
     Algebra {
         bases: Box::leak(bases),

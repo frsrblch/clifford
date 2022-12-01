@@ -1,4 +1,5 @@
 use clifford::ga_3d::*;
+use geo_traits::*;
 
 #[cfg(feature = "dyn")]
 #[test]
@@ -55,4 +56,12 @@ fn change_of_basis() {
     dbg!(alpha_1, alpha_2, alpha_3);
 
     assert_eq!(b, alpha_1 * a1 + alpha_2 * a2 + alpha_3 * a3);
+}
+
+#[test]
+fn f64_mul_vector() {
+    let v = Vector::new(1., 2., 3.);
+    let a = 2f64;
+
+    assert_eq!(a * v, v * a);
 }

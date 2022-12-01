@@ -335,6 +335,7 @@ impl Type {
                 4 => "Quadvector",
                 5 => "Pentavector",
                 6 => "Hexavector",
+                7 => "Heptavector",
                 _ => unimplemented!("grade out of range: {n}"),
             },
             Type::Motor => "Motor",
@@ -353,6 +354,7 @@ impl Type {
                 4 => "quadvector",
                 5 => "pentavector",
                 6 => "hexavector",
+                7 => "heptavector",
                 _ => unimplemented!("grade out of range: {n}"),
             },
             Type::Motor => "motor",
@@ -690,25 +692,37 @@ pub enum ProductOp {
 
 impl ProductOp {
     pub fn iter_local() -> impl Iterator<Item = Self> {
+        // TODO finish moving these to geo_traits
         IntoIterator::into_iter([
-            Self::Geo,
-            Self::Wedge,
-            Self::Dot,
-            Self::Antigeo,
-            Self::Antidot,
-            Self::Antiwedge,
-            Self::Commutator,
+            // Self::Geo,
+            // Self::Wedge,
+            // Self::Dot,
+            // Self::Antigeo,
+            // Self::Antidot,
+            // Self::Antiwedge,
+            // Self::Commutator,
         ])
     }
 
     pub fn iter_all(algebra: Algebra) -> Box<dyn Iterator<Item = Self>> {
         if algebra.slim {
-            Box::new(IntoIterator::into_iter([Self::Geo, Self::Wedge, Self::Dot, Self::Mul]))
+            Box::new(IntoIterator::into_iter([
+                Self::Geo,
+                Self::Wedge,
+                Self::Dot,
+                Self::Mul,
+            ]))
         } else {
-            Box::new(IntoIterator::into_iter([Self::Geo, Self::Wedge, Self::Dot, Self::Mul, Self::Antigeo,
+            Box::new(IntoIterator::into_iter([
+                Self::Geo,
+                Self::Wedge,
+                Self::Dot,
+                Self::Mul,
+                Self::Antigeo,
                 Self::Antidot,
                 Self::Antiwedge,
-                Self::Commutator,]))
+                Self::Commutator,
+            ]))
         }
     }
 

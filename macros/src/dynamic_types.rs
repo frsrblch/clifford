@@ -59,12 +59,18 @@ impl Algebra {
         let variants = BinaryOp::iter(self);
         let variants1 = BinaryOp::iter(self);
         let len = proc_macro2::Literal::usize_unsuffixed(BinaryOp::iter(self).count());
+        let geo_ty = ProductOp::Geo.trait_ty();
+        let geo_fn = ProductOp::Geo.trait_fn();
+        let dot_ty = ProductOp::Dot.trait_ty();
+        let dot_fn = ProductOp::Dot.trait_fn();
+        let wedge_ty = ProductOp::Wedge.trait_ty();
+        let wedge_fn = ProductOp::Wedge.trait_fn();
         let call_variants = BinaryOp::iter(self).map(|op| match op {
             BinaryOp::Add => quote! { BinaryOp::Add => std::ops::Add::add(lhs, rhs), },
             BinaryOp::Sub => quote! { BinaryOp::Sub => std::ops::Sub::sub(lhs, rhs), },
-            BinaryOp::Geo => quote! { BinaryOp::Geo => Geo::geo(lhs, rhs), },
-            BinaryOp::Dot => quote! { BinaryOp::Dot => Dot::dot(lhs, rhs), },
-            BinaryOp::Wedge => quote! { BinaryOp::Wedge => Wedge::wedge(lhs, rhs), },
+            BinaryOp::Geo => quote! { BinaryOp::Geo => #geo_ty::#geo_fn(lhs, rhs), },
+            BinaryOp::Dot => quote! { BinaryOp::Dot => #dot_ty::#dot_fn(lhs, rhs), },
+            BinaryOp::Wedge => quote! { BinaryOp::Wedge => #wedge_ty::#wedge_fn(lhs, rhs), },
             BinaryOp::Sandwich => {
                 quote! { BinaryOp::Sandwich => Sandwich::sandwich(lhs, rhs), }
             }
@@ -650,10 +656,10 @@ impl ToTokens for BinaryOp {
         match self {
             Self::Add => quote!(Add).to_tokens(tokens),
             Self::Sub => quote!(Sub).to_tokens(tokens),
-            Self::Geo => ProductOp::Geo.trait_ty().to_tokens(tokens),
-            Self::Dot => ProductOp::Dot.trait_ty().to_tokens(tokens),
-            Self::Wedge => ProductOp::Wedge.trait_ty().to_tokens(tokens),
-            Self::Sandwich => Sandwich::trait_ty().to_tokens(tokens),
+            Self::Geo => quote!(Geo).to_tokens(tokens),
+            Self::Dot => quote!(Dot).to_tokens(tokens),
+            Self::Wedge => quote!(Wedge).to_tokens(tokens),
+            Self::Sandwich => quote!(Sandwich).to_tokens(tokens),
             Self::Grade(g) => Type::Grade(*g).to_tokens(tokens),
         }
     }

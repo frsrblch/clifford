@@ -1,4 +1,5 @@
 use clifford::pga3::*;
+use geo_traits::*;
 
 #[test]
 fn rotor_sqrt() {
@@ -51,6 +52,7 @@ fn rotation_and_unit_rotation() {
     // panic!();
 }
 
+#[cfg(feature = "dyn")]
 #[test]
 fn f0_ops() {
     use f_zero::f0;
