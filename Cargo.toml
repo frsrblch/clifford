@@ -6,21 +6,19 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-proc_macros = { path = "./proc_macros" }
 num-traits = "0.2.15"
+rand = "0.8"
+bytemuck = "1.12.3"
 num-sqrt = { path = "../num-sqrt" }
 num-trig = { path = "../num-trig" }
 f_zero = { path = "../f_zero", optional = true }
+geo_traits = { path = "../geo_traits" }
 macros = { path = "./macros" }
 
 [dev-dependencies]
 criterion = "0.4.0"
-rand = "0.8"
 num-dual = { path = "../num-dual" }
-
-#[[test]]
-#name = "cga_3d_tests"
-#required-features = ["cga_3d"]
+derive_more = "0.99"
 
 [[test]]
 name = "ga_3d_tests"
@@ -30,16 +28,19 @@ required-features = ["ga_3d"]
 name = "pga_3d_tests"
 required-features = ["pga_3d"]
 
+[[test]]
+name = "cga_3d_tests"
+required-features = ["cga_3d"]
+
+[[example]]
+name = "orbital_motion"
+required-features = ["pga_3d", "pos_vel_ga"]
+
 [features]
 ga_3d = []
 pga_3d = []
-cga_2d = []
-cga_3d = []
+pos_vel_ga = []
 dyn = ["f_zero"]
-
-[[bench]]
-name = "inverse"
-harness = false
 
 [[bench]]
 name = "sandwich"

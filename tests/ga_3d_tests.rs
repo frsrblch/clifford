@@ -97,3 +97,35 @@ fn sandwich_shr_overload() {
 
     assert_eq!(expected, actual);
 }
+
+#[test]
+fn motor_log_and_angle() {
+    let axis = Vector {
+        z: 1.,
+        ..Vector::default()
+    };
+    let angle = Scalar {
+        s: std::f64::consts::FRAC_PI_2,
+    };
+    let motor = Motor::from_axis_and_angle(axis.unit(), angle);
+    let b = Bivector {
+        xy: 1.,
+        ..Bivector::default()
+    };
+
+    assert_eq!(b, motor.log().value());
+    assert_eq!(std::f64::consts::FRAC_PI_2, motor.angle().s);
+
+    let v = Vector {
+        x: 2.,
+        y: 3.,
+        z: 5.,
+    };
+
+    let expected = Vector {
+        x: -3.,
+        y: 2.,
+        z: 5.,
+    };
+    assert_eq!(expected, motor >> v);
+}

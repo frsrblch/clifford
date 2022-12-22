@@ -1,6 +1,6 @@
 use std::iter::FromIterator;
 
-#[derive(Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct Algebra {
     pub bases: &'static [Basis],
     pub slim: bool,
@@ -301,6 +301,10 @@ impl Algebra {
         self.grades()
             .flat_map(move |lhs| self.grades().map(move |rhs| (lhs, rhs)))
     }
+
+    pub fn has_numeric_bases(self) -> bool {
+        self.bases.iter().any(|b| b.char.is_numeric())
+    }
 }
 
 #[derive(Clone)]
@@ -336,6 +340,7 @@ impl Type {
                 5 => "Pentavector",
                 6 => "Hexavector",
                 7 => "Heptavector",
+                8 => "Octavector",
                 _ => unimplemented!("grade out of range: {n}"),
             },
             Type::Motor => "Motor",
@@ -355,6 +360,7 @@ impl Type {
                 5 => "pentavector",
                 6 => "hexavector",
                 7 => "heptavector",
+                8 => "octavector",
                 _ => unimplemented!("grade out of range: {n}"),
             },
             Type::Motor => "motor",
@@ -482,7 +488,7 @@ impl Iterator for IterBlades {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Basis {
     pub char: char,
     pub sqr: Square,
@@ -515,7 +521,7 @@ impl Basis {
     }
 }
 
-#[derive(Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub enum Square {
     #[default]
     Pos,
@@ -693,12 +699,7 @@ pub enum ProductOp {
 impl ProductOp {
     pub fn iter_all(algebra: Algebra) -> impl Iterator<Item = Self> {
         if algebra.slim {
-            vec![
-                Self::Geo,
-                Self::Wedge,
-                Self::Dot,
-                Self::Mul,
-            ].into_iter()
+            vec![Self::Geo, Self::Wedge, Self::Dot, Self::Mul].into_iter()
         } else {
             vec![
                 Self::Geo,
@@ -709,7 +710,8 @@ impl ProductOp {
                 Self::Antidot,
                 Self::Antiwedge,
                 Self::Commutator,
-            ].into_iter()
+            ]
+            .into_iter()
         }
     }
 

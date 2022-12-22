@@ -74,3 +74,44 @@ where
         Unit(bivector.value() * cos + sin)
     }
 }
+
+impl<T> Motor<T>
+where
+    T: num_traits::One + std::ops::Add<Output = T> + std::ops::Div<Output = T>,
+    Scalar<T>:
+        num_trig::Trig + std::ops::Mul<Output = Scalar<T>> + std::ops::Neg<Output = Scalar<T>>,
+    Vector<T>: geo_traits::Dual<Output = Bivector<T>>,
+    Bivector<T>: std::ops::Mul<Scalar<T>, Output = Bivector<T>>
+        + std::ops::Add<Scalar<T>, Output = Motor<T>>,
+{
+    #[inline]
+    pub fn from_axis_and_angle(axis: Unit<Vector<T>>, angle: Scalar<T>) -> Motor<T> {
+        let neg_half = -Scalar {
+            s: num_traits::one::<T>() / (num_traits::one::<T>() + num_traits::one::<T>()),
+        };
+        let (sin, cos) = num_trig::Trig::sin_cos(angle * neg_half);
+        axis.value().dual() * sin + cos
+    }
+}
+
+impl<T> Motor<T>
+where
+    Bivector<T>: Unitize<Output = Unit<Bivector<T>>> + std::ops::Neg<Output = Bivector<T>>,
+{
+    #[inline]
+    pub fn log(self) -> Unit<Bivector<T>> {
+        std::ops::Neg::neg(self.bivector()).unit()
+    }
+}
+
+impl<T> Motor<T>
+where
+    Scalar<T>: num_trig::Arccos<Output = Scalar<T>> + std::ops::Mul<Output = Scalar<T>>,
+    T: num_traits::One + std::ops::Add<Output = T>,
+{
+    #[inline]
+    pub fn angle(self) -> Scalar<T> {
+        let two = num_traits::one::<T>() + num_traits::one::<T>();
+        num_trig::Arccos::acos(self.scalar()) * Scalar { s: two }
+    }
+}

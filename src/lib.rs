@@ -1,24 +1,3 @@
-// TODO link to geo_traits crate
-
-// TODO Multivector type parameters should be the inner type
-// TODO replace Zero with f0 to prevent collisions with num_traits::Zero
-
-// TODO figure out where impl<T: Float> Trait for T can be used instead of "for f32" and "for f64"
-//   lets us use any Float type, including num-dual
-//   Option 1 :: Scalar<T>
-//     allows standard operators but requires wrapping the value
-//     problem: still can't define generic ops for generic types and f0/Zero
-//   Option 2 :: Mul: BinaryOp<Lhs, Rhs>
-//     prevents using the standard operators, but allows generics as the Lhs type
-//   Option 3 :: impl Mul only for scalar multiplication, Geo/Dot/Wedge for geometric transformations
-//     prevents use of standard operators and operator overloading
-
-// TODO Unit -> UnitOp, add Unit<T> with Norm and Norm2 == 1
-
-// TODO use complement to find blades that need to be reversed (e.g., e12, e23, e31)?
-//  - is this unique to G{3,0,1} ?
-//  - allow manual blade ordering
-
 //! Proc macros for defining Clifford algebras of arbitrary dimension
 //!
 //! [`Feature set`]
@@ -26,10 +5,7 @@
 //! Models of geometry:
 //! - [x] Generic types
 //!     - [x] f32/f64 conversions
-//!     - [x] flexible generics
-//! - [ ] Euclidean
-//!     - [ ] Meet
-//!     - [ ] Join
+//!     - [x] flexible generics (e.g., `Vector<T> ^ Vector<U> = Vector<V>` if `T * U = V`)
 //! - [ ] Homogeneous
 //!     - [ ] Weight
 //!     - [ ] Bulk
@@ -46,6 +22,9 @@
 //!
 //! Types:
 //! - [x] Grades
+//! - [x] Even-grade
+//! - [x] Odd-grade
+//! - [x] Multivector
 //! - [x] Unit
 //!
 //! Functions:
@@ -124,7 +103,6 @@
 //!
 //! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features.html
 
-pub use proc_macros::clifford;
 #[cfg(feature = "ga_3d")]
 pub mod ga_3d;
 
@@ -133,5 +111,7 @@ pub mod pga_3d;
 
 #[cfg(feature = "pos_vel_ga")]
 pub mod pos_vel_ga {
-    macros::pos_vel_ga!();
+    macros::algebra_slim!(7);
 }
+
+pub use macros::{algebra, algebra_slim};

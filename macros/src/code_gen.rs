@@ -4,8 +4,6 @@ use quote::{quote, ToTokens};
 use std::collections::HashMap;
 use syn::{parse_quote, ItemFn, ItemImpl, ItemStruct};
 
-// TODO build tests from https://docslib.org/doc/2164884/introduction-to-geometric-algebra-lecture-iv
-
 impl Algebra {
     pub fn define(self) -> TokenStream {
         let structs = self.types().map(move |ty| ty.define(self));
@@ -17,6 +15,7 @@ impl Algebra {
 
         let impl_zero = self.types().map(|ty| ty.impl_zero(self));
         let impl_one = self.types().filter_map(|ty| ty.impl_one(self));
+        let impl_bytemuck = self.types().map(ImplBytemuck);
 
         let impl_product_ops = self.type_tuples().flat_map(|(lhs, rhs)| {
             ProductOp::iter_all(self).filter_map(move |op| op.impl_for(self, lhs, rhs))
@@ -104,6 +103,7 @@ impl Algebra {
             #(#impl_from)*
             #(#impl_zero)*
             #(#impl_one)*
+            #(#impl_bytemuck)*
             #(#impl_product_ops)*
             #(#operator_overloads)*
             #(#div_ops)*
@@ -141,8 +141,20 @@ impl Algebra {
 fn fn_attrs() -> TokenStream {
     quote!(
         #[inline]
-        #[allow(unused_variables, clippy::suspicious_arithmetic_impl, clippy::too_many_arguments)]
+        #[allow(unused_variables)]
     )
+}
+
+struct ImplBytemuck(Type);
+
+impl ToTokens for ImplBytemuck {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let ty = self.0;
+        tokens.extend(quote! {
+            unsafe impl<T: bytemuck::Zeroable> bytemuck::Zeroable for #ty<T> {}
+            unsafe impl<T: bytemuck::Pod + bytemuck::Zeroable> bytemuck::Pod for #ty<T> {}
+        });
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -150,11 +162,21 @@ pub enum TrigOps {
     Sin,
     Cos,
     Tan,
+    Arcsin,
+    Arccos,
+    Arctan,
 }
 
 impl TrigOps {
     pub fn iter() -> impl Iterator<Item = Self> {
-        IntoIterator::into_iter([Self::Sin, Self::Cos, Self::Tan])
+        IntoIterator::into_iter([
+            Self::Sin,
+            Self::Cos,
+            Self::Tan,
+            Self::Arcsin,
+            Self::Arccos,
+            Self::Arctan,
+        ])
     }
 
     pub fn impl_for_scalar(self) -> ItemImpl {
@@ -181,6 +203,9 @@ impl TrigOps {
             Self::Sin => parse_quote!(num_trig::Sin),
             Self::Cos => parse_quote!(num_trig::Cos),
             Self::Tan => parse_quote!(num_trig::Tan),
+            Self::Arcsin => parse_quote!(num_trig::Arcsin),
+            Self::Arccos => parse_quote!(num_trig::Arccos),
+            Self::Arctan => parse_quote!(num_trig::Arctan),
         }
     }
 
@@ -189,6 +214,9 @@ impl TrigOps {
             Self::Sin => parse_quote!(sin),
             Self::Cos => parse_quote!(cos),
             Self::Tan => parse_quote!(tan),
+            Self::Arcsin => parse_quote!(asin),
+            Self::Arccos => parse_quote!(acos),
+            Self::Arctan => parse_quote!(atan),
         }
     }
 }
@@ -303,6 +331,10 @@ pub struct GradeProduct;
 
 impl GradeProduct {
     pub fn impl_for(lhs: Type, rhs: Type, out: Type, algebra: Algebra) -> Option<ItemImpl> {
+        if algebra.slim && out != Type::Grade(0) {
+            return None;
+        }
+
         let blades = Self::iter_blades(lhs, rhs, out, algebra).fold(
             HashMap::<Blade, Vec<(Blade, Blade, Blade)>>::new(),
             |mut map, (l, r, o)| {
@@ -403,6 +435,10 @@ impl GradeAntiproduct {
     }
 
     pub fn impl_for(lhs: Type, rhs: Type, out: Type, algebra: Algebra) -> Option<ItemImpl> {
+        if algebra.slim {
+            return None;
+        }
+
         let blades = lhs
             .iter_blades_unsorted(algebra)
             .flat_map(|lhs| {
@@ -536,12 +572,11 @@ impl Type {
             }
         });
 
-        let fn_attrs = fn_attrs();
-
         parse_quote! {
             impl<T: num_traits::Float> #self<T> {
                 /// A constructor that asserts that the inputs are finite.
-                #fn_attrs
+                #[inline]
+                #[allow(clippy::too_many_arguments)]
                 pub fn new(#(#params),*) -> #self<T> {
                     #self {
                         #(#fields),*
@@ -832,6 +867,9 @@ impl Blade {
         }
         if output.is_empty() {
             output.push('s');
+        } else if output.chars().next().unwrap().is_numeric() {
+            // idents cannot start with a number
+            output.insert(0, 'e');
         }
         Ident::new(&output, Span::mixed_site())
     }
@@ -865,6 +903,13 @@ impl ProductOp {
     }
 
     fn impl_for(self, algebra: Algebra, lhs: Type, rhs: Type) -> Option<ItemImpl> {
+        let i = Type::Grade(algebra.bases.len() as u32);
+        if algebra.slim {
+            if rhs != Type::Grade(1) && lhs != Type::Grade(0) && rhs != Type::Grade(0) && rhs != i {
+                return None;
+            }
+        }
+
         let op = self.trait_ty();
         let op_fn = self.trait_fn();
         let output = self.output(algebra, lhs, rhs)?;
@@ -941,6 +986,10 @@ impl ProductOp {
 
 impl SumOp {
     fn impl_for(self, algebra: Algebra, lhs: Type, rhs: Type) -> Option<ItemImpl> {
+        if algebra.slim && lhs != rhs {
+            return None;
+        }
+
         enum Side {
             Lhs,
             Rhs,
@@ -953,10 +1002,6 @@ impl SumOp {
                     Self::Rhs => tokens.extend(quote!(rhs)),
                 }
             }
-        }
-
-        if algebra.slim && lhs != rhs {
-            return None;
         }
 
         let output = Self::sum(algebra, lhs, rhs)?;
@@ -1062,7 +1107,11 @@ impl ScalarOps {
     pub fn impl_for_scalar(self, ty: Type, algebra: Algebra) -> Option<Vec<ItemImpl>> {
         let trait_ty = self.trait_ty();
         let trait_fn = self.trait_fn();
-        let fn_attrs = fn_attrs();
+
+        let fn_attrs = quote!(
+            #[inline]
+            #[allow(clippy::suspicious_arithmetic_impl)]
+        );
 
         if self == Self::Div {
             let inv_ty = InverseOps::Inverse.trait_ty();
@@ -1284,15 +1333,17 @@ impl FloatConversion {
         let fields1 = ty.iter_blades_unsorted(algebra).map(|blade| {
             let f = blade.field(algebra);
             quote! {
-                self.#f as #to
+                #f: self.#f as #to
             }
         });
         let fn_attrs = fn_attrs();
         parse_quote! {
             impl #ty<#from> {
                 #fn_attrs
-                pub fn #fn_ident(self) -> #ty<#to> {
-                    #ty::new(#(#fields1),*)
+                pub const fn #fn_ident(self) -> #ty<#to> {
+                    #ty {
+                        #(#fields1),*
+                    }
                 }
             }
         }
@@ -1661,6 +1712,10 @@ impl Unit {
         let item_impl = parse_quote! {
             impl<T> Unit<T> {
                 #[inline]
+                pub const fn assert(value: T) -> Unit<T> {
+                    Unit(value)
+                }
+                #[inline]
                 pub fn value(self) -> T {
                     self.0
                 }
@@ -1724,6 +1779,12 @@ impl Unit {
         };
 
         use syn::Item::*;
+
+        let operator_overloads = algebra
+            .types()
+            .flat_map(|ty| Overload::iter(algebra).filter_map(move |op| op.impl_for_unit(ty)))
+            .map(Impl);
+
         IntoIterator::into_iter([
             Struct(item_struct),
             Impl(item_impl),
@@ -1748,6 +1809,7 @@ impl Unit {
                 }
             }
         }))
+        .chain(operator_overloads)
         .collect()
     }
 }
@@ -1809,8 +1871,6 @@ impl Div {
             return None;
         }
 
-        let fn_attrs = fn_attrs();
-
         let inv_ty = InverseOps::Inverse.trait_ty();
         let inv_fn = InverseOps::Inverse.trait_fn();
 
@@ -1821,7 +1881,8 @@ impl Div {
                 #rhs<U>: #inv_ty<Output = #rhs<U>>,
             {
                 type Output = #output<V>;
-                #fn_attrs
+                #[inline]
+                #[allow(clippy::suspicious_arithmetic_impl)]
                 fn div(self, rhs: #rhs<U>) -> Self::Output {
                     self * #inv_ty::#inv_fn(rhs)
                 }
@@ -1870,6 +1931,26 @@ impl Overload {
                 type Output = #output<V>;
                 #[inline]
                 fn #trait_fn(self, rhs: #rhs<U>) -> Self::Output {
+                    #inner_ty::#inner_fn(self, rhs)
+                }
+            }
+        })
+    }
+
+    pub fn impl_for_unit(self, lhs: Type) -> Option<ItemImpl> {
+        let trait_ty = self.trait_ty();
+        let trait_fn = self.trait_fn();
+        let inner = self.inner_op();
+        let inner_ty = inner.trait_ty();
+        let inner_fn = inner.trait_fn();
+        Some(parse_quote! {
+            impl<T, U, V> #trait_ty<U> for Unit<#lhs<T>>
+            where
+                Unit<#lhs<T>>: #inner_ty<U, Output = V>,
+            {
+                type Output = V;
+                #[inline]
+                fn #trait_fn(self, rhs: U) -> Self::Output {
                     #inner_ty::#inner_fn(self, rhs)
                 }
             }
@@ -1933,6 +2014,8 @@ impl OverloadOp {
 
 #[cfg(test)]
 mod tests {
+    use crate::EuclideanAlgebra;
+
     use super::*;
     use quote::ToTokens;
 
@@ -1976,8 +2059,11 @@ mod tests {
         //     slim: true,
         // };
 
-        let algebra = Algebra::ga2();
-        let output = format!("{}\n{}", algebra.define(), algebra.dynamic_types());
+        let algebra = Algebra {
+            slim: true,
+            ..EuclideanAlgebra { pos: 8 }.into()
+        };
+        let output = format!("{}", algebra.define());
         std::fs::write(path, output).unwrap();
     }
 
@@ -1998,5 +2084,17 @@ mod tests {
         }
         .to_string();
         assert_eq!(expected, tokens);
+    }
+
+    #[test]
+    fn numeric_bases() {
+        let a = Algebra {
+            bases: &[Basis {
+                char: '1',
+                sqr: Square::Pos,
+            }],
+            slim: true,
+        };
+        assert_eq!("e1", a.blades().nth(1).unwrap().field(a).to_string());
     }
 }
