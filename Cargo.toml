@@ -39,6 +39,7 @@ required-features = ["pga_3d", "pos_vel_ga"]
 [features]
 ga_3d = []
 pga_3d = []
+# cga_3d = []
 pos_vel_ga = []
 dyn = ["f_zero"]
 

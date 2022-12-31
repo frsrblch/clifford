@@ -1,9 +1,24 @@
-use geo_traits::*;
+pub use geo_traits::*;
+pub use num_sqrt::Sqrt;
+pub use num_traits::{One, Zero};
+pub use num_trig::*;
 
 macros::pga3!();
 
 #[cfg(feature = "dyn")]
 macros::dyn_pga3!();
+
+pub fn point<T>(x: T, y: T, z: T) -> Unit<Trivector<T>>
+where
+    T: One + std::ops::Neg<Output = T>,
+{
+    Unit::assert(Trivector {
+        xyz: T::one(),
+        xyw: -z,
+        xzw: y,
+        yzw: -x,
+    })
+}
 
 impl<T> num_sqrt::Sqrt for Bivector<T>
 where
@@ -36,20 +51,41 @@ where
 {
     type Output = Motor<T>;
     #[inline]
+    #[track_caller]
     fn sqrt(self) -> Self::Output {
         self.unit().sqrt()
     }
 }
 
+/// Adapted from https://arxiv.org/pdf/2206.07496.pdf, page 14
 impl<T> num_sqrt::Sqrt for Unit<Motor<T>>
 where
-    Scalar<T>: num_traits::One,
-    Motor<T>: std::ops::Add<Scalar<T>, Output = Motor<T>>,
+    T: Copy
+        + Zero
+        + One
+        + std::ops::Neg<Output = T>
+        + std::ops::Add<Output = T>
+        + std::ops::Sub<Output = T>
+        + std::ops::Mul<Output = T>
+        + std::ops::Div<Output = T>
+        + Sqrt<Output = T>,
 {
     type Output = Motor<T>;
     #[inline]
+    #[track_caller]
     fn sqrt(self) -> Self::Output {
-        self.value() + num_traits::One::one()
+        let one = if self.0.scalar().is_zero() {
+            Scalar::<T>::one()
+        } else {
+            // need to subtract 1 if scalar is negative
+            self.0.scalar() / self.0.scalar().norm()
+        };
+        let x = self.0 + one;
+        let s = Scalar::product(x, x.rev());
+        let t = Quadvector::product(x, x.rev()).left_comp();
+        let a = one / s.sqrt();
+        let b = t / (a * a * a);
+        a * x + b * Quadvector { xyzw: T::one() } * x
     }
 }
 
@@ -57,8 +93,8 @@ impl<T> rand::distributions::Distribution<Unit<Motor<T>>> for rand::distribution
 where
     rand::distributions::Standard:
         rand::distributions::Distribution<Unit<Bivector<T>>> + rand::distributions::Distribution<T>,
-    T: From<f64>
-        + std::ops::Mul<Output = T>
+    T: std::ops::Mul<Output = T>
+        + num_traits::FloatConst
         + num_trig::Sin<Output = T>
         + num_trig::Cos<Output = T>
         + Copy,
@@ -68,9 +104,43 @@ where
     #[inline]
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Unit<Motor<T>> {
         let bivector = rng.gen::<Unit<Bivector<T>>>();
-        let angle = rng.gen::<T>() * T::from(std::f64::consts::PI);
+        let angle = rng.gen::<T>() * T::PI();
         let sin = Scalar { s: angle.sin() };
         let cos = Scalar { s: angle.cos() };
         Unit(bivector.value() * cos + sin)
+    }
+}
+
+impl<T: std::ops::Neg<Output = T>> Unit<Trivector<T>> {
+    #[inline]
+    pub fn x(self) -> T {
+        -self.value().yzw
+    }
+
+    #[inline]
+    pub fn y(self) -> T {
+        self.value().xzw
+    }
+
+    #[inline]
+    pub fn z(self) -> T {
+        -self.value().xyw
+    }
+}
+
+impl<T: std::ops::Neg<Output = T> + std::ops::Div<Output = T>> Trivector<T> {
+    #[inline]
+    pub fn x(self) -> T {
+        -self.yzw / self.xyz
+    }
+
+    #[inline]
+    pub fn y(self) -> T {
+        self.xzw / self.xyz
+    }
+
+    #[inline]
+    pub fn z(self) -> T {
+        -self.xyw / self.xyz
     }
 }

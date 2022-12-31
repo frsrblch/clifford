@@ -60,6 +60,7 @@
 //! Sum products:
 //! - [x] Addition
 //! - [x] Subtraction
+//! - [ ] Add/Sub f32/f64
 //!
 //! Assignment:
 //! - [x] AddAssign
@@ -84,6 +85,7 @@
 //! Compound products:
 //! - [x] Sandwich
 //! - [x] Antisandwich
+//! - [ ] Sandwich unit types
 //!
 //! Operator overloading:
 //! - [x] Dot product: a | b

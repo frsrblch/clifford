@@ -1,4 +1,6 @@
-use geo_traits::*;
+pub use geo_traits::*;
+pub use num_sqrt::Sqrt;
+pub use num_trig::*;
 
 macros::ga3!();
 
@@ -57,10 +59,9 @@ impl<T> rand::distributions::Distribution<Unit<Motor<T>>> for rand::distribution
 where
     rand::distributions::Standard:
         rand::distributions::Distribution<Unit<Bivector<T>>> + rand::distributions::Distribution<T>,
-    T: From<f64>
-        + std::ops::Mul<Output = T>
-        + num_trig::Sin<Output = T>
-        + num_trig::Cos<Output = T>
+    T: std::ops::Mul<Output = T>
+        + num_traits::FloatConst
+        + num_trig::Trig
         + Copy,
     Bivector<T>: std::ops::Mul<Scalar<T>, Output = Bivector<T>>
         + std::ops::Add<Scalar<T>, Output = Motor<T>>,
@@ -68,9 +69,8 @@ where
     #[inline]
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Unit<Motor<T>> {
         let bivector = rng.gen::<Unit<Bivector<T>>>();
-        let angle = rng.gen::<T>() * T::from(std::f64::consts::PI);
-        let sin = Scalar { s: angle.sin() };
-        let cos = Scalar { s: angle.cos() };
+        let angle = Scalar { s: rng.gen::<T>() * T::PI() };
+        let (sin, cos) = angle.sin_cos();
         Unit(bivector.value() * cos + sin)
     }
 }
@@ -86,11 +86,26 @@ where
 {
     #[inline]
     pub fn from_axis_and_angle(axis: Unit<Vector<T>>, angle: Scalar<T>) -> Motor<T> {
+        let plane = Unit::assert(axis.value().dual());
+        Self::from_plane_and_angle(plane, angle)
+    }
+}
+
+impl<T> Motor<T>
+where
+    T: num_traits::One + std::ops::Add<Output = T> + std::ops::Div<Output = T>,
+    Scalar<T>:
+        num_trig::Trig + std::ops::Mul<Output = Scalar<T>> + std::ops::Neg<Output = Scalar<T>>,
+    Bivector<T>: std::ops::Mul<Scalar<T>, Output = Bivector<T>>
+        + std::ops::Add<Scalar<T>, Output = Motor<T>>,
+{
+    #[inline]
+    pub fn from_plane_and_angle(plane: Unit<Bivector<T>>, angle: Scalar<T>) -> Motor<T> {
         let neg_half = -Scalar {
             s: num_traits::one::<T>() / (num_traits::one::<T>() + num_traits::one::<T>()),
         };
         let (sin, cos) = num_trig::Trig::sin_cos(angle * neg_half);
-        axis.value().dual() * sin + cos
+        plane.value() * sin + cos
     }
 }
 

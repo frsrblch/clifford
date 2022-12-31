@@ -141,6 +141,7 @@ impl Algebra {
 fn fn_attrs() -> TokenStream {
     quote!(
         #[inline]
+        #[track_caller]
         #[allow(unused_variables)]
     )
 }
@@ -904,10 +905,13 @@ impl ProductOp {
 
     fn impl_for(self, algebra: Algebra, lhs: Type, rhs: Type) -> Option<ItemImpl> {
         let i = Type::Grade(algebra.bases.len() as u32);
-        if algebra.slim {
-            if rhs != Type::Grade(1) && lhs != Type::Grade(0) && rhs != Type::Grade(0) && rhs != i {
-                return None;
-            }
+        if algebra.slim
+            && rhs != Type::Grade(1)
+            && lhs != Type::Grade(0)
+            && rhs != Type::Grade(0)
+            && rhs != i
+        {
+            return None;
         }
 
         let op = self.trait_ty();
@@ -1820,6 +1824,7 @@ impl Sqrt {
     pub fn impl_for(ty: Type, _algebra: Algebra) -> Option<syn::ItemImpl> {
         let sqrt_ty = Self::trait_ty();
         let sqrt_fn = Self::trait_fn();
+        let fn_attrs = fn_attrs();
         match ty {
             Type::Grade(0) => Some(parse_quote! {
                 impl<T, U> #sqrt_ty for #ty<T>
@@ -1827,7 +1832,7 @@ impl Sqrt {
                     T: #sqrt_ty<Output = U>,
                 {
                     type Output = Scalar<U>;
-                    #[inline]
+                    #fn_attrs
                     fn #sqrt_fn(self) -> Self::Output {
                         Scalar {
                             s: num_sqrt::Sqrt::sqrt(self.s)
@@ -2014,8 +2019,6 @@ impl OverloadOp {
 
 #[cfg(test)]
 mod tests {
-    use crate::EuclideanAlgebra;
-
     use super::*;
     use quote::ToTokens;
 
@@ -2042,27 +2045,24 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn write_to_file() {
         let path = "../output.rs";
 
-        // let bases = Box::new([
-        //     Basis::pos('x'),
-        //     Basis::pos('y'),
-        //     Basis::pos('z'),
-        //     Basis::pos('t'),
-        //     Basis::pos('u'),
-        //     Basis::pos('v'),
-        //     Basis::pos('w'),
-        // ]);
-        // let algebra = Algebra {
-        //     bases: Box::leak(bases),
-        //     slim: true,
-        // };
-
+        let bases = Box::new([
+            Basis::pos('x'),
+            Basis::pos('y'),
+            Basis::pos('z'),
+            Basis::pos('t'),
+            Basis::pos('u'),
+            Basis::pos('v'),
+            Basis::pos('w'),
+        ]);
         let algebra = Algebra {
+            bases: Box::leak(bases),
             slim: true,
-            ..EuclideanAlgebra { pos: 8 }.into()
         };
+
         let output = format!("{}", algebra.define());
         std::fs::write(path, output).unwrap();
     }
