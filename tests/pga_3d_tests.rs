@@ -1,4 +1,5 @@
 use clifford::pga_3d::*;
+use std::ops::*;
 
 #[test]
 fn rotor_sqrt() {
@@ -222,8 +223,46 @@ fn translator_from_points_sqrt() {
     let offset = point(a, b, c).value();
     let translator2 = offset.geo(origin); // scalar is -1, so adding 1 makes norm == 0
     let translator = translator2.sqrt();
+    let translator_log = translator2.log().mul(0.5_f64).exp();
 
     let expected = point(x + a, y + b, z + c).value();
     assert_eq!(expected, translator >> pt);
     assert_eq!(translator2, -translator * translator);
+    assert_eq!(translator, translator_log);
+}
+
+#[test]
+fn rotation_around_line_log_and_exp() {
+    let xy = Vector::new(0., 0., 1., 0.);
+    let yz = Vector::new(1., 0., 0., 0.);
+    let line = xy ^ yz;
+    let angle = Scalar::new(std::f64::consts::FRAC_PI_4);
+    let (sin, cos) = angle.sin_cos();
+    let motor = line.unit() * sin + cos;
+
+    let expected = motor.sqrt();
+    let actual = motor.log().mul(0.5).exp();
+
+    assert_eq!(expected, actual);
+}
+
+#[test]
+fn plane_translation_log_exp() {
+    let xy = Vector::new(0., 0., 1., 0.);
+    let offset = Vector { w: 2., ..xy };
+
+    let motor = offset * xy.inv();
+
+    assert_eq!(motor.sqrt(), motor.log().mul(0.5f64).exp());
+}
+
+#[test]
+fn point_translation_log_exp() {
+    let p0 = point(0f64, 0., 0.).value();
+    let p1 = point(1., 2., 3.).value();
+
+    let motor = p1 * p0;
+
+    assert_eq!(motor.sqrt(), motor.log().mul(0.5).exp());
+    assert_eq!(p1, motor.sqrt() >> p0);
 }

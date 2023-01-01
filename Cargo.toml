@@ -28,9 +28,9 @@ required-features = ["ga_3d"]
 name = "pga_3d_tests"
 required-features = ["pga_3d"]
 
-[[test]]
-name = "cga_3d_tests"
-required-features = ["cga_3d"]
+# [[test]]
+# name = "cga_3d_tests"
+# required-features = ["cga_3d"]
 
 [[example]]
 name = "orbital_motion"

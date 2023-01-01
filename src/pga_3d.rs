@@ -111,7 +111,10 @@ where
     }
 }
 
-impl<T: std::ops::Neg<Output = T>> Unit<Trivector<T>> {
+impl<T> Unit<Trivector<T>>
+where
+    T: num_traits::Float,
+{
     #[inline]
     pub fn x(self) -> T {
         -self.value().yzw
@@ -128,7 +131,10 @@ impl<T: std::ops::Neg<Output = T>> Unit<Trivector<T>> {
     }
 }
 
-impl<T: std::ops::Neg<Output = T> + std::ops::Div<Output = T>> Trivector<T> {
+impl<T> Trivector<T>
+where
+    T: num_traits::Float,
+{
     #[inline]
     pub fn x(self) -> T {
         -self.yzw / self.xyz
@@ -142,5 +148,109 @@ impl<T: std::ops::Neg<Output = T> + std::ops::Div<Output = T>> Trivector<T> {
     #[inline]
     pub fn z(self) -> T {
         -self.xyw / self.xyz
+    }
+}
+
+impl<T> Bivector<T>
+where
+    T: num_traits::Float,
+{
+    /// Source: Polar decomposition, normalization, square roots and the exponential map in Clifford algebras of fewer than 6 dimensions by Steven De Keninck
+    #[inline]
+    #[track_caller]
+    pub fn exp(self) -> Motor<T> {
+        let Bivector {
+            xw,
+            yw,
+            zw,
+            yz,
+            xz,
+            xy,
+        } = self;
+
+        let l = yz * yz + xz * xz + xy * xy;
+
+        if l.is_zero() {
+            Motor {
+                s: T::one(),
+                xw,
+                yw,
+                zw,
+                ..Motor::zero()
+            }
+        } else {
+            let m = xw * xy + yw * xz + zw * yz;
+
+            let a = l.sqrt();
+            let c = a.cos();
+            let s = a.sin() / a;
+            let t = m / l * (c - s);
+            Motor {
+                s: c,
+                xw: s * xw + t * xy,
+                yw: s * yw + t * xz,
+                zw: s * zw + t * yz,
+                yz: s * yz,
+                xz: s * xz,
+                xy: s * xy,
+                xyzw: m * s,
+            }
+        }
+    }
+}
+
+impl<T> Motor<T>
+where
+    T: num_traits::Float,
+    Motor<T>: Unitize<Output = Unit<Motor<T>>>,
+{
+    #[inline]
+    #[track_caller]
+    pub fn log(self) -> Bivector<T> {
+        self.unit().log()
+    }
+}
+
+impl<T: num_traits::Float> Unit<Motor<T>> {
+    /// Source: Polar decomposition, normalization, square roots and the exponential map in Clifford algebras of fewer than 6 dimensions by Steven De Keninck
+    #[inline]
+    #[track_caller]
+    pub fn log(mut self) -> Bivector<T> {
+        if self.0.s.is_sign_negative() {
+            self = Unit::assert(-self.0);
+        }
+
+        if self.0.s.is_one() {
+            return Bivector {
+                xw: self.0.xw,
+                yw: self.0.yw,
+                zw: self.0.zw,
+                ..Bivector::zero()
+            };
+        }
+
+        let Motor {
+            s,
+            xw,
+            yw,
+            zw,
+            yz,
+            xz,
+            xy,
+            xyzw,
+        } = self.0;
+
+        let a = T::one() / (T::one() - s * s); // inv squared length
+        let b = s.acos() * a.sqrt(); // rotation scale
+        let c = a * xyzw * (T::one() - s * b); //translation scale
+
+        Bivector {
+            xw: c * yz + b * xw,
+            yw: c * xz + b * yw,
+            zw: c * xy + b * zw,
+            yz: b * yz,
+            xz: b * xz,
+            xy: b * xy,
+        }
     }
 }

@@ -59,17 +59,16 @@ impl<T> rand::distributions::Distribution<Unit<Motor<T>>> for rand::distribution
 where
     rand::distributions::Standard:
         rand::distributions::Distribution<Unit<Bivector<T>>> + rand::distributions::Distribution<T>,
-    T: std::ops::Mul<Output = T>
-        + num_traits::FloatConst
-        + num_trig::Trig
-        + Copy,
+    T: std::ops::Mul<Output = T> + num_traits::FloatConst + num_trig::Trig + Copy,
     Bivector<T>: std::ops::Mul<Scalar<T>, Output = Bivector<T>>
         + std::ops::Add<Scalar<T>, Output = Motor<T>>,
 {
     #[inline]
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Unit<Motor<T>> {
         let bivector = rng.gen::<Unit<Bivector<T>>>();
-        let angle = Scalar { s: rng.gen::<T>() * T::PI() };
+        let angle = Scalar {
+            s: rng.gen::<T>() * T::PI(),
+        };
         let (sin, cos) = angle.sin_cos();
         Unit(bivector.value() * cos + sin)
     }
