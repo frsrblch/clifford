@@ -67,9 +67,8 @@ where
             self.0.scalar() / self.0.scalar().norm()
         };
         let x = self.0 + one;
-        let s = Scalar::product(x, x.rev());
         let t = Quadvector::product(x, x.rev()).left_comp();
-        let a = one / Float::sqrt(s);
+        let a = one / x.norm();
         let b = t / (a * a * a);
         a * x + b * Quadvector { xyzw: T::one() } * x
     }
