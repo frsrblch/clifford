@@ -28,8 +28,9 @@ fn rotor_sqrt() {
 
 #[test]
 fn motor_from_scalar() {
-    let s = Scalar { s: 1. };
-    let _m = Motor::from(s);
+    let one = Scalar { s: 1. };
+    let motor = Motor::from(one);
+    assert_eq!(motor, Motor { s: 1., ..zero() });
 }
 
 #[test]
@@ -54,7 +55,7 @@ fn unit_motor_has_norm_1() {
     let mut rng = thread_rng();
     for _ in 0..100 {
         let m = rng.gen::<Unit<Motor<f64>>>();
-        assert_eq!(m.value().norm2().to_f32().s, 1.);
+        assert!(m.value().norm2().to_f32().is_one());
     }
 }
 
@@ -68,24 +69,13 @@ fn point_constructor() {
 }
 
 #[test]
-fn point_to_coordinates() {
+fn non_unit_point_to_coordinates() {
     let (x, y, z) = (2f64, 3., 5.);
-    let actual = point(x, y, z) * 2.;
+    let pt = point(x, y, z) * -2.;
 
-    assert_eq!(x, actual.x());
-    assert_eq!(y, actual.y());
-    assert_eq!(z, actual.z());
-}
+    let (cx, cy, cz) = pt.coords();
 
-#[test]
-fn unit_point_to_coordinates() {
-    let (x, y, z) = (2f64, 3., 5.);
-    let actual = (point(x, y, z) * 2.).unit();
-
-    let actual = actual.unit();
-    assert_eq!(x, actual.x());
-    assert_eq!(y, actual.y());
-    assert_eq!(z, actual.z());
+    assert_eq!((x, y, z), (cx, cy, cz));
 }
 
 #[test]
@@ -129,8 +119,7 @@ fn line_rotation_by_angle() {
     let rotated = motor >> pt;
     let expected = point(-z, y, x).value();
 
-    // ToF32 resolves rounding errors
-    assert_eq!(expected.to_f32(), rotated.to_f32());
+    assert!((expected - rotated).norm2() < Scalar::<f64>::epsilon());
 }
 
 #[test]
@@ -148,8 +137,7 @@ fn line_rotation_by_angle_sqrt() {
     let rotated = motor >> pt;
     let expected = point(-z, y, x).value();
 
-    // ToF32 resolves rounding errors
-    assert_eq!(expected.to_f32(), rotated.to_f32());
+    assert!((expected - rotated).norm2() < Scalar::<f64>::epsilon());
 }
 
 #[test]
@@ -205,7 +193,7 @@ fn translator_from_points_sqrt() {
 
     let origin = point(0f64, 0., 0.).value();
     let offset = point(a, b, c).value();
-    let translator2 = offset.geo(origin); // scalar is -1, so adding 1 makes norm == 0
+    let translator2 = offset.geo(origin);
     let translator = translator2.sqrt();
     let translator_log = translator2.log().mul(0.5).exp();
 

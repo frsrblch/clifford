@@ -88,43 +88,18 @@ where
     }
 }
 
-impl<T> Unit<Trivector<T>>
-where
-    T: Float,
-{
-    #[inline]
-    pub fn x(self) -> T {
-        -self.value().yzw
-    }
-
-    #[inline]
-    pub fn y(self) -> T {
-        self.value().xzw
-    }
-
-    #[inline]
-    pub fn z(self) -> T {
-        -self.value().xyw
-    }
-}
-
 impl<T> Trivector<T>
 where
     T: Float,
 {
+    /// Return the (x, y, z) coordinates
     #[inline]
-    pub fn x(self) -> T {
-        -self.yzw / self.xyz
-    }
-
-    #[inline]
-    pub fn y(self) -> T {
-        self.xzw / self.xyz
-    }
-
-    #[inline]
-    pub fn z(self) -> T {
-        -self.xyw / self.xyz
+    pub fn coords(self) -> (T, T, T) {
+        (
+            -self.yzw / self.xyz,
+            self.xzw / self.xyz,
+            -self.xyw / self.xyz,
+        )
     }
 }
 
@@ -145,7 +120,7 @@ where
             xy,
         } = self;
 
-        let l = yz * yz + xz * xz + xy * xy;
+        let l = self.norm2().s;
 
         if l.is_zero() {
             Motor {
