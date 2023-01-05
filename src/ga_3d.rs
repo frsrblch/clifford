@@ -80,8 +80,8 @@ where
 
     #[inline]
     pub fn angle(self) -> Scalar<T> {
-        let two = T::one() + T::one();
-        self.scalar().acos() * Scalar { s: two }
+        let two = Scalar { s: T::one() + T::one() };
+        self.scalar().acos() * two
     }
 
     #[inline]
