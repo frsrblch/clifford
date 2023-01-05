@@ -21,12 +21,12 @@
 //! Generics:
 //! - [x] flexible generics (e.g., `Vector<T>: Mul<Scalar<U>, Output = Vector<V>> where T: Mul<U, Output = V>`)
 //! - [x] f32/f64 conversions
-//! - [x] FloatType trait (e.g., Vector<T>: FloatType<Float = T>)
+//! - [x] FloatType trait (e.g., `Vector<T>: FloatType<Float = T>`)
 //!
 //! Functions:
-//! - [x] Grade selection (e.g., Motor::bivector() -> Bivector)
+//! - [x] Grade selection (e.g., `Motor::bivector() -> Bivector`)
 //! - [x] fn new(...) -> Self { ... }
-//! - [x] `From<Grade>` for Versor/Multivector
+//! - [x] `From<Grade>` for `Versor`/`Multivector`
 //!
 //! Main products:
 //! - [x] Mul scalar
@@ -81,7 +81,7 @@
 //! Compound products:
 //! - [x] Sandwich
 //! - [x] Antisandwich
-//! - [ ] Sandwich unit types
+//! - [ ] Sandwich `Unit<T>` types
 //!
 //! Operator overloading:
 //! - [x] Dot product: a | b
