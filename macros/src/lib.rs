@@ -6,44 +6,82 @@ use crate::algebra::{Algebra, Basis};
 
 mod algebra;
 mod code_gen;
-mod dynamic_types;
 
+#[proc_macro_error::proc_macro_error]
 #[proc_macro]
 #[allow(non_snake_case)]
 pub fn algebra(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let algebra = parse_macro_input!(input as Algebra);
-    algebra.define().into()
+    let tokens = algebra.define();
+    tokens.into()
 }
 
+#[proc_macro_error::proc_macro_error]
 #[proc_macro]
 #[allow(non_snake_case)]
 pub fn algebra_slim(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let mut algebra = parse_macro_input!(input as Algebra);
     algebra.slim = true;
-    algebra.define().into()
+    let tokens = algebra.define();
+    tokens.into()
 }
 
 impl Parse for Algebra {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let pos: u32 = input.parse::<LitInt>()?.base10_parse()?;
-
-        if input.is_empty() {
-            return Ok(Algebra::from(IntAlgebra { pos, neg: 0, zero: 0 }));
+        if let Ok(int_algebra) = IntAlgebra::parse(input) {
+            return Ok(Algebra::from(int_algebra));
         }
 
-        let _: Comma = input.parse()?;
+        let mut bases = vec![];
+        loop {
+            let char = input.parse::<syn::Ident>().and_then(|ident| {
+                let str = ident.to_string();
+                if str.len() == 1 {
+                    Ok(str.chars().next().unwrap())
+                } else {
+                    proc_macro_error::abort!(ident.span(), "bases must be a single character")
+                }
+            })?;
+            let _caret = input.parse::<syn::token::Caret>()?;
+            let _two = input.parse::<LitInt>().and_then(|int| {
+                let u32 = int.base10_parse::<u32>()?;
+                if u32 == 2 {
+                    Ok(int)
+                } else {
+                    proc_macro_error::abort!(int.span(), "expected exponent 2")
+                }
+            })?;
+            let _eq = input.parse::<syn::Token![==]>()?;
+            let sqr = if input.peek(syn::Token![-]) {
+                let _neg = input.parse::<syn::Token![-]>()?;
+                let _one = input.parse::<LitInt>().and_then(|int| {
+                    let u32 = int.base10_parse::<u32>()?;
+                    if u32 == 1 {
+                        Ok(int)
+                    } else {
+                        proc_macro_error::abort!(int.span(), "expected 1, 0, or -1")
+                    }
+                });
+                algebra::Square::Neg
+            } else {
+                let int = input.parse::<LitInt>()?;
+                let u32 = int.base10_parse::<u32>()?;
+                match u32 {
+                    1 => algebra::Square::Pos,
+                    0 => algebra::Square::Zero,
+                    _ => proc_macro_error::abort!(int.span(), "expected 1, 0, or -1"),
+                }
+            };
 
-        let neg: u32 = input.parse::<LitInt>()?.base10_parse()?;
+            let _: Comma = input.parse()?;
 
-        if input.is_empty() {
-            return Ok(Algebra::from(IntAlgebra { pos, neg, zero: 0 }));
+            bases.push(Basis { char, sqr });
+
+            if input.is_empty() {
+                let bases = bases.leak();
+                return Ok(Algebra { bases, slim: false });
+            }
         }
-
-        let _: Comma = input.parse()?;
-
-        let zero = input.parse::<LitInt>()?.base10_parse()?;
-
-        Ok(Algebra::from(IntAlgebra { pos, neg, zero }))
     }
 }
 
@@ -51,6 +89,34 @@ pub(crate) struct IntAlgebra {
     pos: u32,
     neg: u32,
     zero: u32,
+}
+
+impl Parse for IntAlgebra {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let pos: u32 = input.parse::<LitInt>()?.base10_parse()?;
+
+        if input.is_empty() {
+            return Ok(IntAlgebra {
+                pos,
+                neg: 0,
+                zero: 0,
+            });
+        }
+
+        let _: Comma = input.parse()?;
+
+        let neg: u32 = input.parse::<LitInt>()?.base10_parse()?;
+
+        if input.is_empty() {
+            return Ok(IntAlgebra { pos, neg, zero: 0 });
+        }
+
+        let _: Comma = input.parse()?;
+
+        let zero = input.parse::<LitInt>()?.base10_parse()?;
+
+        Ok(IntAlgebra { pos, neg, zero })
+    }
 }
 
 impl From<IntAlgebra> for Algebra {
@@ -81,26 +147,6 @@ impl From<IntAlgebra> for Algebra {
             slim: false,
         }
     }
-}
-
-#[proc_macro]
-pub fn pga3(_: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    Algebra::pga3().define().into()
-}
-
-#[proc_macro]
-pub fn dyn_pga3(_: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    Algebra::pga3().dynamic_types().into()
-}
-
-#[proc_macro]
-pub fn ga3(_: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    Algebra::ga3().define().into()
-}
-
-#[proc_macro]
-pub fn dyn_ga3(_: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    Algebra::ga3().dynamic_types().into()
 }
 
 #[cfg(test)]

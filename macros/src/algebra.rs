@@ -3,118 +3,11 @@ use std::iter::FromIterator;
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct Algebra {
     pub bases: &'static [Basis],
+    /// If true, limits the amount of code generated at the cost of having a complete algebra
     pub slim: bool,
 }
 
 impl Algebra {
-    pub fn ga2() -> Self {
-        Self {
-            bases: &[
-                Basis {
-                    char: 'x',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'y',
-                    sqr: Square::Pos,
-                },
-            ],
-            slim: false,
-        }
-    }
-
-    pub fn ga3() -> Self {
-        Self {
-            bases: &[
-                Basis {
-                    char: 'x',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'y',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'z',
-                    sqr: Square::Pos,
-                },
-            ],
-            slim: false,
-        }
-    }
-
-    pub fn pga2() -> Self {
-        Self {
-            bases: &[
-                Basis {
-                    char: 'x',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'y',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'w',
-                    sqr: Square::Zero,
-                },
-            ],
-            slim: false,
-        }
-    }
-
-    pub fn pga3() -> Self {
-        Self {
-            bases: &[
-                Basis {
-                    char: 'x',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'y',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'z',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'w',
-                    sqr: Square::Zero,
-                },
-            ],
-            slim: false,
-        }
-    }
-
-    pub fn cga3() -> Self {
-        Self {
-            bases: &[
-                Basis {
-                    char: 'x',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'y',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'z',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'n',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'm',
-                    sqr: Square::Neg,
-                },
-            ],
-            slim: false,
-        }
-    }
-
     pub fn has_negative_bases(self) -> bool {
         self.bases.iter().any(|b| b.sqr == Square::Neg)
     }
@@ -201,26 +94,14 @@ impl Algebra {
 
     pub fn blades_by_grade(self) -> impl Iterator<Item = Blade> {
         self.grade_range()
-            .flat_map(move |g| self.blades().filter(move |b| b.grade() == g))
-    }
-
-    pub fn blades(self) -> Blades {
-        let pseudoscalar = self.pseudoscalar();
-        Blades {
-            range: 0..=pseudoscalar.0,
-        }
-    }
-
-    pub fn pseudoscalar(self) -> Blade {
-        let not = u32::MAX << self.bases.len();
-        Blade(!not)
+            .flat_map(move |g| Blades::from(self).filter(move |b| b.grade() == g))
     }
 
     pub fn right_comp(self, blade: Blade) -> Blade {
         if blade.is_zero() {
             return Blade::zero();
         }
-        let i = self.pseudoscalar();
+        let i = Blade::pseudoscalar(self);
         let comp = i ^ blade;
         if self.geo(blade, comp).is_positive() {
             comp
@@ -233,7 +114,7 @@ impl Algebra {
         if blade.is_zero() {
             return Blade::zero();
         }
-        let i = self.pseudoscalar();
+        let i = Blade::pseudoscalar(self);
         let comp = i ^ blade;
         if self.geo(comp, blade).is_positive() {
             comp
@@ -243,12 +124,11 @@ impl Algebra {
     }
 
     pub fn symmetrical_complements(self) -> bool {
-        self.blades()
-            .all(|blade| self.left_comp(blade) == self.right_comp(blade))
+        Blades::from(self).all(|blade| self.left_comp(blade) == self.right_comp(blade))
     }
 
     pub fn grade(self, grade: u32) -> impl Iterator<Item = Blade> {
-        self.blades().filter(move |b| b.grade() == grade)
+        Blades::from(self).filter(move |b| b.grade() == grade)
     }
 
     pub fn grades(self) -> impl Iterator<Item = Type> {
@@ -259,28 +139,27 @@ impl Algebra {
         0..=(self.bases.len() as u32)
     }
 
-    pub fn types(self) -> Box<dyn Iterator<Item = Type>> {
+    pub fn types(self) -> impl Iterator<Item = Type> {
         if self.slim {
-            Box::new(self.grades())
+            either::Either::Left(self.grades())
         } else {
-            let versors = [Type::Motor, Type::Flector, Type::Mv]
-                .iter()
-                .filter(move |ty| {
-                    let mut some = None;
-                    for blade in ty.iter_blades_unsorted(self) {
-                        match some {
-                            None => some = Some(blade.grade()),
-                            Some(g) => {
-                                if blade.grade() != g {
-                                    return true;
-                                }
-                            }
-                        };
+            let contains_multiple_grades = move |ty: &Type| {
+                let mut single_grade = None;
+                for blade in ty.iter_blades_unsorted(self) {
+                    if let Some(g) = single_grade {
+                        if blade.grade() != g {
+                            return true;
+                        }
+                    } else {
+                        single_grade = Some(blade.grade());
                     }
-                    false
-                })
-                .copied();
-            Box::new(self.grades().chain(versors))
+                }
+                false
+            };
+            let multiple_grade_types =
+                IntoIterator::into_iter([Type::Motor, Type::Flector, Type::Mv])
+                    .filter(contains_multiple_grades);
+            either::Either::Right(self.grades().chain(multiple_grade_types))
         }
     }
 
@@ -310,6 +189,15 @@ impl Algebra {
 #[derive(Clone)]
 pub struct Blades {
     range: std::ops::RangeInclusive<u32>,
+}
+
+impl From<Algebra> for Blades {
+    fn from(algebra: Algebra) -> Self {
+        let pseudoscalar = Blade::pseudoscalar(algebra);
+        Blades {
+            range: 0..=pseudoscalar.0,
+        }
+    }
 }
 
 impl Iterator for Blades {
@@ -379,7 +267,7 @@ impl Type {
 
     pub fn iter_blades_unsorted(self, algebra: Algebra) -> IterBlades {
         IterBlades {
-            blades: algebra.blades(),
+            blades: Blades::from(algebra),
             ty: self,
         }
     }
@@ -411,6 +299,18 @@ impl Type {
             (Type::Mv, _) => true,
             _ => false,
         }
+    }
+
+    pub fn is_scalar(self) -> bool {
+        matches!(self, Type::Grade(0))
+    }
+
+    pub fn is_vector(self) -> bool {
+        matches!(self, Type::Grade(1))
+    }
+
+    pub fn pseudoscalar(algebra: Algebra) -> Self {
+        Type::Grade(algebra.bases.len() as u32)
     }
 }
 
@@ -654,6 +554,11 @@ impl Blade {
     fn unflagged(self) -> Self {
         Blade(self.0 & !(Self::SIGN | Self::ZERO))
     }
+
+    pub fn pseudoscalar(algebra: Algebra) -> Self {
+        let inverse = u32::MAX << algebra.bases.len();
+        Blade(!inverse)
+    }
 }
 
 impl std::ops::Neg for Blade {
@@ -686,13 +591,13 @@ impl std::ops::BitAnd for Blade {
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum ProductOp {
+    Mul,
     Geo,
     Dot,
     Wedge,
     Antigeo,
     Antidot,
     Antiwedge,
-    Mul,
     Commutator,
 }
 
@@ -702,10 +607,10 @@ impl ProductOp {
             vec![Self::Geo, Self::Wedge, Self::Dot, Self::Mul].into_iter()
         } else {
             vec![
+                Self::Mul,
                 Self::Geo,
                 Self::Wedge,
                 Self::Dot,
-                Self::Mul,
                 Self::Antigeo,
                 Self::Antidot,
                 Self::Antiwedge,
@@ -716,12 +621,18 @@ impl ProductOp {
     }
 
     pub fn output(self, algebra: Algebra, lhs: Type, rhs: Type) -> Option<Type> {
-        cartesian_product(
+        if !self.has_implementation(lhs, rhs, algebra) {
+            return None;
+        }
+
+        let output = cartesian_product(
             lhs.iter_blades_unsorted(algebra),
             rhs.iter_blades_unsorted(algebra),
         )
         .map(|(lhs, rhs)| self.product(algebra, lhs, rhs))
-        .collect()
+        .collect::<Option<Type>>()?;
+
+        algebra.contains(output).then_some(output)
     }
 
     pub fn product(self, algebra: Algebra, lhs: Blade, rhs: Blade) -> Blade {
@@ -867,8 +778,68 @@ impl InverseOps {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    pub fn pga_3d() -> Algebra {
+        Algebra {
+            bases: &[
+                Basis {
+                    char: 'x',
+                    sqr: Square::Pos,
+                },
+                Basis {
+                    char: 'y',
+                    sqr: Square::Pos,
+                },
+                Basis {
+                    char: 'z',
+                    sqr: Square::Pos,
+                },
+                Basis {
+                    char: 'w',
+                    sqr: Square::Zero,
+                },
+            ],
+            slim: false,
+        }
+    }
+
+    pub fn ga_2d() -> Algebra {
+        Algebra {
+            bases: &[
+                Basis {
+                    char: 'x',
+                    sqr: Square::Pos,
+                },
+                Basis {
+                    char: 'y',
+                    sqr: Square::Pos,
+                },
+            ],
+            slim: false,
+        }
+    }
+
+    pub fn ga_3d() -> Algebra {
+        Algebra {
+            bases: &[
+                Basis {
+                    char: 'x',
+                    sqr: Square::Pos,
+                },
+                Basis {
+                    char: 'y',
+                    sqr: Square::Pos,
+                },
+                Basis {
+                    char: 'z',
+                    sqr: Square::Pos,
+                },
+            ],
+            slim: false,
+        }
+    }
 
     #[test]
     fn pos_and_neg_scalar() {
@@ -880,7 +851,7 @@ mod tests {
 
     #[test]
     fn scalar_closed_mul() {
-        let a = Algebra::ga2();
+        let a = ga_2d();
         let s = Blade(0);
         assert_eq!(s, a.geo(s, s));
 
@@ -890,7 +861,7 @@ mod tests {
 
     #[test]
     fn vector_mul_scalar() {
-        let a = Algebra::ga3();
+        let a = ga_3d();
         let s = Blade(0);
         let e1 = Blade(0b001);
         let e2 = Blade(0b010);
@@ -961,7 +932,7 @@ mod tests {
 
     #[test]
     fn bivector_mul_neg_scalar() {
-        let a = Algebra::ga3();
+        let a = ga_3d();
         let s = Blade(0);
         let e12 = Blade(0b011);
         let e23 = Blade(0b110);
@@ -974,7 +945,7 @@ mod tests {
 
     #[test]
     fn bivector_mul_e12_e23() {
-        let a = Algebra::ga3();
+        let a = ga_3d();
         let e12 = Blade(0b011);
         let e23 = Blade(0b110);
         let e13 = Blade(0b101);
@@ -984,7 +955,7 @@ mod tests {
 
     #[test]
     fn bivector_mul_e23_e12() {
-        let a = Algebra::ga3();
+        let a = ga_3d();
         let e12 = Blade(0b011);
         let e23 = Blade(0b110);
         let e13 = Blade(0b101);
@@ -1026,7 +997,7 @@ mod tests {
 
     #[test]
     fn vector_wedge_bivector() {
-        let a = Algebra::ga3();
+        let a = ga_3d();
         let e12 = Blade(0b11);
         let e3 = Blade(0b100);
         let e123 = Blade(0b111);
@@ -1044,7 +1015,7 @@ mod tests {
 
     #[test]
     fn blade_set_mul_zero() {
-        let a = Algebra::ga2();
+        let a = ga_2d();
         assert_eq!(Blade::zero(), a.geo(Blade(1), Blade::zero()));
         assert_eq!(Blade::zero(), a.geo(Blade::zero(), Blade(1)));
     }
@@ -1056,7 +1027,7 @@ mod tests {
 
     #[test]
     fn dot_vectors() {
-        let a = Algebra::ga2();
+        let a = ga_2d();
         let s = Blade(0);
         let e1 = Blade(1);
         let e2 = Blade(0b10);
@@ -1067,7 +1038,7 @@ mod tests {
 
     #[test]
     fn wedge_vectors() {
-        let a = Algebra::ga2();
+        let a = ga_2d();
         let e12 = Blade(0b11);
         let e1 = Blade(1);
         let e2 = Blade(0b10);
@@ -1149,15 +1120,6 @@ mod tests {
     }
 
     #[test]
-    fn algebra_grades() {
-        let a = Algebra::ga2();
-        assert_eq!(3, a.grades().count());
-
-        let a = Algebra::cga3();
-        assert_eq!(6, a.grades().count());
-    }
-
-    #[test]
     fn motor_contains() {
         assert!(Type::Motor.contains(Blade(0)));
         assert!(!Type::Motor.contains(Blade(1)));
@@ -1175,9 +1137,7 @@ mod tests {
 
     #[test]
     fn skip_versors_with_one_grade() {
-        let types = Algebra::ga2()
-            .types()
-            .collect::<std::collections::HashSet<_>>();
+        let types = ga_2d().types().collect::<std::collections::HashSet<_>>();
 
         assert!(types.contains(&Type::Motor));
         assert!(!types.contains(&Type::Flector));
@@ -1185,7 +1145,7 @@ mod tests {
 
     #[test]
     fn add_scalar_bivector_to_motor() {
-        let algebra = Algebra::ga3();
+        let algebra = ga_3d();
 
         assert_eq!(
             Some(Type::Motor),
@@ -1195,9 +1155,9 @@ mod tests {
 
     #[test]
     fn right_comp() {
-        let a = Algebra::pga3();
-        let i = a.pseudoscalar();
-        for blade in a.blades() {
+        let a = pga_3d();
+        let i = Blade::pseudoscalar(a);
+        for blade in Blades::from(a) {
             let comp = a.right_comp(blade);
             assert_eq!(i, a.geo(blade, comp));
         }
@@ -1205,8 +1165,8 @@ mod tests {
 
     #[test]
     fn symmetrical_complements() {
-        let g3 = Algebra::ga3();
-        let pga3 = Algebra::pga3();
+        let g3 = ga_3d();
+        let pga3 = pga_3d();
 
         assert!(g3.symmetrical_complements());
         assert!(!pga3.symmetrical_complements());
@@ -1214,7 +1174,7 @@ mod tests {
 
     #[test]
     fn complements() {
-        let a = Algebra::ga3();
+        let a = ga_3d();
         assert_eq!(Type::Grade(2), Type::Grade(1).complement(a));
         assert_eq!(Type::Grade(1), Type::Grade(2).complement(a));
         assert_eq!(Type::Flector, Type::Motor.complement(a));
@@ -1229,7 +1189,7 @@ mod tests {
     #[test]
     #[allow(non_snake_case)]
     fn antidot() {
-        let a = Algebra::pga3();
+        let a = pga_3d();
 
         let s = Blade(0);
         let I = Blade(0b1111);
@@ -1248,7 +1208,7 @@ mod tests {
     #[test]
     #[allow(non_snake_case)]
     fn antiwedge() {
-        let a = Algebra::pga3();
+        let a = pga_3d();
 
         let z = Blade::zero();
         let s = Blade(0);
@@ -1267,7 +1227,7 @@ mod tests {
 
     #[test]
     fn antirev() {
-        let a = Algebra::pga3();
+        let a = pga_3d();
         let s = Blade(0);
         let e1 = Blade(1);
         let e12 = Blade(0b11);
@@ -1282,14 +1242,9 @@ mod tests {
 
     #[test]
     fn commutator_products() {
-        let algebra = Algebra::pga3();
-        let _all_pga_products = algebra
-            .blades()
-            .flat_map(|lhs| {
-                algebra
-                    .blades()
-                    .map(move |rhs| algebra.commutator(lhs, rhs))
-            })
+        let algebra = pga_3d();
+        let _all_pga_products = Blades::from(algebra)
+            .flat_map(|lhs| Blades::from(algebra).map(move |rhs| algebra.commutator(lhs, rhs)))
             .collect::<Vec<_>>();
 
         let bivector = Type::Grade(2)

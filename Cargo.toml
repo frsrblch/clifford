@@ -3,22 +3,18 @@ name = "clifford"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace]
+members = ["macros", "geo_traits"]
 
 [dependencies]
 num-traits = "0.2.15"
 rand = "0.8"
 bytemuck = "1.12.3"
-num-sqrt = { path = "../num-sqrt" }
-num-trig = { path = "../num-trig" }
-f_zero = { path = "../f_zero", optional = true }
-geo_traits = { path = "../geo_traits" }
+geo_traits = { path = "./geo_traits" }
 macros = { path = "./macros" }
 
 [dev-dependencies]
 criterion = "0.4.0"
-num-dual = { path = "../num-dual" }
-derive_more = "0.99"
 
 [[test]]
 name = "ga_3d_tests"
@@ -28,20 +24,14 @@ required-features = ["ga_3d"]
 name = "pga_3d_tests"
 required-features = ["pga_3d"]
 
-# [[test]]
-# name = "cga_3d_tests"
-# required-features = ["cga_3d"]
-
-[[example]]
-name = "orbital_motion"
-required-features = ["pga_3d", "pos_vel_ga"]
+[[test]]
+name = "cga_3d_tests"
+required-features = ["cga_3d"]
 
 [features]
 ga_3d = []
 pga_3d = []
-# cga_3d = []
-pos_vel_ga = []
-dyn = ["f_zero"]
+cga_3d = []
 
 [[bench]]
 name = "sandwich"

@@ -1,16 +1,25 @@
 pub use geo_traits::*;
-pub use num_sqrt::Sqrt;
-pub use num_traits::{One, Zero};
-pub use num_trig::*;
+pub use num_traits::*;
 
-macros::pga3!();
+macros::algebra! {
+    x ^ 2 == 1,
+    y ^ 2 == 1,
+    z ^ 2 == 1,
+    w ^ 2 == 0,
+}
 
 #[cfg(feature = "dyn")]
-macros::dyn_pga3!();
+macros::dynamic_types! {
+    x ^ 2 == 1,
+    y ^ 2 == 1,
+    z ^ 2 == 1,
+    w ^ 2 == 0,
+}
 
+#[inline]
 pub fn point<T>(x: T, y: T, z: T) -> Unit<Trivector<T>>
 where
-    T: One + std::ops::Neg<Output = T>,
+    T: Float,
 {
     Unit::assert(Trivector {
         xyz: T::one(),
@@ -20,60 +29,45 @@ where
     })
 }
 
-impl<T> num_sqrt::Sqrt for Bivector<T>
+impl<T> Bivector<T>
 where
-    Unit<Bivector<T>>: num_sqrt::Sqrt<Output = Motor<T>>,
-    Bivector<T>: Unitize<Output = Unit<Bivector<T>>>,
+    T: Float,
 {
-    type Output = Motor<T>;
     #[inline]
-    fn sqrt(self) -> Self::Output {
+    pub fn sqrt(self) -> Motor<T> {
         self.unit().sqrt()
     }
 }
 
-impl<T> num_sqrt::Sqrt for Unit<Bivector<T>>
+impl<T> Unit<Bivector<T>>
 where
-    Scalar<T>: num_traits::One,
-    Bivector<T>: std::ops::Add<Scalar<T>, Output = Motor<T>>,
+    T: Float,
 {
-    type Output = Motor<T>;
     #[inline]
-    fn sqrt(self) -> Self::Output {
-        self.value() + num_traits::One::one()
+    pub fn sqrt(self) -> Motor<T> {
+        self.value() + Scalar::<T>::one()
     }
 }
 
-impl<T> num_sqrt::Sqrt for Motor<T>
+impl<T> Motor<T>
 where
-    Motor<T>: Unitize<Output = Unit<Motor<T>>>,
-    Unit<Motor<T>>: num_sqrt::Sqrt<Output = Motor<T>>,
+    T: Float,
 {
-    type Output = Motor<T>;
     #[inline]
     #[track_caller]
-    fn sqrt(self) -> Self::Output {
+    pub fn sqrt(self) -> Motor<T> {
         self.unit().sqrt()
     }
 }
 
-/// Adapted from https://arxiv.org/pdf/2206.07496.pdf, page 14
-impl<T> num_sqrt::Sqrt for Unit<Motor<T>>
+/// Adapted from <https://arxiv.org/pdf/2206.07496.pdf>, page 14
+impl<T> Unit<Motor<T>>
 where
-    T: Copy
-        + Zero
-        + One
-        + std::ops::Neg<Output = T>
-        + std::ops::Add<Output = T>
-        + std::ops::Sub<Output = T>
-        + std::ops::Mul<Output = T>
-        + std::ops::Div<Output = T>
-        + Sqrt<Output = T>,
+    T: Float,
 {
-    type Output = Motor<T>;
     #[inline]
     #[track_caller]
-    fn sqrt(self) -> Self::Output {
+    pub fn sqrt(self) -> Motor<T> {
         let one = if self.0.scalar().is_zero() {
             Scalar::<T>::one()
         } else {
@@ -83,7 +77,7 @@ where
         let x = self.0 + one;
         let s = Scalar::product(x, x.rev());
         let t = Quadvector::product(x, x.rev()).left_comp();
-        let a = one / s.sqrt();
+        let a = one / Float::sqrt(s);
         let b = t / (a * a * a);
         a * x + b * Quadvector { xyzw: T::one() } * x
     }
@@ -91,29 +85,21 @@ where
 
 impl<T> rand::distributions::Distribution<Unit<Motor<T>>> for rand::distributions::Standard
 where
-    rand::distributions::Standard:
-        rand::distributions::Distribution<Unit<Bivector<T>>> + rand::distributions::Distribution<T>,
-    T: std::ops::Mul<Output = T>
-        + num_traits::FloatConst
-        + num_trig::Sin<Output = T>
-        + num_trig::Cos<Output = T>
-        + Copy,
-    Bivector<T>: std::ops::Mul<Scalar<T>, Output = Bivector<T>>
-        + std::ops::Add<Scalar<T>, Output = Motor<T>>,
+    rand::distributions::Standard: rand::distributions::Distribution<T>,
+    T: Float + FloatConst,
 {
     #[inline]
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Unit<Motor<T>> {
-        let bivector = rng.gen::<Unit<Bivector<T>>>();
-        let angle = rng.gen::<T>() * T::PI();
-        let sin = Scalar { s: angle.sin() };
-        let cos = Scalar { s: angle.cos() };
-        Unit(bivector.value() * cos + sin)
+        let plane = rng.gen::<Unit<Bivector<T>>>();
+        let angle = rng.gen::<Scalar<T>>() * Scalar::PI();
+        let (sin, cos) = angle.sin_cos();
+        Unit::assert(plane * cos + sin)
     }
 }
 
 impl<T> Unit<Trivector<T>>
 where
-    T: num_traits::Float,
+    T: Float,
 {
     #[inline]
     pub fn x(self) -> T {
@@ -133,7 +119,7 @@ where
 
 impl<T> Trivector<T>
 where
-    T: num_traits::Float,
+    T: Float,
 {
     #[inline]
     pub fn x(self) -> T {
@@ -153,7 +139,7 @@ where
 
 impl<T> Bivector<T>
 where
-    T: num_traits::Float,
+    T: Float,
 {
     /// Source: Polar decomposition, normalization, square roots and the exponential map in Clifford algebras of fewer than 6 dimensions by Steven De Keninck
     #[inline]
@@ -176,7 +162,7 @@ where
                 xw,
                 yw,
                 zw,
-                ..Motor::zero()
+                ..zero()
             }
         } else {
             let m = xw * xy + yw * xz + zw * yz;
@@ -201,8 +187,7 @@ where
 
 impl<T> Motor<T>
 where
-    T: num_traits::Float,
-    Motor<T>: Unitize<Output = Unit<Motor<T>>>,
+    T: Float,
 {
     #[inline]
     #[track_caller]
@@ -211,7 +196,10 @@ where
     }
 }
 
-impl<T: num_traits::Float> Unit<Motor<T>> {
+impl<T> Unit<Motor<T>>
+where
+    T: num_traits::Float,
+{
     /// Source: Polar decomposition, normalization, square roots and the exponential map in Clifford algebras of fewer than 6 dimensions by Steven De Keninck
     #[inline]
     #[track_caller]
@@ -225,7 +213,7 @@ impl<T: num_traits::Float> Unit<Motor<T>> {
                 xw: self.0.xw,
                 yw: self.0.yw,
                 zw: self.0.zw,
-                ..Bivector::zero()
+                ..zero()
             };
         }
 

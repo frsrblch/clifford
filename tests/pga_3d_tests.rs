@@ -48,22 +48,6 @@ fn rotation_and_unit_rotation() {
     // panic!();
 }
 
-#[cfg(feature = "dyn")]
-#[test]
-fn f0_ops() {
-    use f_zero::f0;
-    let vector: Value<f0> = Value::Vector(Default::default());
-    let bivector: Value<f0> = Value::Bivector(Default::default());
-    assert_eq!(
-        Some(Value::Flector(Default::default())),
-        vector.geo(bivector)
-    );
-    assert_eq!(
-        Some(Value::Vector(Default::default())),
-        vector.dot(bivector)
-    );
-}
-
 #[test]
 fn unit_motor_has_norm_1() {
     use rand::{thread_rng, Rng};
@@ -138,7 +122,7 @@ fn line_rotation_by_angle() {
     let xy = Vector::new(0., 0., 1., 0.);
     let yz = Vector::new(1., 0., 0., 0.);
     let line = xy ^ yz;
-    let angle = Scalar::new(std::f64::consts::FRAC_PI_4);
+    let angle = Scalar::<f64>::FRAC_PI_4();
     let (sin, cos) = angle.sin_cos();
     let motor = line.unit() * sin + cos;
 
@@ -157,7 +141,7 @@ fn line_rotation_by_angle_sqrt() {
     let xy = Vector::new(0., 0., 1., 0.);
     let yz = Vector::new(1., 0., 0., 0.);
     let line = xy ^ yz;
-    let angle = Scalar::new(std::f64::consts::FRAC_PI_2);
+    let angle = Scalar::<f64>::FRAC_PI_2();
     let (sin, cos) = angle.sin_cos();
     let motor = (line.unit() * sin + cos).sqrt();
 
@@ -236,7 +220,7 @@ fn rotation_around_line_log_and_exp() {
     let xy = Vector::new(0., 0., 1., 0.);
     let yz = Vector::new(1., 0., 0., 0.);
     let line = xy ^ yz;
-    let angle = Scalar::new(std::f64::consts::FRAC_PI_4);
+    let angle = Scalar::<f64>::FRAC_PI_4();
     let (sin, cos) = angle.sin_cos();
     let motor = line.unit() * sin + cos;
 

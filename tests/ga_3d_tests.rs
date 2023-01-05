@@ -100,9 +100,9 @@ fn sandwich_shr_overload() {
 #[test]
 fn motor_log_and_angle() {
     let plane = Bivector::new(1., 2., 3.).unit();
-    let angle = Scalar::new(std::f64::consts::FRAC_PI_3);
+    let angle = Scalar::<f64>::FRAC_PI_3();
     let motor = Motor::from_plane_and_angle(plane, angle);
 
-    assert_eq!(motor.log(), plane);
+    assert_eq!(motor.plane(), plane);
     assert_eq!(motor.angle(), angle);
 }

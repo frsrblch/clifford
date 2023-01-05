@@ -3,21 +3,12 @@
 //! [`Feature set`]
 //!
 //! Models of geometry:
-//! - [x] Generic types
-//!     - [x] f32/f64 conversions
-//!     - [x] flexible generics (e.g., `Vector<T> ^ Vector<U> = Vector<V>` if `T * U = V`)
-//! - [ ] Homogeneous
-//!     - [ ] Weight
-//!     - [ ] Bulk
-//!     - [ ] IsIdeal
-//!     - [ ] Projection
-//!     - [ ] Antiprojection
-//! - [ ] Conformal
-//!     - [ ] Meet
-//!     - [ ] Join
-//!     - [ ] Origin
-//!     - [ ] Infinity
-//!     - [ ] IsFlat
+//! - [x] Vectorspace GA 3D
+//! - [x] Homogeneous PGA 3D
+//! - [ ] Conformal CGA 3D (experimental WIP)
+//!     - [x] Origin
+//!     - [x] Infinity
+//!     - [x] IsFlat
 //! - [ ] Minkowski
 //!
 //! Types:
@@ -26,6 +17,10 @@
 //! - [x] Odd-grade
 //! - [x] Multivector
 //! - [x] Unit
+//!
+//! Generics:
+//! - [x] flexible generics (e.g., `Vector<T>: Mul<Scalar<U>, Output = Vector<V>> where T: Mul<U, Output = V>`)
+//! - [x] f32/f64 conversions
 //!
 //! Functions:
 //! - [x] Grade selection (e.g., Motor::bivector() -> Bivector)
@@ -92,6 +87,7 @@
 //! - [x] Wedge product: a ^ b
 //! - [x] Antiwedge (regressive) product: a & b
 //! - [x] Sandwich product: M >> a
+//! - [ ] Dual: !a
 //!
 //! Num Traits:
 //! - [x] Zero
@@ -105,15 +101,14 @@
 //!
 //! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features.html
 
+/// 3D vectorspace geometric algbra 
 #[cfg(feature = "ga_3d")]
 pub mod ga_3d;
 
 #[cfg(feature = "pga_3d")]
 pub mod pga_3d;
 
-#[cfg(feature = "pos_vel_ga")]
-pub mod pos_vel_ga {
-    macros::algebra_slim!(7);
-}
+#[cfg(feature = "cga_3d")]
+pub mod cga_3d;
 
 pub use macros::{algebra, algebra_slim};
