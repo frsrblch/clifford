@@ -73,6 +73,10 @@ impl Algebra {
             .type_tuples()
             .map(|(lhs, rhs)| Sandwich::impl_for(lhs, rhs, self));
 
+        let antisandwich_ops = self
+            .type_tuples()
+            .map(|(lhs, rhs)| Antisandwich::impl_for(lhs, rhs, self));
+
         let unit_items = Unit::define(self);
 
         let sample_unit = self.types().filter_map(|ty| ty.impl_sample_unit(self));
@@ -111,6 +115,7 @@ impl Algebra {
             #(#grade_products)*
             #(#norm_ops)*
             #(#sandwich_ops)*
+            #(#antisandwich_ops)*
             #(#inverse_ops)*
             #(#unit_items)*
             #(#sample_unit)*
@@ -1754,6 +1759,64 @@ impl Sandwich {
 
     pub fn trait_fn() -> Ident {
         parse_quote!(sandwich)
+    }
+}
+
+struct Antisandwich;
+
+impl Antisandwich {
+    pub fn impl_for(lhs: Type, rhs: Type, algebra: Algebra) -> Option<ItemImpl> {
+        if !Sandwich::has_implementation(lhs, rhs, algebra) {
+            return None;
+        }
+
+        let trait_ty = Self::trait_ty();
+        let trait_fn = Self::trait_fn();
+        let fn_attrs = fn_attrs();
+
+        if algebra.symmetrical_complements() {
+            Some(parse_quote! {
+                impl<T, U, V> #trait_ty<#rhs<U>> for #lhs<T>
+                where
+                    T: num_traits::Float + std::ops::Mul<U, Output = V>,
+                    U: num_traits::Float,
+                    V: num_traits::Float + std::ops::Mul<T, Output = V>,
+                {
+                    type Output = #rhs<V>;
+                    #fn_attrs
+                    fn #trait_fn(self, rhs: #rhs<U>) -> Self::Output {
+                        let lhs = self.dual();
+                        let rhs = rhs.dual();
+                        Sandwich::sandwich(lhs, rhs).dual()
+                    }
+                }
+            })
+        } else {
+            Some(parse_quote! {
+                impl<T, U, V> #trait_ty<#rhs<U>> for #lhs<T>
+                where
+                    T: num_traits::Float + std::ops::Mul<U, Output = V>,
+                    U: num_traits::Float,
+                    V: num_traits::Float + std::ops::Mul<T, Output = V>,
+                {
+                    type Output = #rhs<V>;
+                    #fn_attrs
+                    fn #trait_fn(self, rhs: #rhs<U>) -> Self::Output {
+                        let lhs = self.left_comp();
+                        let rhs = rhs.left_comp();
+                        Sandwich::sandwich(lhs, rhs).right_comp()
+                    }
+                }
+            })
+        }
+    }
+
+    pub fn trait_ty() -> syn::Type {
+        parse_quote!(geo_traits::Antisandwich)
+    }
+
+    pub fn trait_fn() -> Ident {
+        parse_quote!(antisandwich)
     }
 }
 
