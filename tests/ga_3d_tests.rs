@@ -1,18 +1,5 @@
 use clifford::ga_3d::*;
 
-#[cfg(feature = "dyn")]
-#[test]
-fn value_geo() {
-    let v = Value::Vector(Vector::new(1., 0., 0.));
-    assert_eq!(
-        Value::Motor(Motor {
-            s: 1.,
-            ..Motor::default()
-        }),
-        v.geo(v).unwrap()
-    );
-}
-
 #[test]
 fn vector_inv() {
     let v = Vector::new(2., 3., 5.);
@@ -105,4 +92,25 @@ fn motor_log_and_angle() {
 
     assert_eq!(motor.plane(), plane);
     assert_eq!(motor.angle(), angle);
+}
+
+#[test]
+fn unit_type_ops() {
+    let v = Vector::new(2., 3., 5.);
+    let u = v.unit();
+
+    let _ = v + v;
+    // let _ = u + v;
+    // let _ = v + u;
+    // let _ = u + u;
+
+    let _ = v * v;
+    let _ = u * v;
+    // let _ = v * u;
+    // let _ = u * u;
+
+    let _ = v >> v;
+    let _ = u >> v;
+    // let _ = v >> u;
+    // let _ = u >> u;
 }

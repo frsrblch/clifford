@@ -8,14 +8,6 @@ macros::algebra! {
     w ^ 2 == 0,
 }
 
-#[cfg(feature = "dyn")]
-macros::dynamic_types! {
-    x ^ 2 == 1,
-    y ^ 2 == 1,
-    z ^ 2 == 1,
-    w ^ 2 == 0,
-}
-
 #[inline]
 pub fn point<T>(x: T, y: T, z: T) -> Unit<Trivector<T>>
 where

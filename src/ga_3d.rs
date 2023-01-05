@@ -7,13 +7,6 @@ macros::algebra! {
     z ^ 2 == 1,
 }
 
-#[cfg(feature = "dyn")]
-macros::dynamic_types! {
-    x ^ 2 == 1,
-    y ^ 2 == 1,
-    z ^ 2 == 1,
-}
-
 impl<T> Bivector<T>
 where
     T: Float,
