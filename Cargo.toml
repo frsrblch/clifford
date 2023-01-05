@@ -3,12 +3,13 @@ name = "clifford"
 version = "0.1.0"
 edition = "2021"
 
+
 [workspace]
 members = ["macros", "geo_traits"]
 
 [dependencies]
 num-traits = "0.2.15"
-rand = "0.8"
+rand = "0.8.5"
 bytemuck = "1.12.3"
 geo_traits = { path = "./geo_traits" }
 macros = { path = "./macros" }
