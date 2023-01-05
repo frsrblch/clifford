@@ -36,3 +36,4 @@ cga_3d = []
 [[bench]]
 name = "sandwich"
 harness = false
+required-features = ["pga_3d"]
