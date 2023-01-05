@@ -79,6 +79,18 @@ fn non_unit_point_to_coordinates() {
 }
 
 #[test]
+fn unit_point_to_coordinates() {
+    let (x, y, z) = (2f64, 3., 5.);
+    let pt = point(x, y, z) * -2.;
+    dbg!(pt, pt.unit());
+    let pt = pt.unit();
+
+    let (cx, cy, cz) = pt.coords();
+
+    assert_eq!((x, y, z), (cx, cy, cz));
+}
+
+#[test]
 fn plane_reflection() {
     let pt = point(1., 2., 3.).value();
 

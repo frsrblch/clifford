@@ -1784,6 +1784,18 @@ impl InverseOps {
             return None;
         }
 
+        let scalar_fields = ty
+            .iter_blades_unsorted(algebra)
+            .filter_map(|b| {
+                let dot = algebra.dot(b, b);
+                if !dot.is_zero() && dot.grade() == 0 {
+                    Some(b)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
         let trait_ty = self.trait_ty();
         let trait_fn = self.trait_fn();
 
@@ -1801,8 +1813,9 @@ impl InverseOps {
         let norm_ty = NormOps::Norm.trait_ty();
         let norm_fn = NormOps::Norm.trait_fn();
 
-        Some(match (self, ty) {
-            (InverseOps::Inverse, Type::Grade(0)) => {
+        Some(match (self, scalar_fields.len()) {
+            (InverseOps::Inverse, 1) => {
+                let field = scalar_fields[0].field(algebra);
                 parse_quote! {
                     impl<T> #trait_ty for #ty<T>
                     where
@@ -1811,7 +1824,9 @@ impl InverseOps {
                         type Output = #ty<T>;
                         #fn_attrs
                         fn #trait_fn(self) -> Self::Output {
-                            self.map(num_traits::Float::recip)
+                            let norm2 = self.#field * self.#field;
+                            let recip = norm2.recip();
+                            self.rev().map(|t| t * recip)
                         }
                     }
                 }
@@ -1830,7 +1845,8 @@ impl InverseOps {
                     }
                 }
             }
-            (InverseOps::Unitize, Type::Grade(0)) => {
+            (InverseOps::Unitize, 1) => {
+                let field = scalar_fields[0].field(algebra);
                 parse_quote! {
                     impl<T> #trait_ty for #ty<T>
                     where
@@ -1839,7 +1855,9 @@ impl InverseOps {
                         type Output = Unit<#ty<T>>;
                         #fn_attrs
                         fn #trait_fn(self) -> Self::Output {
-                            Unit(Scalar { s: T::one() })
+                            let recip = self.#field.recip();
+                            let value = self.map(|t| t * recip);
+                            Unit(value)
                         }
                     }
                 }

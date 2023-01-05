@@ -17,6 +17,7 @@
 //! - [x] Odd-grade
 //! - [x] Multivector
 //! - [x] Unit
+//!     - [ ] Seamless use of unary and binary operations with `Unit<T>` types
 //!
 //! Generics:
 //! - [x] flexible generics (e.g., `Vector<T>: Mul<Scalar<U>, Output = Vector<V>> where T: Mul<U, Output = V>`)
@@ -81,14 +82,13 @@
 //! Compound products:
 //! - [x] Sandwich
 //! - [x] Antisandwich
-//! - [ ] Sandwich `Unit<T>` types
 //!
 //! Operator overloading:
-//! - [x] Dot product: a | b
-//! - [x] Wedge product: a ^ b
-//! - [x] Antiwedge (regressive) product: a & b
-//! - [x] Sandwich product: M >> a
-//! - [ ] Dual: !a
+//! - [x] Dot product: `a | b`
+//! - [x] Wedge product: `a ^ b`
+//! - [x] Antiwedge (regressive) product: `a & b`
+//! - [x] Sandwich product: `M >> a`
+//! - [ ] Dual: `!a`
 //!
 //! Num Traits:
 //! - [x] Zero
@@ -102,13 +102,15 @@
 //!
 //! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features.html
 
-/// 3D vectorspace geometric algbra 
+/// 3D Vectorspace Geometric Algbra 
 #[cfg(feature = "ga_3d")]
 pub mod ga_3d;
 
+/// 3D Projective Geometric Algebra
 #[cfg(feature = "pga_3d")]
 pub mod pga_3d;
 
+/// 3D Conformal Geometric Algebra
 #[cfg(feature = "cga_3d")]
 pub mod cga_3d;
 

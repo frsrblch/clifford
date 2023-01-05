@@ -103,6 +103,17 @@ where
     }
 }
 
+impl<T> Unit<Trivector<T>>
+where
+    T: Float,
+{
+    /// Return the (x, y, z) coordinates
+    #[inline]
+    pub fn coords(self) -> (T, T, T) {
+        (-self.0.yzw, self.0.xzw, -self.0.xyw)
+    }
+}
+
 impl<T> Bivector<T>
 where
     T: Float,
