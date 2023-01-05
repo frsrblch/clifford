@@ -69,31 +69,6 @@ pub fn point<T: Float>(x: T, y: T, z: T) -> Vector<T> {
     }
 }
 
-macro_rules! impl_float_type {
-    ($($kvector:ident),*) => {
-        $(
-            impl<T> FloatType for $kvector<T>
-            where
-                T: num_traits::Float,
-            {
-                type Float = T;
-            }
-        )*
-    };
-}
-
-impl_float_type!(
-    Scalar,
-    Vector,
-    Bivector,
-    Trivector,
-    Quadvector,
-    Pentavector,
-    Motor,
-    Flector,
-    Multivector
-);
-
 pub trait IsFlat {
     fn is_flat(&self) -> bool;
 }

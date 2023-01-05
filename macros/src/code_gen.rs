@@ -19,6 +19,7 @@ impl Algebra {
         let impl_zero = self.types().map(|ty| ty.impl_zero(self));
         let impl_one = self.types().filter_map(|ty| ty.impl_one(self));
         let impl_bytemuck = self.types().map(ImplBytemuck);
+        let impl_float_type = self.types().map(ImplFloatType);
 
         let impl_product_ops = self.type_tuples().flat_map(|(lhs, rhs)| {
             ProductOp::iter_all(self).filter_map(move |op| op.impl_for(self, lhs, rhs))
@@ -95,6 +96,7 @@ impl Algebra {
             #(#impl_zero)*
             #(#impl_one)*
             #(#impl_bytemuck)*
+            #(#impl_float_type)*
             #(#impl_product_ops)*
             #(#operator_overloads)*
             #(#div_ops)*
@@ -565,6 +567,22 @@ fn fn_attrs() -> TokenStream {
         #[inline]
         #[track_caller]
     )
+}
+
+struct ImplFloatType(Type);
+
+impl ToTokens for ImplFloatType {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let ty = self.0;
+        tokens.extend(quote! {
+            impl<T> geo_traits::FloatType for #ty<T>
+            where
+                T: num_traits::Float,
+            {
+                type Float = T;
+            }
+        });
+    }
 }
 
 struct ImplBytemuck(Type);

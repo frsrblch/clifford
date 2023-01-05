@@ -21,6 +21,7 @@
 //! Generics:
 //! - [x] flexible generics (e.g., `Vector<T>: Mul<Scalar<U>, Output = Vector<V>> where T: Mul<U, Output = V>`)
 //! - [x] f32/f64 conversions
+//! - [x] FloatType trait (e.g., Vector<T>: FloatType<Float = T>)
 //!
 //! Functions:
 //! - [x] Grade selection (e.g., Motor::bivector() -> Bivector)
