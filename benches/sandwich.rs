@@ -1,6 +1,5 @@
 use clifford::pga_3d::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use geo_traits::*;
 
 criterion_main!(sandwich);
 criterion_group!(
