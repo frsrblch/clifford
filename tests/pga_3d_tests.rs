@@ -203,11 +203,11 @@ fn translator_from_points_sqrt() {
     let (a, b, c) = (1., 2., 3.);
     let pt = point(x, y, z).value();
 
-    let origin = point(0., 0., 0.).value();
+    let origin = point(0f64, 0., 0.).value();
     let offset = point(a, b, c).value();
     let translator2 = offset.geo(origin); // scalar is -1, so adding 1 makes norm == 0
     let translator = translator2.sqrt();
-    let translator_log = translator2.log().mul(0.5_f64).exp();
+    let translator_log = translator2.log().mul(0.5).exp();
 
     let expected = point(x + a, y + b, z + c).value();
     assert_eq!(expected, translator >> pt);
@@ -232,12 +232,12 @@ fn rotation_around_line_log_and_exp() {
 
 #[test]
 fn plane_translation_log_exp() {
-    let xy = Vector::new(0., 0., 1., 0.);
+    let xy = Vector::new(0f64, 0., 1., 0.);
     let offset = Vector { w: 2., ..xy };
 
     let motor = offset * xy.inv();
 
-    assert_eq!(motor.sqrt(), motor.log().mul(0.5f64).exp());
+    assert_eq!(motor.sqrt(), motor.log().mul(0.5).exp());
 }
 
 #[test]
