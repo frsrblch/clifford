@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 pub use geo_traits::*;
-pub use num_traits::*;
+pub use num_traits::{Float, FloatConst, One, Zero, one, zero};
 
 macros::algebra! {
     x ^ 2 == 1,
