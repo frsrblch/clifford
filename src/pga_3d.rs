@@ -219,3 +219,13 @@ where
         }
     }
 }
+
+impl<T: Float> Motor<T> {
+    pub fn slerp<U>(start: Self, end: Self, fraction: U) -> Self
+    where
+        Bivector<T>: std::ops::Mul<U, Output = Bivector<T>>,
+    {
+        use std::ops::Mul;
+        start * (start.inv() * end).log().mul(fraction).exp()
+    }
+}
