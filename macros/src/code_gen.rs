@@ -1018,8 +1018,6 @@ impl Type {
             return None;
         }
 
-        // let fields = &self.iter_blades_unsorted(algebra).map(|b| b.field(algebra));
-
         let fields = self.iter_blades_unsorted(algebra).map(|b| {
             let f = b.field(algebra);
             if algebra.dot(b, b).is_zero() {
@@ -1881,8 +1879,6 @@ impl InverseOps {
 
     /// No implementation if there's only one blade, or mv which are not easily inverted
     pub fn inapplicable(self, ty: Type, algebra: Algebra) -> bool {
-        // (algebra.has_negative_bases()
-        //     && !matches!(ty, Type::Grade(0) | Type::Grade(1) | Type::Motor)) ||
         ty == Type::Mv || ProductOp::Dot.output(algebra, ty, ty).is_none()
     }
 
