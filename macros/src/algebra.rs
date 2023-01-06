@@ -709,11 +709,13 @@ impl Complement {
 pub enum ScalarOps {
     Mul,
     Div,
+    Add,
+    Sub,
 }
 
 impl ScalarOps {
     pub fn iter() -> impl Iterator<Item = Self> {
-        IntoIterator::into_iter([Self::Mul, Self::Div])
+        IntoIterator::into_iter([Self::Mul, Self::Div, Self::Add, Self::Sub])
     }
 }
 

@@ -45,12 +45,10 @@ impl Algebra {
         let impl_complements = Complement::iter(self)
             .flat_map(|comp| self.types().map(move |ty| ty.impl_complement(self, comp)));
 
-        let explicit_scalar_ops = ScalarOps::iter()
-            .flat_map(|op| {
-                self.types()
-                    .filter_map(move |ty| op.impl_for_scalar(ty, self))
-            })
-            .flatten();
+        let explicit_scalar_ops = ScalarOps::iter().flat_map(|op| {
+            self.types()
+                .flat_map(move |ty| op.impl_for_scalar(ty, self))
+        });
 
         let scalar_assign_ops = ScalarAssignOps::iter()
             .flat_map(|op| self.types().map(move |ty| op.impl_for(ty, self)));
@@ -1120,9 +1118,9 @@ impl ToTokens for Type {
 }
 
 impl Blade {
-    pub fn field(self, algebga: Algebra) -> Ident {
+    pub fn field(self, algebra: Algebra) -> Ident {
         let mut output = String::new();
-        for basis in algebga.iter_bases(self) {
+        for basis in algebra.iter_bases(self) {
             output.push(basis.char);
         }
         if output.is_empty() {
@@ -1341,9 +1339,9 @@ impl SumOp {
 }
 
 impl ScalarOps {
-    pub fn impl_for_scalar(self, ty: Type, algebra: Algebra) -> Option<Vec<ItemImpl>> {
+    pub fn impl_for_scalar(self, ty: Type, algebra: Algebra) -> Vec<ItemImpl> {
         if ty == Type::Mv {
-            return None;
+            return vec![];
         }
 
         let trait_ty = self.trait_ty();
@@ -1354,95 +1352,96 @@ impl ScalarOps {
             #[allow(clippy::suspicious_arithmetic_impl)]
         );
 
-        if self == Self::Div {
-            let inv_ty = InverseOps::Inverse.trait_ty();
-            let inv_fn = InverseOps::Inverse.trait_fn();
+        match self {
+            Self::Div => {
+                let inv_ty = InverseOps::Inverse.trait_ty();
+                let inv_fn = InverseOps::Inverse.trait_fn();
 
-            if InverseOps::Inverse.inapplicable(ty, algebra) {
-                Some(vec![
-                    parse_quote! {
-                        impl<T> #trait_ty<f32> for #ty<T>
-                        where
-                            T: std::ops::Mul<f32, Output = T>,
-                        {
-                            type Output = #ty<T>;
-                            #fn_attrs
-                            fn #trait_fn(self, rhs: f32) -> Self::Output {
-                                let recip = rhs.recip();
-                                self.map(|t| t * recip)
+                if InverseOps::Inverse.inapplicable(ty, algebra) {
+                    vec![
+                        parse_quote! {
+                            impl<T> #trait_ty<f32> for #ty<T>
+                            where
+                                T: std::ops::Mul<f32, Output = T>,
+                            {
+                                type Output = #ty<T>;
+                                #fn_attrs
+                                fn #trait_fn(self, rhs: f32) -> Self::Output {
+                                    let recip = rhs.recip();
+                                    self.map(|t| t * recip)
+                                }
                             }
-                        }
-                    },
-                    parse_quote! {
-                        impl<T> #trait_ty<f64> for #ty<T>
-                        where
-                            T: std::ops::Mul<f64, Output = T>,
-                        {
-                            type Output = #ty<T>;
-                            #fn_attrs
-                            fn #trait_fn(self, rhs: f64) -> Self::Output {
-                                let recip = rhs.recip();
-                                self.map(|t| t * recip)
+                        },
+                        parse_quote! {
+                            impl<T> #trait_ty<f64> for #ty<T>
+                            where
+                                T: std::ops::Mul<f64, Output = T>,
+                            {
+                                type Output = #ty<T>;
+                                #fn_attrs
+                                fn #trait_fn(self, rhs: f64) -> Self::Output {
+                                    let recip = rhs.recip();
+                                    self.map(|t| t * recip)
+                                }
                             }
-                        }
-                    },
-                ])
-            } else {
-                Some(vec![
-                    parse_quote! {
-                        impl<T> #trait_ty<#ty<T>> for f32
-                        where
-                            T: num_traits::Float + std::ops::Mul<f32, Output = T>,
-                        {
-                            type Output = #ty<T>;
-                            #fn_attrs
-                            fn #trait_fn(self, rhs: #ty<T>) -> Self::Output {
-                                #inv_ty::#inv_fn(rhs).map(|t| t * self)
+                        },
+                    ]
+                } else {
+                    vec![
+                        parse_quote! {
+                            impl<T> #trait_ty<#ty<T>> for f32
+                            where
+                                T: num_traits::Float + std::ops::Mul<f32, Output = T>,
+                            {
+                                type Output = #ty<T>;
+                                #fn_attrs
+                                fn #trait_fn(self, rhs: #ty<T>) -> Self::Output {
+                                    #inv_ty::#inv_fn(rhs).map(|t| t * self)
+                                }
                             }
-                        }
-                    },
-                    parse_quote! {
-                        impl<T> #trait_ty<#ty<T>> for f64
-                        where
-                            T: num_traits::Float + std::ops::Mul<f64, Output = T>,
-                        {
-                            type Output = #ty<T>;
-                            #fn_attrs
-                            fn #trait_fn(self, rhs: #ty<T>) -> Self::Output {
-                                #inv_ty::#inv_fn(rhs).map(|t| t * self)
+                        },
+                        parse_quote! {
+                            impl<T> #trait_ty<#ty<T>> for f64
+                            where
+                                T: num_traits::Float + std::ops::Mul<f64, Output = T>,
+                            {
+                                type Output = #ty<T>;
+                                #fn_attrs
+                                fn #trait_fn(self, rhs: #ty<T>) -> Self::Output {
+                                    #inv_ty::#inv_fn(rhs).map(|t| t * self)
+                                }
                             }
-                        }
-                    },
-                    parse_quote! {
-                        impl<T> #trait_ty<f32> for #ty<T>
-                        where
-                            T: std::ops::Mul<f32, Output = T>,
-                        {
-                            type Output = #ty<T>;
-                            #fn_attrs
-                            fn #trait_fn(self, rhs: f32) -> Self::Output {
-                                let recip = rhs.recip();
-                                self.map(|t| t * recip)
+                        },
+                        parse_quote! {
+                            impl<T> #trait_ty<f32> for #ty<T>
+                            where
+                                T: std::ops::Mul<f32, Output = T>,
+                            {
+                                type Output = #ty<T>;
+                                #fn_attrs
+                                fn #trait_fn(self, rhs: f32) -> Self::Output {
+                                    let recip = rhs.recip();
+                                    self.map(|t| t * recip)
+                                }
                             }
-                        }
-                    },
-                    parse_quote! {
-                        impl<T> #trait_ty<f64> for #ty<T>
-                        where
-                            T: std::ops::Mul<f64, Output = T>,
-                        {
-                            type Output = #ty<T>;
-                            #fn_attrs
-                            fn #trait_fn(self, rhs: f64) -> Self::Output {
-                                let recip = rhs.recip();
-                                self.map(|t| t * recip)
+                        },
+                        parse_quote! {
+                            impl<T> #trait_ty<f64> for #ty<T>
+                            where
+                                T: std::ops::Mul<f64, Output = T>,
+                            {
+                                type Output = #ty<T>;
+                                #fn_attrs
+                                fn #trait_fn(self, rhs: f64) -> Self::Output {
+                                    let recip = rhs.recip();
+                                    self.map(|t| t * recip)
+                                }
                             }
-                        }
-                    },
-                ])
+                        },
+                    ]
+                }
             }
-        } else {
-            Some(vec![
+            Self::Mul => vec![
                 parse_quote! {
                     impl<T> #trait_ty<#ty<T>> for f32
                     where
@@ -1491,7 +1490,48 @@ impl ScalarOps {
                         }
                     }
                 },
-            ])
+            ],
+            Self::Add | Self::Sub => {
+                let output = SumOp::sum(algebra, ty, Type::Grade(0));
+                vec![
+                    parse_quote! {
+                        impl #trait_ty<f32> for #ty<f32> {
+                            type Output = #output<f32>;
+                            #[inline]
+                            fn #trait_fn(self, rhs: f32) -> Self::Output {
+                                #trait_ty::#trait_fn(self, Scalar { s: rhs })
+                            }
+                        }
+                    },
+                    parse_quote! {
+                        impl #trait_ty<f64> for #ty<f64> {
+                            type Output = #output<f64>;
+                            #[inline]
+                            fn #trait_fn(self, rhs: f64) -> Self::Output {
+                                #trait_ty::#trait_fn(self, Scalar { s: rhs })
+                            }
+                        }
+                    },
+                    parse_quote! {
+                        impl #trait_ty<#ty<f32>> for f32 {
+                            type Output = #output<f32>;
+                            #[inline]
+                            fn #trait_fn(self, rhs: #ty<f32>) -> Self::Output {
+                                #trait_ty::#trait_fn(Scalar { s: self }, rhs)
+                            }
+                        }
+                    },
+                    parse_quote! {
+                        impl #trait_ty<#ty<f64>> for f64 {
+                            type Output = #output<f64>;
+                            #[inline]
+                            fn #trait_fn(self, rhs: #ty<f64>) -> Self::Output {
+                                #trait_ty::#trait_fn(Scalar { s: self }, rhs)
+                            }
+                        }
+                    },
+                ]
+            }
         }
     }
 
@@ -1499,6 +1539,8 @@ impl ScalarOps {
         match self {
             Self::Mul => parse_quote!(std::ops::Mul),
             Self::Div => parse_quote!(std::ops::Div),
+            Self::Add => parse_quote!(std::ops::Add),
+            Self::Sub => parse_quote!(std::ops::Sub),
         }
     }
 
@@ -1506,6 +1548,8 @@ impl ScalarOps {
         match self {
             Self::Mul => parse_quote!(mul),
             Self::Div => parse_quote!(div),
+            Self::Add => parse_quote!(add),
+            Self::Sub => parse_quote!(sub),
         }
     }
 }
@@ -1849,13 +1893,9 @@ impl InverseOps {
 
         let scalar_fields = ty
             .iter_blades_unsorted(algebra)
-            .filter_map(|b| {
-                let dot = algebra.dot(b, b);
-                if !dot.is_zero() && dot.grade() == 0 {
-                    Some(b)
-                } else {
-                    None
-                }
+            .filter(|b| {
+                let dot = algebra.dot(*b, *b);
+                !dot.is_zero() && dot.grade() == 0
             })
             .collect::<Vec<_>>();
 

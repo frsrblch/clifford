@@ -114,3 +114,10 @@ fn unit_type_ops() {
     // let _ = v >> u;
     // let _ = u >> u;
 }
+
+#[test]
+fn bivector_plus_float() {
+    let plane = Bivector::new(2., 3., 5.).unit().value();
+    let (sin, cos) = 0.4.sin_cos();
+    assert_eq!(plane * sin + cos, plane * Scalar { s: sin } + Scalar { s: cos });
+}
