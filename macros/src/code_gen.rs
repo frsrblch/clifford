@@ -1049,7 +1049,7 @@ impl Type {
                 #[inline]
                 fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> #self<T> {
                     let two = T::one() + T::one();
-                    for _ in 0..16 {
+                    for _ in 0..64 {
                         let v = #self { #( #fields )* };
                         if #norm2_ty::#norm2_fn(v) <= one() {
                             return v;

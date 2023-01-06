@@ -94,11 +94,9 @@
 //! - [x] Zero
 //! - [x] One
 //!
-//! Rand
+//! Rand:
 //! - [x] `Unit<T>` for r-vectors where 0 < r < n
-//!
-//! Possible
-//! - [ ] operations with `Unit<T>` on the rhs
+//! - [x] Random r-vector with norm < 1
 //!
 //! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features.html
 
