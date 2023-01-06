@@ -92,7 +92,7 @@
 //! Num Traits:
 //! - [x] Zero
 //! - [x] One
-//! - [x] Float for Scalar<T>
+//! - [x] Float for `Scalar<T>`
 //!
 //! Rand:
 //! - [x] `Unit<T>` for r-vectors where 0 < r < n
