@@ -1,4 +1,4 @@
-//! Proc macros for defining Clifford algebras of arbitrary dimension and basis vectors
+//! Proc macros for defining geometric algebras of arbitrary dimension and basis vectors
 //!
 //! [`Feature set`]
 //!

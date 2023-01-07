@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 pub use geo_traits::*;
-pub use num_traits::{Float, FloatConst, One, Zero, one, zero};
+pub use num_traits::{one, zero, Float, FloatConst, One, Zero};
 
 macros::algebra! {
     x ^ 2 == 1,
@@ -9,30 +9,6 @@ macros::algebra! {
     z ^ 2 == 1,
     e ^ 2 == 1,
     E ^ 2 == -1,
-}
-
-impl PartialEq<f32> for Scalar<f32> {
-    fn eq(&self, other: &f32) -> bool {
-        self.s.eq(other)
-    }
-}
-
-impl PartialEq<f64> for Scalar<f64> {
-    fn eq(&self, other: &f64) -> bool {
-        self.s.eq(other)
-    }
-}
-
-impl PartialEq<Scalar<f32>> for f32 {
-    fn eq(&self, other: &Scalar<f32>) -> bool {
-        self.eq(&other.s)
-    }
-}
-
-impl PartialEq<Scalar<f64>> for f64 {
-    fn eq(&self, other: &Scalar<f64>) -> bool {
-        self.eq(&other.s)
-    }
 }
 
 /// Point at the origin

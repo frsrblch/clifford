@@ -247,6 +247,42 @@ fn impl_num_traits_for_scalar() -> TokenStream {
                 }
             }
         }
+
+        impl<T: PartialEq> PartialEq<T> for Scalar<T> {
+            fn eq(&self, other: &T) -> bool {
+                self.s.eq(other)
+            }
+        }
+
+        impl PartialEq<Scalar<f32>> for f32 {
+            fn eq(&self, other: &Scalar<f32>) -> bool {
+                self.eq(&other.s)
+            }
+        }
+
+        impl PartialEq<Scalar<f64>> for f64 {
+            fn eq(&self, other: &Scalar<f64>) -> bool {
+                self.eq(&other.s)
+            }
+        }
+
+        impl<T: PartialOrd> PartialOrd<T> for Scalar<T> {
+            fn partial_cmp(&self, rhs: &T) -> Option<std::cmp::Ordering> {
+                self.s.partial_cmp(rhs)
+            }
+        }
+
+        impl PartialOrd<Scalar<f32>> for f32 {
+            fn partial_cmp(&self, rhs: &Scalar<f32>) -> Option<std::cmp::Ordering> {
+                self.partial_cmp(&rhs.s)
+            }
+        }
+
+        impl PartialOrd<Scalar<f64>> for f64 {
+            fn partial_cmp(&self, rhs: &Scalar<f64>) -> Option<std::cmp::Ordering> {
+                self.partial_cmp(&rhs.s)
+            }
+        }
     }
 }
 
@@ -773,9 +809,16 @@ impl Type {
     pub fn define(self, algebra: Algebra) -> ItemStruct {
         let fields = self.iter_blades_sorted(algebra).map(|b| b.field(algebra));
 
-        let attr = quote! {
-            #[repr(C)]
-            #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+        let attr = if self.single_blade(algebra) {
+            quote! {
+                #[repr(C)]
+                #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+            }
+        } else {
+            quote! {
+                #[repr(C)]
+                #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Hash)]
+            }
         };
 
         parse_quote! {
@@ -1047,7 +1090,7 @@ impl Type {
                     let two = T::one() + T::one();
                     for _ in 0..64 {
                         let v = #self { #( #fields )* };
-                        if #norm2_ty::#norm2_fn(v) <= one() {
+                        if #norm2_ty::#norm2_fn(v) <= T::one() {
                             return v;
                         }
                     }

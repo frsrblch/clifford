@@ -45,8 +45,7 @@ fn rotation_and_unit_rotation() {
     let v2 = unit.sandwich(v); // interestingly, the sqrt adds inaccuracy
 
     dbg!(v1, v2);
-    assert!((v1 - v2).norm2().s < 1e-10);
-    // panic!();
+    assert!((v1 - v2).norm2() < 1e-10);
 }
 
 #[test]
@@ -131,7 +130,7 @@ fn line_rotation_by_angle() {
     let rotated = motor >> pt;
     let expected = point(-z, y, x).value();
 
-    assert!((expected - rotated).norm2() < Scalar::<f64>::epsilon());
+    assert!((expected - rotated).norm2() < f64::epsilon());
 }
 
 #[test]
@@ -149,7 +148,7 @@ fn line_rotation_by_angle_sqrt() {
     let rotated = motor >> pt;
     let expected = point(-z, y, x).value();
 
-    assert!((expected - rotated).norm2() < Scalar::<f64>::epsilon());
+    assert!((expected - rotated).norm2() < f64::epsilon());
 }
 
 #[test]

@@ -1,5 +1,5 @@
 pub use geo_traits::*;
-pub use num_traits::{Float, FloatConst, One, Zero, one, zero};
+pub use num_traits::{one, zero, Float, FloatConst, One, Zero};
 
 macros::algebra! {
     x ^ 2 == 1,
@@ -80,7 +80,9 @@ where
 
     #[inline]
     pub fn angle(self) -> Scalar<T> {
-        let two = Scalar { s: T::one() + T::one() };
+        let two = Scalar {
+            s: T::one() + T::one(),
+        };
         self.scalar().acos() * two
     }
 
