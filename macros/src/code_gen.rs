@@ -29,6 +29,9 @@ impl Algebra {
             Overload::iter(self).filter_map(move |op| op.impl_for(lhs, rhs, self))
         });
 
+        let unary_operator_overloads = UnaryOverload::iter(self)
+            .flat_map(|op| self.types().map(move |ty| op.impl_for(ty, self)));
+
         let div_ops = self
             .type_tuples()
             .filter_map(|(lhs, rhs)| Div::impl_for(lhs, rhs, self));
@@ -101,6 +104,7 @@ impl Algebra {
             #(#impl_float_type)*
             #(#impl_product_ops)*
             #(#operator_overloads)*
+            #(#unary_operator_overloads)*
             #(#div_ops)*
             #(#impl_sum_ops)*
             #(#impl_neg)*
@@ -2248,6 +2252,62 @@ impl Div {
                 }
             }
         })
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum UnaryOverload {
+    Not,
+}
+
+impl UnaryOverload {
+    pub fn iter(algebra: Algebra) -> impl Iterator<Item = Self> {
+        if algebra.symmetrical_complements() {
+            Some(Self::Not).into_iter()
+        } else {
+            None.into_iter()
+        }
+    }
+
+    pub fn impl_for(self, ty: Type, algebra: Algebra) -> ItemImpl {
+        let trait_ty = self.trait_ty();
+        let trait_fn = self.trait_fn();
+        let output = ty.complement(algebra);
+        let inner_ty = self.inner_ty();
+        let inner_fn = self.inner_fn();
+        parse_quote! {
+            impl<T> #trait_ty for #ty<T> where T: num_traits::Float {
+                type Output = #output<T>;
+                #[inline]
+                fn #trait_fn(self) -> Self::Output {
+                    #inner_ty::#inner_fn(self)
+                }
+            }
+        }
+    }
+
+    pub fn trait_ty(self) -> syn::Path {
+        match self {
+            Self::Not => parse_quote!(std::ops::Not),
+        }
+    }
+
+    pub fn trait_fn(self) -> Ident {
+        match self {
+            Self::Not => parse_quote!(not),
+        }
+    }
+
+    pub fn inner_ty(self) -> syn::Path {
+        match self {
+            Self::Not => parse_quote!(geo_traits::Dual),
+        }
+    }
+
+    pub fn inner_fn(self) -> Ident {
+        match self {
+            Self::Not => parse_quote!(dual),
+        }
     }
 }
 

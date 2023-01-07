@@ -119,5 +119,14 @@ fn unit_type_ops() {
 fn bivector_plus_float() {
     let plane = Bivector::new(2., 3., 5.).unit().value();
     let (sin, cos) = 0.4.sin_cos();
-    assert_eq!(plane * sin + cos, plane * Scalar { s: sin } + Scalar { s: cos });
+    assert_eq!(
+        plane * sin + cos,
+        plane * Scalar { s: sin } + Scalar { s: cos }
+    );
+}
+
+#[test]
+fn not_dual() {
+    let v = Vector::new(1., 2., 3.);
+    assert_eq!(v.dual(), !v);
 }
