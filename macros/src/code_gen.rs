@@ -1863,6 +1863,18 @@ impl Antisandwich {
         let trait_fn = Self::trait_fn();
         let fn_attrs = fn_attrs();
 
+        let sandwich_ty = Sandwich::trait_ty();
+        let sandwich_fn = Sandwich::trait_fn();
+
+        let dual_ty = Complement::Dual.trait_ty();
+        let dual_fn = Complement::Dual.trait_fn();
+
+        let l_comp_ty = Complement::LeftComp.trait_ty();
+        let l_comp_fn = Complement::LeftComp.trait_fn();
+
+        let r_comp_ty = Complement::RightComp.trait_ty();
+        let r_comp_fn = Complement::RightComp.trait_fn();
+
         if algebra.symmetrical_complements() {
             Some(parse_quote! {
                 impl<T, U, V> #trait_ty<#rhs<U>> for #lhs<T>
@@ -1874,9 +1886,10 @@ impl Antisandwich {
                     type Output = #rhs<V>;
                     #fn_attrs
                     fn #trait_fn(self, rhs: #rhs<U>) -> Self::Output {
-                        let lhs = self.dual();
-                        let rhs = rhs.dual();
-                        Sandwich::sandwich(lhs, rhs).dual()
+                        let lhs = #dual_ty::#dual_fn(self);
+                        let rhs = #dual_ty::#dual_fn(rhs);
+                        let sandwich = #sandwich_ty::#sandwich_fn(lhs, rhs);
+                        #dual_ty::#dual_fn(sandwich)
                     }
                 }
             })
@@ -1891,9 +1904,10 @@ impl Antisandwich {
                     type Output = #rhs<V>;
                     #fn_attrs
                     fn #trait_fn(self, rhs: #rhs<U>) -> Self::Output {
-                        let lhs = self.left_comp();
-                        let rhs = rhs.left_comp();
-                        Sandwich::sandwich(lhs, rhs).right_comp()
+                        let lhs = #l_comp_ty::#l_comp_fn(self);
+                        let rhs = #l_comp_ty::#l_comp_fn(rhs);
+                        let sandwich = #sandwich_ty::#sandwich_fn(lhs, rhs);
+                        #r_comp_ty::#r_comp_fn(sandwich)
                     }
                 }
             })
@@ -1971,8 +1985,8 @@ impl InverseOps {
                         #fn_attrs
                         fn #trait_fn(self) -> Self::Output {
                             let norm2 = self.#field * self.#field;
-                            let recip = norm2.recip();
-                            self.rev().map(|t| t * recip)
+                            let recip = num_traits::Float::recip(norm2);
+                            #rev_ty::#rev_fn(self).map(|t| t * recip)
                         }
                     }
                 }
@@ -2164,7 +2178,8 @@ impl Unit {
         let sandwich_fn = Sandwich::trait_fn();
         let rev_ty = Reverse::trait_ty();
         let grade_prod_ty = GradeProduct::trait_ty();
-        let sandwich_impl = parse_quote! {
+
+        let sandwich_impl_lhs = parse_quote! {
             impl<Lhs, Rhs, Int> #sandwich_ty<Rhs> for Unit<Lhs>
             where
                 Lhs: #geo_ty<Rhs, Output = Int> + #rev_ty<Output = Lhs> + Copy,
@@ -2179,6 +2194,44 @@ impl Unit {
             }
         };
 
+        let sandwich_impl_rhs = algebra
+            .type_tuples()
+            .map(|(lhs, rhs)| {
+                parse_quote! {
+                    impl<T, U, V> #sandwich_ty<Unit<#rhs<U>>> for #lhs<T>
+                    where
+                        #lhs<T>: #sandwich_ty<#rhs<U>, Output = #rhs<V>>,
+                    {
+                        type Output = Unit<#rhs<V>>;
+                        #[inline]
+                        fn #sandwich_fn(self, rhs: Unit<#rhs<U>>) -> Self::Output {
+                            let output = #sandwich_ty::#sandwich_fn(self, rhs.value());
+                            Unit::assert(output)
+                        }
+                    }
+                }
+            })
+            .map(Impl);
+
+        let sandwich_impl_both = algebra
+            .type_tuples()
+            .map(|(lhs, rhs)| {
+                parse_quote! {
+                    impl<T, U, V> #sandwich_ty<Unit<#rhs<U>>> for Unit<#lhs<T>>
+                    where
+                        Unit<#lhs<T>>: #sandwich_ty<#rhs<U>, Output = #rhs<V>>,
+                    {
+                        type Output = Unit<#rhs<V>>;
+                        #[inline]
+                        fn #sandwich_fn(self, rhs: Unit<#rhs<U>>) -> Self::Output {
+                            let output = #sandwich_ty::#sandwich_fn(self, rhs.value());
+                            Unit::assert(output)
+                        }
+                    }
+                }
+            })
+            .map(Impl);
+
         use syn::Item::*;
 
         let operator_overloads = algebra
@@ -2191,8 +2244,10 @@ impl Unit {
             Impl(item_impl),
             Impl(unitize_impl),
             Impl(inverse_impl),
-            Impl(sandwich_impl),
+            Impl(sandwich_impl_lhs),
         ])
+        .chain(sandwich_impl_rhs)
+        .chain(sandwich_impl_both)
         .chain(ProductOp::iter_all(algebra).map(|op| {
             let trait_ty = op.trait_ty();
             let trait_fn = op.trait_fn();
@@ -2518,7 +2573,7 @@ mod tests {
             .to_string();
         let expected = quote! {
             #[repr(C)]
-            #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+            #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Hash)]
             pub struct Bivector<T> {
                 pub xy: T,
                 pub xz: T,

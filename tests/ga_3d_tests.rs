@@ -109,6 +109,11 @@ fn unit_type_ops() {
     // let _ = v * u;
     // let _ = u * u;
 
+    let _ = v.sandwich(v);
+    let _ = u.sandwich(v);
+    let _ = v.sandwich(u);
+    // let _ = u.sandwich(u);
+
     let _ = v >> v;
     let _ = u >> v;
     // let _ = v >> u;
