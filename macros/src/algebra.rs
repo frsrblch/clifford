@@ -1,25 +1,43 @@
 use std::iter::FromIterator;
 
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct Algebra {
-    pub bases: &'static [Basis],
+    pub bases: Vec<Basis>,
+    pub fields: Vec<syn::Ident>,
     /// If true, limits the amount of code generated at the cost of having a complete algebra
     pub slim: bool,
 }
 
 impl Algebra {
-    pub fn has_negative_bases(self) -> bool {
+    pub fn new(bases: Vec<Basis>) -> Self {
+        let fields = Blades::from(bases.len())
+            .enumerate()
+            .map(|(i, b)| {
+                assert_eq!(b.0, i as u32);
+                b
+            })
+            .map(|b| b.field(&bases))
+            .collect();
+
+        Algebra {
+            bases,
+            fields,
+            slim: false,
+        }
+    }
+
+    pub fn has_negative_bases(&self) -> bool {
         self.bases.iter().any(|b| b.sqr == Square::Neg)
     }
 
-    pub fn iter_bases(self, set: Blade) -> impl Iterator<Item = Basis> {
+    pub fn iter_bases(&self, set: Blade) -> impl Iterator<Item = Basis> + '_ {
         self.bases
             .iter()
             .enumerate()
             .filter_map(move |(i, b)| set.contains(i as u32).then_some(*b))
     }
 
-    pub fn geo(self, lhs: Blade, rhs: Blade) -> Blade {
+    pub fn geo(&self, lhs: Blade, rhs: Blade) -> Blade {
         if Blade::is_zero(lhs | rhs) {
             return Blade::zero();
         }
@@ -31,7 +49,7 @@ impl Algebra {
         product
     }
 
-    pub fn dot(self, lhs: Blade, rhs: Blade) -> Blade {
+    pub fn dot(&self, lhs: Blade, rhs: Blade) -> Blade {
         let max = lhs.grade().max(rhs.grade());
         let min = lhs.grade().min(rhs.grade());
         let product = self.geo(lhs, rhs);
@@ -42,28 +60,28 @@ impl Algebra {
         }
     }
 
-    pub fn antigeo(self, lhs: Blade, rhs: Blade) -> Blade {
+    pub fn antigeo(&self, lhs: Blade, rhs: Blade) -> Blade {
         let lhs = self.left_comp(lhs);
         let rhs = self.left_comp(rhs);
         let output = self.geo(lhs, rhs);
         self.right_comp(output)
     }
 
-    pub fn antidot(self, lhs: Blade, rhs: Blade) -> Blade {
+    pub fn antidot(&self, lhs: Blade, rhs: Blade) -> Blade {
         let lhs = self.left_comp(lhs);
         let rhs = self.left_comp(rhs);
         let output = self.dot(lhs, rhs);
         self.right_comp(output)
     }
 
-    pub fn antiwedge(self, lhs: Blade, rhs: Blade) -> Blade {
+    pub fn antiwedge(&self, lhs: Blade, rhs: Blade) -> Blade {
         let lhs = self.left_comp(lhs);
         let rhs = self.left_comp(rhs);
         let output = self.wedge(lhs, rhs);
         self.right_comp(output)
     }
 
-    pub fn wedge(self, lhs: Blade, rhs: Blade) -> Blade {
+    pub fn wedge(&self, lhs: Blade, rhs: Blade) -> Blade {
         let sum = lhs.grade() + rhs.grade();
         let product = self.geo(lhs, rhs);
         if product.grade() == sum {
@@ -74,7 +92,7 @@ impl Algebra {
     }
 
     /// P × Q = 1/2 (PQ - QP)
-    pub fn commutator(self, lhs: Blade, rhs: Blade) -> Blade {
+    pub fn commutator(&self, lhs: Blade, rhs: Blade) -> Blade {
         let lr_product = self.geo(lhs, rhs);
         let rl_product = self.geo(rhs, lhs);
         if lr_product == rl_product {
@@ -86,22 +104,22 @@ impl Algebra {
         }
     }
 
-    pub fn antirev(self, blade: Blade) -> Blade {
+    pub fn antirev(&self, blade: Blade) -> Blade {
         let comp = self.left_comp(blade);
         let rev = comp.rev();
         self.right_comp(rev)
     }
 
-    pub fn blades_by_grade(self) -> impl Iterator<Item = Blade> {
+    pub fn blades_by_grade(&self) -> impl Iterator<Item = Blade> + '_ {
         self.grade_range()
             .flat_map(move |g| Blades::from(self).filter(move |b| b.grade() == g))
     }
 
-    pub fn right_comp(self, blade: Blade) -> Blade {
+    pub fn right_comp(&self, blade: Blade) -> Blade {
         if blade.is_zero() {
             return Blade::zero();
         }
-        let i = Blade::pseudoscalar(self);
+        let i = Blade::pseudoscalar(self.bases.len());
         let comp = i ^ blade;
         if self.geo(blade, comp).is_positive() {
             comp
@@ -110,11 +128,11 @@ impl Algebra {
         }
     }
 
-    pub fn left_comp(self, blade: Blade) -> Blade {
+    pub fn left_comp(&self, blade: Blade) -> Blade {
         if blade.is_zero() {
             return Blade::zero();
         }
-        let i = Blade::pseudoscalar(self);
+        let i = Blade::pseudoscalar(self.bases.len());
         let comp = i ^ blade;
         if self.geo(comp, blade).is_positive() {
             comp
@@ -123,23 +141,23 @@ impl Algebra {
         }
     }
 
-    pub fn symmetrical_complements(self) -> bool {
+    pub fn symmetrical_complements(&self) -> bool {
         Blades::from(self).all(|blade| self.left_comp(blade) == self.right_comp(blade))
     }
 
-    pub fn grade(self, grade: u32) -> impl Iterator<Item = Blade> {
+    pub fn grade(&self, grade: u32) -> impl Iterator<Item = Blade> + '_ {
         Blades::from(self).filter(move |b| b.grade() == grade)
     }
 
-    pub fn grades(self) -> impl Iterator<Item = Type> {
+    pub fn grades(&self) -> impl Iterator<Item = Type> + '_ {
         self.grade_range().map(Type::Grade)
     }
 
-    pub fn grade_range(self) -> std::ops::RangeInclusive<u32> {
+    pub fn grade_range(&self) -> std::ops::RangeInclusive<u32> {
         0..=(self.bases.len() as u32)
     }
 
-    pub fn types(self) -> impl Iterator<Item = Type> {
+    pub fn types(&self) -> impl Iterator<Item = Type> + '_ {
         if self.slim {
             either::Either::Left(self.grades())
         } else {
@@ -171,17 +189,17 @@ impl Algebra {
         }
     }
 
-    pub fn type_tuples(self) -> impl Iterator<Item = (Type, Type)> {
+    pub fn type_tuples(&self) -> impl Iterator<Item = (Type, Type)> + '_ {
         self.types()
             .flat_map(move |lhs| self.types().map(move |rhs| (lhs, rhs)))
     }
 
-    pub fn grade_tuples(self) -> impl Iterator<Item = (Type, Type)> {
+    pub fn grade_tuples(&self) -> impl Iterator<Item = (Type, Type)> + '_ {
         self.grades()
             .flat_map(move |lhs| self.grades().map(move |rhs| (lhs, rhs)))
     }
 
-    pub fn has_numeric_bases(self) -> bool {
+    pub fn has_numeric_bases(&self) -> bool {
         self.bases.iter().any(|b| b.char.is_numeric())
     }
 }
@@ -191,9 +209,15 @@ pub struct Blades {
     range: std::ops::RangeInclusive<u32>,
 }
 
-impl From<Algebra> for Blades {
-    fn from(algebra: Algebra) -> Self {
-        let pseudoscalar = Blade::pseudoscalar(algebra);
+impl From<&Algebra> for Blades {
+    fn from(algebra: &Algebra) -> Self {
+        Self::from(algebra.bases.len())
+    }
+}
+
+impl From<usize> for Blades {
+    fn from(dim: usize) -> Self {
+        let pseudoscalar = Blade::pseudoscalar(dim);
         Blades {
             range: 0..=pseudoscalar.0,
         }
@@ -257,15 +281,15 @@ impl Type {
         }
     }
 
-    pub fn iter_blades_sorted(self, algebra: Algebra) -> impl Iterator<Item = Blade> {
+    pub fn iter_blades_sorted(self, algebra: &Algebra) -> impl Iterator<Item = Blade> + '_ {
         algebra.blades_by_grade().filter(move |b| self.contains(*b))
     }
 
-    pub fn single_blade(self, algebra: Algebra) -> bool {
+    pub fn single_blade(self, algebra: &Algebra) -> bool {
         self.iter_blades_unsorted(algebra).nth(1).is_none()
     }
 
-    pub fn iter_blades_unsorted(self, algebra: Algebra) -> IterBlades {
+    pub fn iter_blades_unsorted(self, algebra: &Algebra) -> IterBlades {
         IterBlades {
             blades: Blades::from(algebra),
             ty: self,
@@ -284,7 +308,7 @@ impl Type {
         }
     }
 
-    pub fn complement(self, algebra: Algebra) -> Self {
+    pub fn complement(self, algebra: &Algebra) -> Self {
         self.iter_blades_unsorted(algebra)
             .map(|blade| algebra.left_comp(blade))
             .collect::<Option<Self>>()
@@ -309,7 +333,7 @@ impl Type {
         matches!(self, Type::Grade(1))
     }
 
-    pub fn pseudoscalar(algebra: Algebra) -> Self {
+    pub fn pseudoscalar(algebra: &Algebra) -> Self {
         Type::Grade(algebra.bases.len() as u32)
     }
 }
@@ -440,7 +464,7 @@ impl Square {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
-pub struct Blade(u32);
+pub struct Blade(pub u32);
 
 impl std::fmt::Debug for Blade {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -537,7 +561,7 @@ impl Blade {
         }
     }
 
-    fn contains(self, i: u32) -> bool {
+    pub fn contains(self, i: u32) -> bool {
         let flag = 1 << i;
         self.0 & flag == flag
     }
@@ -555,8 +579,8 @@ impl Blade {
         Blade(self.0 & !(Self::SIGN | Self::ZERO))
     }
 
-    pub fn pseudoscalar(algebra: Algebra) -> Self {
-        let inverse = u32::MAX << algebra.bases.len();
+    pub fn pseudoscalar(dim: usize) -> Self {
+        let inverse = u32::MAX << dim;
         Blade(!inverse)
     }
 }
@@ -602,7 +626,7 @@ pub enum ProductOp {
 }
 
 impl ProductOp {
-    pub fn iter_all(algebra: Algebra) -> impl Iterator<Item = Self> {
+    pub fn iter_all(algebra: &Algebra) -> impl Iterator<Item = Self> {
         if algebra.slim {
             vec![Self::Geo, Self::Wedge, Self::Dot, Self::Mul].into_iter()
         } else {
@@ -620,7 +644,7 @@ impl ProductOp {
         }
     }
 
-    pub fn output(self, algebra: Algebra, lhs: Type, rhs: Type) -> Option<Type> {
+    pub fn output(self, algebra: &Algebra, lhs: Type, rhs: Type) -> Option<Type> {
         if !self.has_implementation(lhs, rhs, algebra) {
             return None;
         }
@@ -635,7 +659,7 @@ impl ProductOp {
         algebra.contains(output).then_some(output)
     }
 
-    pub fn product(self, algebra: Algebra, lhs: Blade, rhs: Blade) -> Blade {
+    pub fn product(self, algebra: &Algebra, lhs: Blade, rhs: Blade) -> Blade {
         match self {
             ProductOp::Geo | ProductOp::Mul => algebra.geo(lhs, rhs),
             ProductOp::Dot => algebra.dot(lhs, rhs),
@@ -672,7 +696,7 @@ impl SumOp {
         IntoIterator::into_iter([Self::Add, Self::Sub])
     }
 
-    pub fn sum(algebra: Algebra, lhs: Type, rhs: Type) -> Option<Type> {
+    pub fn sum(algebra: &Algebra, lhs: Type, rhs: Type) -> Option<Type> {
         lhs.iter_blades_unsorted(algebra)
             .chain(rhs.iter_blades_unsorted(algebra))
             .collect()
@@ -687,7 +711,7 @@ pub enum Complement {
 }
 
 impl Complement {
-    pub fn iter(algebra: Algebra) -> impl Iterator<Item = Self> {
+    pub fn iter(algebra: &Algebra) -> impl Iterator<Item = Self> {
         let symmetric = algebra.symmetrical_complements();
 
         let dual = symmetric.then_some(Complement::Dual);
@@ -697,7 +721,7 @@ impl Complement {
         IntoIterator::into_iter([dual, left_comp, right_comp]).flatten()
     }
 
-    pub fn call(self, algebra: Algebra, blade: Blade) -> Blade {
+    pub fn call(self, algebra: &Algebra, blade: Blade) -> Blade {
         match self {
             Self::Dual | Self::RightComp => algebra.right_comp(blade),
             Self::LeftComp => algebra.left_comp(blade),
@@ -784,63 +808,54 @@ pub(crate) mod tests {
     use super::*;
 
     pub fn pga_3d() -> Algebra {
-        Algebra {
-            bases: &[
-                Basis {
-                    char: 'x',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'y',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'z',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'w',
-                    sqr: Square::Zero,
-                },
-            ],
-            slim: false,
-        }
+        Algebra::new(vec![
+            Basis {
+                char: 'x',
+                sqr: Square::Pos,
+            },
+            Basis {
+                char: 'y',
+                sqr: Square::Pos,
+            },
+            Basis {
+                char: 'z',
+                sqr: Square::Pos,
+            },
+            Basis {
+                char: 'w',
+                sqr: Square::Zero,
+            },
+        ])
     }
 
     pub fn ga_2d() -> Algebra {
-        Algebra {
-            bases: &[
-                Basis {
-                    char: 'x',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'y',
-                    sqr: Square::Pos,
-                },
-            ],
-            slim: false,
-        }
+        Algebra::new(vec![
+            Basis {
+                char: 'x',
+                sqr: Square::Pos,
+            },
+            Basis {
+                char: 'y',
+                sqr: Square::Pos,
+            },
+        ])
     }
 
     pub fn ga_3d() -> Algebra {
-        Algebra {
-            bases: &[
-                Basis {
-                    char: 'x',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'y',
-                    sqr: Square::Pos,
-                },
-                Basis {
-                    char: 'z',
-                    sqr: Square::Pos,
-                },
-            ],
-            slim: false,
-        }
+        Algebra::new(vec![
+            Basis {
+                char: 'x',
+                sqr: Square::Pos,
+            },
+            Basis {
+                char: 'y',
+                sqr: Square::Pos,
+            },
+            Basis {
+                char: 'z',
+                sqr: Square::Pos,
+            },
+        ])
     }
 
     #[test]
@@ -1052,13 +1067,10 @@ pub(crate) mod tests {
 
     #[test]
     fn mul_zero_sqr() {
-        let a = Algebra {
-            bases: &[Basis {
-                char: 'n',
-                sqr: Square::Zero,
-            }],
-            slim: false,
-        };
+        let a = Algebra::new(vec![Basis {
+            char: 'n',
+            sqr: Square::Zero,
+        }]);
         let e1 = Blade(1);
 
         assert!(a.geo(e1, e1).is_zero());
@@ -1066,13 +1078,10 @@ pub(crate) mod tests {
 
     #[test]
     fn mul_neg_sqr() {
-        let a = Algebra {
-            bases: &[Basis {
-                char: 'n',
-                sqr: Square::Neg,
-            }],
-            slim: false,
-        };
+        let a = Algebra::new(vec![Basis {
+            char: 'n',
+            sqr: Square::Neg,
+        }]);
         let e1 = Blade(1);
         let neg_s = -Blade(0);
 
@@ -1147,7 +1156,7 @@ pub(crate) mod tests {
 
     #[test]
     fn add_scalar_bivector_to_motor() {
-        let algebra = ga_3d();
+        let algebra = &ga_3d();
 
         assert_eq!(
             Some(Type::Motor),
@@ -1157,8 +1166,8 @@ pub(crate) mod tests {
 
     #[test]
     fn right_comp() {
-        let a = pga_3d();
-        let i = Blade::pseudoscalar(a);
+        let a = &pga_3d();
+        let i = Blade::pseudoscalar(a.bases.len());
         for blade in Blades::from(a) {
             let comp = a.right_comp(blade);
             assert_eq!(i, a.geo(blade, comp));
@@ -1176,7 +1185,7 @@ pub(crate) mod tests {
 
     #[test]
     fn complements() {
-        let a = ga_3d();
+        let a = &ga_3d();
         assert_eq!(Type::Grade(2), Type::Grade(1).complement(a));
         assert_eq!(Type::Grade(1), Type::Grade(2).complement(a));
         assert_eq!(Type::Flector, Type::Motor.complement(a));
@@ -1244,7 +1253,7 @@ pub(crate) mod tests {
 
     #[test]
     fn commutator_products() {
-        let algebra = pga_3d();
+        let algebra = &pga_3d();
         let _all_pga_products = Blades::from(algebra)
             .flat_map(|lhs| Blades::from(algebra).map(move |rhs| algebra.commutator(lhs, rhs)))
             .collect::<Vec<_>>();
@@ -1274,5 +1283,18 @@ pub(crate) mod tests {
             .collect::<Option<Type>>();
 
         assert_eq!(Some(Type::Grade(2)), product);
+    }
+
+    #[test]
+    #[ignore]
+    fn quick_benchmark() {
+        let algebra = ga_3d();
+        let start = std::time::Instant::now();
+        let _tokens = algebra.define();
+        let elapsed = start.elapsed();
+        println!("{} ms", elapsed.as_millis());
+        // panic!("done");
+        // startpoint: 712 ms
+        // remove parse_quote!: 130 ms
     }
 }

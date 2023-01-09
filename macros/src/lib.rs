@@ -1,7 +1,6 @@
 extern crate proc_macro;
 
 use syn::{parse::Parse, parse_macro_input, token::Comma, LitInt};
-
 use crate::algebra::{Algebra, Basis};
 
 mod algebra;
@@ -78,8 +77,7 @@ impl Parse for Algebra {
             bases.push(Basis { char, sqr });
 
             if input.is_empty() {
-                let bases = bases.leak();
-                return Ok(Algebra { bases, slim: false });
+                return Ok(Algebra::new(bases));
             }
         }
     }
@@ -142,10 +140,8 @@ impl From<IntAlgebra> for Algebra {
                 sqr: algebra::Square::Zero,
             });
         }
-        Algebra {
-            bases: Box::leak(bases.into()),
-            slim: false,
-        }
+
+        Algebra::new(bases)
     }
 }
 
@@ -183,4 +179,11 @@ mod tests {
             pga3.bases.iter().filter(|b| b.sqr == Square::Zero).count()
         );
     }
+
+    // #[test]
+    // fn to_file() {
+    //     let algebra: Algebra = syn::parse_str("3").unwrap();
+    //     let tokens = algebra.define();
+    //     let _ = std::fs::write(r#"C:\Users\Farseer\IdeaProjects\clifford\output.rs"#, tokens.to_string());
+    // }
 }

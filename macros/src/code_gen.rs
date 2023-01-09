@@ -2,10 +2,9 @@ use crate::algebra::*;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{quote, ToTokens};
 use std::collections::HashMap;
-use syn::{parse_quote, ItemFn, ItemImpl, ItemStruct};
 
 impl Algebra {
-    pub fn define(self) -> TokenStream {
+    pub fn define(&self) -> TokenStream {
         let structs = self.types().map(move |ty| ty.define(self));
 
         let scalar_num_traits = impl_num_traits_for_scalar();
@@ -290,7 +289,7 @@ fn impl_num_traits_for_scalar() -> TokenStream {
     }
 }
 
-fn impl_float_for_scalar(algebra: Algebra) -> TokenStream {
+fn impl_float_for_scalar(algebra: &Algebra) -> TokenStream {
     if InverseOps::Inverse.inapplicable(Type::Grade(0), algebra) {
         return quote!();
     }
@@ -643,9 +642,9 @@ impl ToTokens for ImplBytemuck {
 pub struct Neg;
 
 impl Neg {
-    fn impl_for(ty: Type, _algebra: Algebra) -> ItemImpl {
+    fn impl_for(ty: Type, _algebra: &Algebra) -> TokenStream {
         let fn_attrs = fn_attrs();
-        parse_quote! {
+        quote! {
             impl<T> std::ops::Neg for #ty<T>
             where
                 T: num_traits::Float,
@@ -663,13 +662,13 @@ impl Neg {
 pub struct Reverse;
 
 impl Reverse {
-    fn impl_for(ty: Type, algebra: Algebra) -> ItemImpl {
+    fn impl_for(ty: Type, algebra: &Algebra) -> TokenStream {
         let trait_ty = Self::trait_ty();
         let trait_fn = Self::trait_fn();
         let fn_attrs = fn_attrs();
 
         let fields = ty.iter_blades_unsorted(algebra).map(|blade| {
-            let f = blade.field(algebra);
+            let f = blade.field_ref(algebra);
             let rev = blade.rev();
             if rev.is_positive() {
                 quote! { #f: self.#f, }
@@ -678,7 +677,7 @@ impl Reverse {
             }
         });
 
-        parse_quote! {
+        quote! {
             impl<T> #trait_ty for #ty<T> where T: num_traits::Float {
                 type Output = #ty<T>;
                 #fn_attrs
@@ -691,19 +690,19 @@ impl Reverse {
         }
     }
 
-    pub fn trait_ty() -> syn::Type {
-        parse_quote!(geo_traits::Reverse)
+    pub fn trait_ty() -> TokenStream {
+        quote!(geo_traits::Reverse)
     }
 
-    pub fn trait_fn() -> Ident {
-        parse_quote!(rev)
+    pub fn trait_fn() -> TokenStream {
+        quote!(rev)
     }
 }
 
 pub struct GradeProduct;
 
 impl GradeProduct {
-    pub fn has_implementation(lhs: Type, rhs: Type, out: Type, algebra: Algebra) -> bool {
+    pub fn has_implementation(lhs: Type, rhs: Type, out: Type, algebra: &Algebra) -> bool {
         if algebra.slim && !out.is_scalar() {
             return false;
         }
@@ -723,11 +722,7 @@ impl GradeProduct {
         true
     }
 
-    pub fn impl_for(lhs: Type, rhs: Type, out: Type, algebra: Algebra) -> Option<ItemImpl> {
-        if out == Type::Motor {
-            panic!("found!");
-        }
-
+    pub fn impl_for(lhs: Type, rhs: Type, out: Type, algebra: &Algebra) -> Option<TokenStream> {
         if !Self::has_implementation(lhs, rhs, out, algebra) {
             return None;
         }
@@ -740,14 +735,18 @@ impl GradeProduct {
             },
         );
 
+        let fn_attrs = fn_attrs();
+        let trait_ty = Self::trait_ty();
+        let trait_fn = Self::trait_fn();
+
         let fields = out.iter_blades_unsorted(algebra).map(|blade| {
-            let f = blade.field(algebra);
+            let f = blade.field_ref(algebra);
             let mut sum = quote!();
 
             if let Some(vec) = blades.get(&blade) {
                 for (l, r, o) in vec {
-                    let lf = l.field(algebra);
-                    let rf = r.field(algebra);
+                    let lf = l.field_ref(algebra);
+                    let rf = r.field_ref(algebra);
                     match (sum.is_empty(), o.is_positive()) {
                         (true, true) => sum.extend(quote! { lhs.#lf * rhs.#rf }),
                         (true, false) => sum.extend(quote! { -(lhs.#lf * rhs.#rf) }),
@@ -764,11 +763,7 @@ impl GradeProduct {
             }
         });
 
-        let fn_attrs = fn_attrs();
-        let trait_ty = Self::trait_ty();
-        let trait_fn = Self::trait_fn();
-
-        Some(parse_quote! {
+        Some(quote! {
             impl<T, U, V> #trait_ty<#lhs<T>, #rhs<U>> for #out<V>
             where
                 T: num_traits::Float + std::ops::Mul<U, Output = V>,
@@ -786,20 +781,20 @@ impl GradeProduct {
         })
     }
 
-    pub fn trait_ty() -> syn::Type {
-        parse_quote!(geo_traits::GradeProduct)
+    pub fn trait_ty() -> TokenStream {
+        quote!(geo_traits::GradeProduct)
     }
 
-    pub fn trait_fn() -> Ident {
-        parse_quote!(product)
+    pub fn trait_fn() -> TokenStream {
+        quote!(product)
     }
 
     fn iter_blades(
         lhs: Type,
         rhs: Type,
         out: Type,
-        algebra: Algebra,
-    ) -> impl Iterator<Item = (Blade, Blade, Blade)> {
+        algebra: &Algebra,
+    ) -> impl Iterator<Item = (Blade, Blade, Blade)> + '_ {
         lhs.iter_blades_unsorted(algebra)
             .flat_map(move |lhs| {
                 rhs.iter_blades_unsorted(algebra)
@@ -810,8 +805,10 @@ impl GradeProduct {
 }
 
 impl Type {
-    pub fn define(self, algebra: Algebra) -> ItemStruct {
-        let fields = self.iter_blades_sorted(algebra).map(|b| b.field(algebra));
+    pub fn define(self, algebra: &Algebra) -> TokenStream {
+        let fields = self
+            .iter_blades_sorted(algebra)
+            .map(|b| b.field_ref(algebra));
 
         let attr = if self.single_blade(algebra) {
             quote! {
@@ -825,7 +822,7 @@ impl Type {
             }
         };
 
-        parse_quote! {
+        quote! {
             #attr
             pub struct #self <T> {
                 #( pub #fields: T, )*
@@ -833,7 +830,7 @@ impl Type {
         }
     }
 
-    fn impl_grade_fns(self, algebra: Algebra) -> Option<ItemImpl> {
+    fn impl_grade_fns(self, algebra: &Algebra) -> Option<TokenStream> {
         let contained_types = || {
             algebra
                 .types()
@@ -847,7 +844,7 @@ impl Type {
         let fns = contained_types().map(|rhs| {
             let grade_fn = rhs.fn_ident();
             let fields = rhs.iter_blades_unsorted(algebra).map(|blade| {
-                let f = blade.field(algebra);
+                let f = blade.field_ref(algebra);
                 quote!( #f: self.#f, )
             });
             quote! {
@@ -858,21 +855,21 @@ impl Type {
                 }
             }
         });
-        Some(parse_quote! {
+        Some(quote! {
             impl<T> #self<T> {
                 #(#fns)*
             }
         })
     }
 
-    fn impl_new_fn(self, algebra: Algebra) -> ItemImpl {
+    fn impl_new_fn(self, algebra: &Algebra) -> TokenStream {
         let params = self.iter_blades_sorted(algebra).map(|blade| {
-            let f = blade.field(algebra);
+            let f = blade.field_ref(algebra);
             quote!(#f: T)
         });
 
         let fields = self.iter_blades_unsorted(algebra).map(|blade| {
-            let f = blade.field(algebra);
+            let f = blade.field_ref(algebra);
             quote! {
                 #f: {
                     debug_assert!(#f.is_finite());
@@ -881,7 +878,7 @@ impl Type {
             }
         });
 
-        parse_quote! {
+        quote! {
             impl<T: num_traits::Float> #self<T> {
                 /// A constructor that asserts that the inputs are finite.
                 #[inline]
@@ -895,14 +892,14 @@ impl Type {
         }
     }
 
-    pub fn impl_map(self, algebra: Algebra) -> ItemImpl {
+    pub fn impl_map(self, algebra: &Algebra) -> TokenStream {
         let fields = self.iter_blades_unsorted(algebra).map(|blade| {
-            let f = blade.field(algebra);
+            let f = blade.field_ref(algebra);
             quote! {
                 #f: f(self.#f),
             }
         });
-        parse_quote! {
+        quote! {
             impl<T> #self<T> {
                 /// Takes a closure and calls that closure on each element, returning a new value
                 pub fn map<U, F: Fn(T) -> U>(self, f: F) -> #self<U> {
@@ -914,14 +911,14 @@ impl Type {
         }
     }
 
-    pub fn impl_from(self, algebra: Algebra) -> impl Iterator<Item = ItemImpl> {
+    pub fn impl_from(self, algebra: &Algebra) -> impl Iterator<Item = TokenStream> + '_ {
         algebra.types().filter_map(move |target| {
             if self != target && target.contains_ty(self) {
                 let fields = self.iter_blades_unsorted(algebra).map(|blade| {
-                    let f = blade.field(algebra);
+                    let f = blade.field_ref(algebra);
                     quote!(#f: value.#f,)
                 });
-                Some(parse_quote! {
+                Some(quote! {
                     impl<T> From<#self<T>> for #target<T>
                     where
                         #target<T>: num_traits::Zero,
@@ -944,22 +941,22 @@ impl Type {
         Ident::new(self.name(), Span::mixed_site())
     }
 
-    fn impl_complement(self, algebra: Algebra, op: Complement) -> ItemImpl {
+    fn impl_complement(self, algebra: &Algebra, op: Complement) -> TokenStream {
         let ident = op.trait_ty();
         let fn_ident = op.trait_fn();
         let comp = self.complement(algebra);
         let fn_attrs = fn_attrs();
         let fields = self.iter_blades_unsorted(algebra).map(|blade| {
             let comp = op.call(algebra, blade);
-            let cf = comp.field(algebra);
-            let sf = blade.field(algebra);
+            let cf = comp.field_ref(algebra);
+            let sf = blade.field_ref(algebra);
             if comp.is_positive() {
                 quote!(#cf: self.#sf,)
             } else {
                 quote!(#cf: -self.#sf,)
             }
         });
-        parse_quote! {
+        quote! {
             impl<T> #ident for #self<T>
             where
                 T: num_traits::Float,
@@ -975,16 +972,16 @@ impl Type {
         }
     }
 
-    fn impl_zero(self, algebra: Algebra) -> ItemImpl {
+    fn impl_zero(self, algebra: &Algebra) -> TokenStream {
         let fields0 = self.iter_blades_unsorted(algebra).map(|blade| {
-            let f = blade.field(algebra);
+            let f = blade.field_ref(algebra);
             quote! { #f: num_traits::Zero::zero(), }
         });
         let fields1 = self.iter_blades_unsorted(algebra).map(|blade| {
-            let f = blade.field(algebra);
+            let f = blade.field_ref(algebra);
             quote! { self.#f.is_zero() }
         });
-        parse_quote! {
+        quote! {
             impl<T> num_traits::Zero for #self<T>
             where
                 T: num_traits::Float,
@@ -1004,7 +1001,7 @@ impl Type {
         }
     }
 
-    fn impl_one(self, algebra: Algebra) -> Option<ItemImpl> {
+    fn impl_one(self, algebra: &Algebra) -> Option<TokenStream> {
         if !self.contains(Blade::scalar()) {
             return None;
         }
@@ -1027,7 +1024,7 @@ impl Type {
         };
 
         let fields = self.iter_blades_unsorted(algebra).map(|b| {
-            let field = b.field(algebra);
+            let field = b.field_ref(algebra);
             let value = if b == Blade::scalar() {
                 quote! { num_traits::One::one() }
             } else {
@@ -1036,7 +1033,7 @@ impl Type {
             quote! { #field: #value }
         });
 
-        Some(parse_quote! {
+        Some(quote! {
             impl<T> num_traits::One for #self<T> #where_clause {
                 fn one() -> Self {
                     #self {
@@ -1051,7 +1048,7 @@ impl Type {
         Ident::new(self.name_lowercase(), Span::mixed_site())
     }
 
-    fn has_impl_sample_unit(self, algebra: Algebra) -> bool {
+    fn has_impl_sample_unit(self, algebra: &Algebra) -> bool {
         matches!(self, Type::Grade(_))
             && !algebra.slim
             && !algebra.has_negative_bases()
@@ -1060,13 +1057,13 @@ impl Type {
                 .any(|b| !algebra.dot(b, b).is_zero())
     }
 
-    pub fn impl_sample_unit(self, algebra: Algebra) -> Option<TokenStream> {
+    pub fn impl_sample_unit(self, algebra: &Algebra) -> Option<TokenStream> {
         if !self.has_impl_sample_unit(algebra) {
             return None;
         }
 
         let fields = self.iter_blades_unsorted(algebra).map(|b| {
-            let f = b.field(algebra);
+            let f = b.field_ref(algebra);
             if algebra.dot(b, b).is_zero() {
                 quote! {
                     #f: T::zero(),
@@ -1083,7 +1080,7 @@ impl Type {
         let norm2_ty = NormOps::Norm2.trait_ty();
         let norm2_fn = NormOps::Norm2.trait_fn();
 
-        Some(parse_quote! {
+        Some(quote! {
             impl<T> rand::distributions::Distribution<#self<T>> for rand::distributions::Standard
             where
                 T: num_traits::Float,
@@ -1114,7 +1111,7 @@ impl Type {
         })
     }
 
-    fn test_sample_unit(self, algebra: Algebra) -> Option<ItemFn> {
+    fn test_sample_unit(self, algebra: &Algebra) -> Option<TokenStream> {
         if !self.has_impl_sample_unit(algebra) {
             return None;
         }
@@ -1127,7 +1124,7 @@ impl Type {
         let norm2_ty = NormOps::Norm2.trait_ty();
         let norm2_fn = NormOps::Norm2.trait_fn();
 
-        Some(parse_quote! {
+        Some(quote! {
             #[test]
             fn #fn_ident() {
                 let mut rng = rand::thread_rng();
@@ -1139,19 +1136,19 @@ impl Type {
 }
 
 impl Complement {
-    pub fn trait_ty(self) -> syn::Type {
+    pub fn trait_ty(self) -> TokenStream {
         match self {
-            Self::Dual => parse_quote!(geo_traits::Dual),
-            Self::LeftComp => parse_quote!(geo_traits::LeftComplement),
-            Self::RightComp => parse_quote!(geo_traits::RightComplement),
+            Self::Dual => quote!(geo_traits::Dual),
+            Self::LeftComp => quote!(geo_traits::LeftComplement),
+            Self::RightComp => quote!(geo_traits::RightComplement),
         }
     }
 
-    pub fn trait_fn(self) -> Ident {
+    pub fn trait_fn(self) -> TokenStream {
         match self {
-            Self::Dual => parse_quote!(dual),
-            Self::LeftComp => parse_quote!(left_comp),
-            Self::RightComp => parse_quote!(right_comp),
+            Self::Dual => quote!(dual),
+            Self::LeftComp => quote!(left_comp),
+            Self::RightComp => quote!(right_comp),
         }
     }
 }
@@ -1163,9 +1160,18 @@ impl ToTokens for Type {
 }
 
 impl Blade {
-    pub fn field(self, algebra: Algebra) -> Ident {
+    pub fn field_ref(self, algebra: &Algebra) -> &Ident {
+        &algebra.fields[self.unsigned().0 as usize]
+    }
+
+    pub fn field(self, bases: &[Basis]) -> Ident {
         let mut output = String::new();
-        for basis in algebra.iter_bases(self) {
+        let blade_bases = bases
+            .iter()
+            .enumerate()
+            .filter_map(move |(i, b)| self.contains(i as u32).then_some(*b));
+
+        for basis in blade_bases {
             output.push(basis.char);
         }
         if output.is_empty() {
@@ -1179,33 +1185,33 @@ impl Blade {
 }
 
 impl ProductOp {
-    pub fn trait_ty(self) -> syn::Type {
+    pub fn trait_ty(self) -> TokenStream {
         match self {
-            ProductOp::Geo => parse_quote!(geo_traits::Geo),
-            ProductOp::Wedge => parse_quote!(geo_traits::Wedge),
-            ProductOp::Dot => parse_quote!(geo_traits::Dot),
-            ProductOp::Antigeo => parse_quote!(geo_traits::Antigeo),
-            ProductOp::Antidot => parse_quote!(geo_traits::Antidot),
-            ProductOp::Antiwedge => parse_quote!(geo_traits::Antiwedge),
-            ProductOp::Mul => parse_quote!(std::ops::Mul),
-            ProductOp::Commutator => parse_quote!(geo_traits::Commutator),
+            ProductOp::Geo => quote!(geo_traits::Geo),
+            ProductOp::Wedge => quote!(geo_traits::Wedge),
+            ProductOp::Dot => quote!(geo_traits::Dot),
+            ProductOp::Antigeo => quote!(geo_traits::Antigeo),
+            ProductOp::Antidot => quote!(geo_traits::Antidot),
+            ProductOp::Antiwedge => quote!(geo_traits::Antiwedge),
+            ProductOp::Mul => quote!(std::ops::Mul),
+            ProductOp::Commutator => quote!(geo_traits::Commutator),
         }
     }
 
-    pub fn trait_fn(self) -> Ident {
+    pub fn trait_fn(self) -> TokenStream {
         match self {
-            ProductOp::Geo => parse_quote!(geo),
-            ProductOp::Wedge => parse_quote!(wedge),
-            ProductOp::Dot => parse_quote!(dot),
-            ProductOp::Antigeo => parse_quote!(antigeo),
-            ProductOp::Antidot => parse_quote!(antidot),
-            ProductOp::Antiwedge => parse_quote!(antiwedge),
-            ProductOp::Mul => parse_quote!(mul),
-            ProductOp::Commutator => parse_quote!(com),
+            ProductOp::Geo => quote!(geo),
+            ProductOp::Wedge => quote!(wedge),
+            ProductOp::Dot => quote!(dot),
+            ProductOp::Antigeo => quote!(antigeo),
+            ProductOp::Antidot => quote!(antidot),
+            ProductOp::Antiwedge => quote!(antiwedge),
+            ProductOp::Mul => quote!(mul),
+            ProductOp::Commutator => quote!(com),
         }
     }
 
-    pub fn has_implementation(self, lhs: Type, rhs: Type, algebra: Algebra) -> bool {
+    pub fn has_implementation(self, lhs: Type, rhs: Type, algebra: &Algebra) -> bool {
         if !Self::iter_all(algebra).any(|op| op == self) {
             return false;
         }
@@ -1217,7 +1223,7 @@ impl ProductOp {
             || rhs == Type::pseudoscalar(algebra)
     }
 
-    fn impl_for(self, algebra: Algebra, lhs: Type, rhs: Type) -> Option<ItemImpl> {
+    fn impl_for(self, algebra: &Algebra, lhs: Type, rhs: Type) -> Option<TokenStream> {
         let op = self.trait_ty();
         let op_fn = self.trait_fn();
         let output = self.output(algebra, lhs, rhs)?;
@@ -1240,14 +1246,14 @@ impl ProductOp {
         );
 
         let fields = output.iter_blades_unsorted(algebra).map(|blade| {
-            let ident = blade.field(algebra);
+            let ident = blade.field_ref(algebra);
 
             let mut sum = quote!();
 
             if let Some(vec) = blades.get(&blade) {
                 for (l, r, o) in vec {
-                    let lf = l.field(algebra);
-                    let rf = r.field(algebra);
+                    let lf = l.field_ref(algebra);
+                    let rf = r.field_ref(algebra);
                     match (sum.is_empty(), o.is_positive()) {
                         (true, true) => sum.extend(quote! { self.#lf * rhs.#rf }),
                         (true, false) => sum.extend(quote! { -(self.#lf * rhs.#rf) }),
@@ -1266,7 +1272,7 @@ impl ProductOp {
 
         let fn_attrs = fn_attrs();
 
-        Some(parse_quote! {
+        Some(quote! {
             impl<T, U, V> #op<#rhs<U>> for #lhs<T>
             where
                 T: num_traits::Float + std::ops::Mul<U, Output = V>,
@@ -1286,7 +1292,7 @@ impl ProductOp {
 }
 
 impl SumOp {
-    fn impl_for(self, algebra: Algebra, lhs: Type, rhs: Type) -> Option<ItemImpl> {
+    fn impl_for(self, algebra: &Algebra, lhs: Type, rhs: Type) -> Option<TokenStream> {
         if algebra.slim && lhs != rhs {
             return None;
         }
@@ -1332,11 +1338,11 @@ impl SumOp {
         }
 
         let fields = output.iter_blades_unsorted(algebra).map(|blade| {
-            let field = blade.field(algebra);
+            let field = blade.field_ref(algebra);
             let mut sum = quote!();
             if let Some(vec) = blades.get(&blade) {
                 for (side, blade) in vec {
-                    let f = blade.field(algebra);
+                    let f = blade.field_ref(algebra);
                     match (sum.is_empty(), blade.is_positive()) {
                         (true, true) => sum.extend(quote! { #side.#f }),
                         (true, false) => sum.extend(quote! { -#side.#f }),
@@ -1352,7 +1358,7 @@ impl SumOp {
 
         let fn_attrs = fn_attrs();
 
-        Some(parse_quote! {
+        Some(quote! {
             impl<T> #trait_ty<#rhs<T>> for #lhs<T>
             where
                 T: num_traits::Float,
@@ -1368,23 +1374,23 @@ impl SumOp {
         })
     }
 
-    pub fn trait_ty(self) -> syn::Type {
+    pub fn trait_ty(self) -> TokenStream {
         match self {
-            SumOp::Add => parse_quote! { std::ops::Add },
-            SumOp::Sub => parse_quote! { std::ops::Sub },
+            SumOp::Add => quote! { std::ops::Add },
+            SumOp::Sub => quote! { std::ops::Sub },
         }
     }
 
-    pub fn trait_fn(self) -> Ident {
+    pub fn trait_fn(self) -> TokenStream {
         match self {
-            SumOp::Add => parse_quote! { add },
-            SumOp::Sub => parse_quote! { sub },
+            SumOp::Add => quote! { add },
+            SumOp::Sub => quote! { sub },
         }
     }
 }
 
 impl ScalarOps {
-    pub fn impl_for_scalar(self, ty: Type, algebra: Algebra) -> Vec<ItemImpl> {
+    pub fn impl_for_scalar(self, ty: Type, algebra: &Algebra) -> Vec<TokenStream> {
         if ty == Type::Mv {
             return vec![];
         }
@@ -1404,7 +1410,7 @@ impl ScalarOps {
 
                 if InverseOps::Inverse.inapplicable(ty, algebra) {
                     vec![
-                        parse_quote! {
+                        quote! {
                             impl<T> #trait_ty<f32> for #ty<T>
                             where
                                 T: std::ops::Mul<f32, Output = T>,
@@ -1417,7 +1423,7 @@ impl ScalarOps {
                                 }
                             }
                         },
-                        parse_quote! {
+                        quote! {
                             impl<T> #trait_ty<f64> for #ty<T>
                             where
                                 T: std::ops::Mul<f64, Output = T>,
@@ -1433,7 +1439,7 @@ impl ScalarOps {
                     ]
                 } else {
                     vec![
-                        parse_quote! {
+                        quote! {
                             impl<T> #trait_ty<#ty<T>> for f32
                             where
                                 T: num_traits::Float + std::ops::Mul<f32, Output = T>,
@@ -1445,7 +1451,7 @@ impl ScalarOps {
                                 }
                             }
                         },
-                        parse_quote! {
+                        quote! {
                             impl<T> #trait_ty<#ty<T>> for f64
                             where
                                 T: num_traits::Float + std::ops::Mul<f64, Output = T>,
@@ -1457,7 +1463,7 @@ impl ScalarOps {
                                 }
                             }
                         },
-                        parse_quote! {
+                        quote! {
                             impl<T> #trait_ty<f32> for #ty<T>
                             where
                                 T: std::ops::Mul<f32, Output = T>,
@@ -1470,7 +1476,7 @@ impl ScalarOps {
                                 }
                             }
                         },
-                        parse_quote! {
+                        quote! {
                             impl<T> #trait_ty<f64> for #ty<T>
                             where
                                 T: std::ops::Mul<f64, Output = T>,
@@ -1487,7 +1493,7 @@ impl ScalarOps {
                 }
             }
             Self::Mul => vec![
-                parse_quote! {
+                quote! {
                     impl<T> #trait_ty<#ty<T>> for f32
                     where
                         T: #trait_ty<f32, Output = T>,
@@ -1499,7 +1505,7 @@ impl ScalarOps {
                         }
                     }
                 },
-                parse_quote! {
+                quote! {
                     impl<T> #trait_ty<#ty<T>> for f64
                     where
                         T: #trait_ty<f64, Output = T>,
@@ -1511,7 +1517,7 @@ impl ScalarOps {
                         }
                     }
                 },
-                parse_quote! {
+                quote! {
                     impl<T> #trait_ty<f32> for #ty<T>
                     where
                         T: #trait_ty<f32, Output = T>,
@@ -1523,7 +1529,7 @@ impl ScalarOps {
                         }
                     }
                 },
-                parse_quote! {
+                quote! {
                     impl<T> #trait_ty<f64> for #ty<T>
                     where
                         T: #trait_ty<f64, Output = T>,
@@ -1539,7 +1545,7 @@ impl ScalarOps {
             Self::Add | Self::Sub => {
                 let output = SumOp::sum(algebra, ty, Type::Grade(0));
                 vec![
-                    parse_quote! {
+                    quote! {
                         impl #trait_ty<f32> for #ty<f32> {
                             type Output = #output<f32>;
                             #[inline]
@@ -1548,7 +1554,7 @@ impl ScalarOps {
                             }
                         }
                     },
-                    parse_quote! {
+                    quote! {
                         impl #trait_ty<f64> for #ty<f64> {
                             type Output = #output<f64>;
                             #[inline]
@@ -1557,7 +1563,7 @@ impl ScalarOps {
                             }
                         }
                     },
-                    parse_quote! {
+                    quote! {
                         impl #trait_ty<#ty<f32>> for f32 {
                             type Output = #output<f32>;
                             #[inline]
@@ -1566,7 +1572,7 @@ impl ScalarOps {
                             }
                         }
                     },
-                    parse_quote! {
+                    quote! {
                         impl #trait_ty<#ty<f64>> for f64 {
                             type Output = #output<f64>;
                             #[inline]
@@ -1580,35 +1586,35 @@ impl ScalarOps {
         }
     }
 
-    pub fn trait_ty(self) -> syn::Type {
+    pub fn trait_ty(self) -> TokenStream {
         match self {
-            Self::Mul => parse_quote!(std::ops::Mul),
-            Self::Div => parse_quote!(std::ops::Div),
-            Self::Add => parse_quote!(std::ops::Add),
-            Self::Sub => parse_quote!(std::ops::Sub),
+            Self::Mul => quote!(std::ops::Mul),
+            Self::Div => quote!(std::ops::Div),
+            Self::Add => quote!(std::ops::Add),
+            Self::Sub => quote!(std::ops::Sub),
         }
     }
 
-    pub fn trait_fn(self) -> syn::Type {
+    pub fn trait_fn(self) -> TokenStream {
         match self {
-            Self::Mul => parse_quote!(mul),
-            Self::Div => parse_quote!(div),
-            Self::Add => parse_quote!(add),
-            Self::Sub => parse_quote!(sub),
+            Self::Mul => quote!(mul),
+            Self::Div => quote!(div),
+            Self::Add => quote!(add),
+            Self::Sub => quote!(sub),
         }
     }
 }
 
 impl ScalarAssignOps {
-    pub fn impl_for(self, ty: Type, algebra: Algebra) -> ItemImpl {
+    pub fn impl_for(self, ty: Type, algebra: &Algebra) -> TokenStream {
         let trait_ty = self.trait_ty();
         let trait_fn = self.trait_fn();
         let fn_attrs = fn_attrs();
         let fields = ty.iter_blades_unsorted(algebra).map(|blade| {
-            let f = blade.field(algebra);
+            let f = blade.field_ref(algebra);
             quote! { #trait_ty::#trait_fn(&mut self.#f, rhs); }
         });
-        parse_quote! {
+        quote! {
             impl<T, U> #trait_ty<U> for #ty<T>
             where
                 T: #trait_ty<U>,
@@ -1622,31 +1628,31 @@ impl ScalarAssignOps {
         }
     }
 
-    pub fn trait_ty(self) -> syn::Type {
+    pub fn trait_ty(self) -> TokenStream {
         match self {
-            Self::Mul => parse_quote!(std::ops::MulAssign),
-            Self::Div => parse_quote!(std::ops::DivAssign),
+            Self::Mul => quote!(std::ops::MulAssign),
+            Self::Div => quote!(std::ops::DivAssign),
         }
     }
 
-    pub fn trait_fn(self) -> syn::Type {
+    pub fn trait_fn(self) -> TokenStream {
         match self {
-            Self::Mul => parse_quote!(mul_assign),
-            Self::Div => parse_quote!(div_assign),
+            Self::Mul => quote!(mul_assign),
+            Self::Div => quote!(div_assign),
         }
     }
 }
 
 impl SumAssignOps {
-    pub fn impl_for(self, ty: Type, algebra: Algebra) -> ItemImpl {
+    pub fn impl_for(self, ty: Type, algebra: &Algebra) -> TokenStream {
         let trait_ty = self.trait_ty();
         let trait_fn = self.trait_fn();
         let fn_attrs = fn_attrs();
         let fields = ty.iter_blades_unsorted(algebra).map(|blade| {
-            let f = blade.field(algebra);
+            let f = blade.field_ref(algebra);
             quote! { #trait_ty::#trait_fn(&mut self.#f, rhs.#f); }
         });
-        parse_quote! {
+        quote! {
             impl<T, U> #trait_ty<#ty<U>> for #ty<T>
             where
                 T: #trait_ty<U>,
@@ -1659,34 +1665,34 @@ impl SumAssignOps {
         }
     }
 
-    pub fn trait_ty(self) -> syn::Type {
+    pub fn trait_ty(self) -> TokenStream {
         match self {
-            Self::AddAssign => parse_quote!(std::ops::AddAssign),
-            Self::SubAssign => parse_quote!(std::ops::SubAssign),
+            Self::AddAssign => quote!(std::ops::AddAssign),
+            Self::SubAssign => quote!(std::ops::SubAssign),
         }
     }
 
-    pub fn trait_fn(self) -> syn::Type {
+    pub fn trait_fn(self) -> TokenStream {
         match self {
-            Self::AddAssign => parse_quote!(add_assign),
-            Self::SubAssign => parse_quote!(sub_assign),
+            Self::AddAssign => quote!(add_assign),
+            Self::SubAssign => quote!(sub_assign),
         }
     }
 }
 
 impl FloatConversion {
-    pub fn impl_for(self, ty: Type, algebra: Algebra) -> ItemImpl {
+    pub fn impl_for(self, ty: Type, algebra: &Algebra) -> TokenStream {
         let from = self.type_from();
         let to = self.type_to();
         let fn_ident = self.fn_ident();
         let fields1 = ty.iter_blades_unsorted(algebra).map(|blade| {
-            let f = blade.field(algebra);
+            let f = blade.field_ref(algebra);
             quote! {
                 #f: self.#f as #to
             }
         });
         let fn_attrs = fn_attrs();
-        parse_quote! {
+        quote! {
             impl #ty<#from> {
                 #fn_attrs
                 pub const fn #fn_ident(self) -> #ty<#to> {
@@ -1698,30 +1704,30 @@ impl FloatConversion {
         }
     }
 
-    fn type_from(self) -> syn::Type {
+    fn type_from(self) -> TokenStream {
         match self {
-            Self::ToF64 => parse_quote!(f32),
-            Self::ToF32 => parse_quote!(f64),
+            Self::ToF64 => quote!(f32),
+            Self::ToF32 => quote!(f64),
         }
     }
 
-    fn type_to(self) -> syn::Type {
+    fn type_to(self) -> TokenStream {
         match self {
-            Self::ToF32 => parse_quote!(f32),
-            Self::ToF64 => parse_quote!(f64),
+            Self::ToF32 => quote!(f32),
+            Self::ToF64 => quote!(f64),
         }
     }
 
-    fn fn_ident(self) -> Ident {
+    fn fn_ident(self) -> TokenStream {
         match self {
-            Self::ToF32 => parse_quote!(to_f32),
-            Self::ToF64 => parse_quote!(to_f64),
+            Self::ToF32 => quote!(to_f32),
+            Self::ToF64 => quote!(to_f64),
         }
     }
 }
 
 impl NormOps {
-    pub fn impl_for(self, ty: Type, algebra: Algebra) -> Option<ItemImpl> {
+    pub fn impl_for(self, ty: Type, algebra: &Algebra) -> Option<TokenStream> {
         // Float::sqrt needed for Norm
         if self == NormOps::Norm && InverseOps::Inverse.inapplicable(ty, algebra) {
             return None;
@@ -1743,7 +1749,7 @@ impl NormOps {
         }
 
         match self {
-            NormOps::Norm2 => Some(parse_quote! {
+            NormOps::Norm2 => Some(quote! {
                 impl<T> #trait_ty for #ty<T>
                 where
                     T: num_traits::Float,
@@ -1755,7 +1761,7 @@ impl NormOps {
                     }
                 }
             }),
-            NormOps::Norm => Some(parse_quote! {
+            NormOps::Norm => Some(quote! {
                 impl<T> #trait_ty for #ty<T>
                 where
                     T: num_traits::Float,
@@ -1771,17 +1777,17 @@ impl NormOps {
         }
     }
 
-    pub fn trait_ty(self) -> syn::Type {
+    pub fn trait_ty(self) -> TokenStream {
         match self {
-            NormOps::Norm => parse_quote!(geo_traits::Norm),
-            NormOps::Norm2 => parse_quote!(geo_traits::Norm2),
+            NormOps::Norm => quote!(geo_traits::Norm),
+            NormOps::Norm2 => quote!(geo_traits::Norm2),
         }
     }
 
-    pub fn trait_fn(self) -> Ident {
+    pub fn trait_fn(self) -> TokenStream {
         match self {
-            NormOps::Norm => parse_quote!(norm),
-            NormOps::Norm2 => parse_quote!(norm2),
+            NormOps::Norm => quote!(norm),
+            NormOps::Norm2 => quote!(norm2),
         }
     }
 }
@@ -1789,7 +1795,7 @@ impl NormOps {
 pub struct Sandwich;
 
 impl Sandwich {
-    pub fn has_implementation(lhs: Type, rhs: Type, algebra: Algebra) -> bool {
+    pub fn has_implementation(lhs: Type, rhs: Type, algebra: &Algebra) -> bool {
         let excluded = [Type::Grade(0), Type::pseudoscalar(algebra), Type::Mv];
 
         let Some(intermediate) = ProductOp::Geo.output(algebra, lhs, rhs) else { return false; };
@@ -1801,7 +1807,7 @@ impl Sandwich {
             && GradeProduct::has_implementation(intermediate, lhs, rhs, algebra)
     }
 
-    pub fn impl_for(lhs: Type, rhs: Type, algebra: Algebra) -> Option<ItemImpl> {
+    pub fn impl_for(lhs: Type, rhs: Type, algebra: &Algebra) -> Option<TokenStream> {
         if !Sandwich::has_implementation(lhs, rhs, algebra) {
             return None;
         }
@@ -1825,7 +1831,7 @@ impl Sandwich {
             },
         };
 
-        Some(parse_quote! {
+        Some(quote! {
             impl<T, U, V> #trait_ty<#rhs<U>> for #lhs<T>
             where
                 T: num_traits::Float + std::ops::Mul<U, Output = V>,
@@ -1842,19 +1848,19 @@ impl Sandwich {
         })
     }
 
-    pub fn trait_ty() -> syn::Type {
-        parse_quote!(geo_traits::Sandwich)
+    pub fn trait_ty() -> TokenStream {
+        quote!(geo_traits::Sandwich)
     }
 
-    pub fn trait_fn() -> Ident {
-        parse_quote!(sandwich)
+    pub fn trait_fn() -> TokenStream {
+        quote!(sandwich)
     }
 }
 
 struct Antisandwich;
 
 impl Antisandwich {
-    pub fn impl_for(lhs: Type, rhs: Type, algebra: Algebra) -> Option<ItemImpl> {
+    pub fn impl_for(lhs: Type, rhs: Type, algebra: &Algebra) -> Option<TokenStream> {
         if !Sandwich::has_implementation(lhs, rhs, algebra) {
             return None;
         }
@@ -1876,7 +1882,7 @@ impl Antisandwich {
         let r_comp_fn = Complement::RightComp.trait_fn();
 
         if algebra.symmetrical_complements() {
-            Some(parse_quote! {
+            Some(quote! {
                 impl<T, U, V> #trait_ty<#rhs<U>> for #lhs<T>
                 where
                     T: num_traits::Float + std::ops::Mul<U, Output = V>,
@@ -1894,7 +1900,7 @@ impl Antisandwich {
                 }
             })
         } else {
-            Some(parse_quote! {
+            Some(quote! {
                 impl<T, U, V> #trait_ty<#rhs<U>> for #lhs<T>
                 where
                     T: num_traits::Float + std::ops::Mul<U, Output = V>,
@@ -1914,36 +1920,36 @@ impl Antisandwich {
         }
     }
 
-    pub fn trait_ty() -> syn::Type {
-        parse_quote!(geo_traits::Antisandwich)
+    pub fn trait_ty() -> TokenStream {
+        quote!(geo_traits::Antisandwich)
     }
 
-    pub fn trait_fn() -> Ident {
-        parse_quote!(antisandwich)
+    pub fn trait_fn() -> TokenStream {
+        quote!(antisandwich)
     }
 }
 
 impl InverseOps {
-    pub fn trait_ty(self) -> syn::Type {
+    pub fn trait_ty(self) -> TokenStream {
         match self {
-            InverseOps::Inverse => parse_quote!(geo_traits::Inverse),
-            InverseOps::Unitize => parse_quote!(geo_traits::Unitize),
+            InverseOps::Inverse => quote!(geo_traits::Inverse),
+            InverseOps::Unitize => quote!(geo_traits::Unitize),
         }
     }
 
-    pub fn trait_fn(self) -> Ident {
+    pub fn trait_fn(self) -> TokenStream {
         match self {
-            InverseOps::Inverse => parse_quote!(inv),
-            InverseOps::Unitize => parse_quote!(unit),
+            InverseOps::Inverse => quote!(inv),
+            InverseOps::Unitize => quote!(unit),
         }
     }
 
     /// No implementation if there's only one blade, or mv which are not easily inverted
-    pub fn inapplicable(self, ty: Type, algebra: Algebra) -> bool {
+    pub fn inapplicable(self, ty: Type, algebra: &Algebra) -> bool {
         ty == Type::Mv || ProductOp::Dot.output(algebra, ty, ty).is_none()
     }
 
-    pub fn impl_for(self, ty: Type, algebra: Algebra) -> Option<ItemImpl> {
+    pub fn impl_for(self, ty: Type, algebra: &Algebra) -> Option<TokenStream> {
         if self.inapplicable(ty, algebra) {
             return None;
         }
@@ -1975,8 +1981,8 @@ impl InverseOps {
 
         Some(match (self, scalar_fields.len()) {
             (InverseOps::Inverse, 1) => {
-                let field = scalar_fields[0].field(algebra);
-                parse_quote! {
+                let field = scalar_fields[0].field_ref(algebra);
+                quote! {
                     impl<T> #trait_ty for #ty<T>
                     where
                         T: num_traits::Float,
@@ -1992,7 +1998,7 @@ impl InverseOps {
                 }
             }
             (InverseOps::Inverse, _) => {
-                parse_quote! {
+                quote! {
                     impl<T> #trait_ty for #ty<T>
                     where
                         T: num_traits::Float,
@@ -2006,8 +2012,8 @@ impl InverseOps {
                 }
             }
             (InverseOps::Unitize, 1) => {
-                let field = scalar_fields[0].field(algebra);
-                parse_quote! {
+                let field = scalar_fields[0].field_ref(algebra);
+                quote! {
                     impl<T> #trait_ty for #ty<T>
                     where
                         T: num_traits::Float,
@@ -2023,7 +2029,7 @@ impl InverseOps {
                 }
             }
             (InverseOps::Unitize, _) => {
-                parse_quote! {
+                quote! {
                     impl<T> #trait_ty for #ty<T>
                     where
                         T: num_traits::Float,
@@ -2041,7 +2047,7 @@ impl InverseOps {
         })
     }
 
-    pub fn tests(self, ty: Type, algebra: Algebra) -> Option<syn::ItemFn> {
+    pub fn tests(self, ty: Type, algebra: &Algebra) -> Option<TokenStream> {
         if self.inapplicable(ty, algebra) || algebra.slim || algebra.has_negative_bases() {
             return None;
         }
@@ -2055,7 +2061,7 @@ impl InverseOps {
         };
 
         let fields = ty.iter_blades_unsorted(algebra).map(|blade| {
-            let f = blade.field(algebra);
+            let f = blade.field_ref(algebra);
             quote! { #f: rng.gen::<f64>(), }
         });
 
@@ -2075,7 +2081,7 @@ impl InverseOps {
         let rev_fn = Reverse::trait_fn();
 
         match self {
-            InverseOps::Inverse => Some(parse_quote! {
+            InverseOps::Inverse => Some(quote! {
                 #[test]
                 fn #fn_ident() {
                     use rand::Rng;
@@ -2096,7 +2102,7 @@ impl InverseOps {
                     assert_eq!(N, success_count);
                 }
             }),
-            InverseOps::Unitize => Some(parse_quote! {
+            InverseOps::Unitize => Some(quote! {
                 #[test]
                 fn #fn_ident() {
                     use rand::Rng;
@@ -2132,17 +2138,17 @@ impl InverseOps {
 pub struct Unit;
 
 impl Unit {
-    pub fn define(algebra: Algebra) -> Vec<syn::Item> {
+    pub fn define(algebra: &Algebra) -> Vec<TokenStream> {
         let unitize_ty = InverseOps::Unitize.trait_ty();
         let unitize_fn = InverseOps::Unitize.trait_fn();
         let inverse_ty = InverseOps::Inverse.trait_ty();
         let inverse_fn = InverseOps::Inverse.trait_fn();
         let reverse_ty = Reverse::trait_ty();
-        let item_struct = parse_quote! {
+        let item_struct = quote! {
             #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
             pub struct Unit<T>(T);
         };
-        let item_impl = parse_quote! {
+        let item_impl = quote! {
             impl<T> Unit<T> {
                 #[inline]
                 pub const fn assert(value: T) -> Unit<T> {
@@ -2154,7 +2160,7 @@ impl Unit {
                 }
             }
         };
-        let unitize_impl = parse_quote! {
+        let unitize_impl = quote! {
             impl<T> #unitize_ty for Unit<T> where T: #unitize_ty {
                 type Output = Self;
                 #[inline]
@@ -2163,7 +2169,7 @@ impl Unit {
                 }
             }
         };
-        let inverse_impl = parse_quote! {
+        let inverse_impl = quote! {
             impl<T> #inverse_ty for Unit<T> where T: #reverse_ty<Output = T> {
                 type Output = Self;
                 #[inline]
@@ -2179,7 +2185,7 @@ impl Unit {
         let rev_ty = Reverse::trait_ty();
         let grade_prod_ty = GradeProduct::trait_ty();
 
-        let sandwich_impl_lhs = parse_quote! {
+        let sandwich_impl_lhs = quote! {
             impl<Lhs, Rhs, Int> #sandwich_ty<Rhs> for Unit<Lhs>
             where
                 Lhs: #geo_ty<Rhs, Output = Int> + #rev_ty<Output = Lhs> + Copy,
@@ -2194,64 +2200,55 @@ impl Unit {
             }
         };
 
-        let sandwich_impl_rhs = algebra
-            .type_tuples()
-            .map(|(lhs, rhs)| {
-                parse_quote! {
-                    impl<T, U, V> #sandwich_ty<Unit<#rhs<U>>> for #lhs<T>
-                    where
-                        #lhs<T>: #sandwich_ty<#rhs<U>, Output = #rhs<V>>,
-                    {
-                        type Output = Unit<#rhs<V>>;
-                        #[inline]
-                        fn #sandwich_fn(self, rhs: Unit<#rhs<U>>) -> Self::Output {
-                            let output = #sandwich_ty::#sandwich_fn(self, rhs.value());
-                            Unit::assert(output)
-                        }
+        let sandwich_impl_rhs = algebra.type_tuples().map(|(lhs, rhs)| {
+            quote! {
+                impl<T, U, V> #sandwich_ty<Unit<#rhs<U>>> for #lhs<T>
+                where
+                    #lhs<T>: #sandwich_ty<#rhs<U>, Output = #rhs<V>>,
+                {
+                    type Output = Unit<#rhs<V>>;
+                    #[inline]
+                    fn #sandwich_fn(self, rhs: Unit<#rhs<U>>) -> Self::Output {
+                        let output = #sandwich_ty::#sandwich_fn(self, rhs.value());
+                        Unit::assert(output)
                     }
                 }
-            })
-            .map(Impl);
+            }
+        });
 
-        let sandwich_impl_both = algebra
-            .type_tuples()
-            .map(|(lhs, rhs)| {
-                parse_quote! {
-                    impl<T, U, V> #sandwich_ty<Unit<#rhs<U>>> for Unit<#lhs<T>>
-                    where
-                        Unit<#lhs<T>>: #sandwich_ty<#rhs<U>, Output = #rhs<V>>,
-                    {
-                        type Output = Unit<#rhs<V>>;
-                        #[inline]
-                        fn #sandwich_fn(self, rhs: Unit<#rhs<U>>) -> Self::Output {
-                            let output = #sandwich_ty::#sandwich_fn(self, rhs.value());
-                            Unit::assert(output)
-                        }
+        let sandwich_impl_both = algebra.type_tuples().map(|(lhs, rhs)| {
+            quote! {
+                impl<T, U, V> #sandwich_ty<Unit<#rhs<U>>> for Unit<#lhs<T>>
+                where
+                    Unit<#lhs<T>>: #sandwich_ty<#rhs<U>, Output = #rhs<V>>,
+                {
+                    type Output = Unit<#rhs<V>>;
+                    #[inline]
+                    fn #sandwich_fn(self, rhs: Unit<#rhs<U>>) -> Self::Output {
+                        let output = #sandwich_ty::#sandwich_fn(self, rhs.value());
+                        Unit::assert(output)
                     }
                 }
-            })
-            .map(Impl);
-
-        use syn::Item::*;
+            }
+        });
 
         let operator_overloads = algebra
             .types()
-            .flat_map(|ty| Overload::iter(algebra).filter_map(move |op| op.impl_for_unit(ty)))
-            .map(Impl);
+            .flat_map(|ty| Overload::iter(algebra).filter_map(move |op| op.impl_for_unit(ty)));
 
         IntoIterator::into_iter([
-            Struct(item_struct),
-            Impl(item_impl),
-            Impl(unitize_impl),
-            Impl(inverse_impl),
-            Impl(sandwich_impl_lhs),
+            item_struct,
+            item_impl,
+            unitize_impl,
+            inverse_impl,
+            sandwich_impl_lhs,
         ])
         .chain(sandwich_impl_rhs)
         .chain(sandwich_impl_both)
         .chain(ProductOp::iter_all(algebra).map(|op| {
             let trait_ty = op.trait_ty();
             let trait_fn = op.trait_fn();
-            parse_quote! {
+            quote! {
                 impl<Lhs, Rhs, Output> #trait_ty<Rhs> for Unit<Lhs>
                 where
                     Lhs: #trait_ty<Rhs, Output = Output>
@@ -2272,7 +2269,7 @@ impl Unit {
 pub struct Div;
 
 impl Div {
-    pub fn impl_for(lhs: Type, rhs: Type, algebra: Algebra) -> Option<ItemImpl> {
+    pub fn impl_for(lhs: Type, rhs: Type, algebra: &Algebra) -> Option<TokenStream> {
         if InverseOps::Inverse.inapplicable(rhs, algebra) {
             return None;
         }
@@ -2292,7 +2289,7 @@ impl Div {
         let inv_ty = InverseOps::Inverse.trait_ty();
         let inv_fn = InverseOps::Inverse.trait_fn();
 
-        Some(parse_quote! {
+        Some(quote! {
             impl<T, U, V> std::ops::Div<#rhs<U>> for #lhs<T>
             where
                 T: num_traits::Float + std::ops::Mul<U, Output = V>,
@@ -2316,7 +2313,7 @@ pub enum UnaryOverload {
 }
 
 impl UnaryOverload {
-    pub fn iter(algebra: Algebra) -> impl Iterator<Item = Self> {
+    pub fn iter(algebra: &Algebra) -> impl Iterator<Item = Self> {
         if algebra.symmetrical_complements() {
             Some(Self::Not).into_iter()
         } else {
@@ -2324,13 +2321,13 @@ impl UnaryOverload {
         }
     }
 
-    pub fn impl_for(self, ty: Type, algebra: Algebra) -> ItemImpl {
+    pub fn impl_for(self, ty: Type, algebra: &Algebra) -> TokenStream {
         let trait_ty = self.trait_ty();
         let trait_fn = self.trait_fn();
         let output = ty.complement(algebra);
         let inner_ty = self.inner_ty();
         let inner_fn = self.inner_fn();
-        parse_quote! {
+        quote! {
             impl<T> #trait_ty for #ty<T> where T: num_traits::Float {
                 type Output = #output<T>;
                 #[inline]
@@ -2341,27 +2338,27 @@ impl UnaryOverload {
         }
     }
 
-    pub fn trait_ty(self) -> syn::Path {
+    pub fn trait_ty(self) -> TokenStream {
         match self {
-            Self::Not => parse_quote!(std::ops::Not),
+            Self::Not => quote!(std::ops::Not),
         }
     }
 
-    pub fn trait_fn(self) -> Ident {
+    pub fn trait_fn(self) -> TokenStream {
         match self {
-            Self::Not => parse_quote!(not),
+            Self::Not => quote!(not),
         }
     }
 
-    pub fn inner_ty(self) -> syn::Path {
+    pub fn inner_ty(self) -> TokenStream {
         match self {
-            Self::Not => parse_quote!(geo_traits::Dual),
+            Self::Not => quote!(geo_traits::Dual),
         }
     }
 
-    pub fn inner_fn(self) -> Ident {
+    pub fn inner_fn(self) -> TokenStream {
         match self {
-            Self::Not => parse_quote!(dual),
+            Self::Not => quote!(dual),
         }
     }
 }
@@ -2375,7 +2372,7 @@ pub enum Overload {
 }
 
 impl Overload {
-    pub fn iter(algebra: Algebra) -> impl Iterator<Item = Self> {
+    pub fn iter(algebra: &Algebra) -> impl Iterator<Item = Self> {
         if algebra.slim {
             IntoIterator::into_iter(vec![Overload::Or, Overload::Xor])
         } else {
@@ -2388,7 +2385,7 @@ impl Overload {
         }
     }
 
-    pub fn impl_for(self, lhs: Type, rhs: Type, algebra: Algebra) -> Option<ItemImpl> {
+    pub fn impl_for(self, lhs: Type, rhs: Type, algebra: &Algebra) -> Option<TokenStream> {
         match self.inner_op() {
             OverloadOp::Sandwich => {
                 if !Sandwich::has_implementation(lhs, rhs, algebra) {
@@ -2429,7 +2426,7 @@ impl Overload {
             },
         };
 
-        Some(parse_quote! {
+        Some(quote! {
             impl<T, U, V> #trait_ty<#rhs<U>> for #lhs<T> #where_clause {
                 type Output = #output<V>;
                 #[inline]
@@ -2440,13 +2437,13 @@ impl Overload {
         })
     }
 
-    pub fn impl_for_unit(self, lhs: Type) -> Option<ItemImpl> {
+    pub fn impl_for_unit(self, lhs: Type) -> Option<TokenStream> {
         let trait_ty = self.trait_ty();
         let trait_fn = self.trait_fn();
         let inner = self.inner_op();
         let inner_ty = inner.trait_ty();
         let inner_fn = inner.trait_fn();
-        Some(parse_quote! {
+        Some(quote! {
             impl<T, U, V> #trait_ty<U> for Unit<#lhs<T>>
             where
                 Unit<#lhs<T>>: #inner_ty<U, Output = V>,
@@ -2460,21 +2457,21 @@ impl Overload {
         })
     }
 
-    pub fn trait_ty(self) -> syn::Type {
+    pub fn trait_ty(self) -> TokenStream {
         match self {
-            Overload::And => parse_quote!(std::ops::BitAnd),
-            Overload::Or => parse_quote!(std::ops::BitOr),
-            Overload::Xor => parse_quote!(std::ops::BitXor),
-            Overload::Shr => parse_quote!(std::ops::Shr),
+            Overload::And => quote!(std::ops::BitAnd),
+            Overload::Or => quote!(std::ops::BitOr),
+            Overload::Xor => quote!(std::ops::BitXor),
+            Overload::Shr => quote!(std::ops::Shr),
         }
     }
 
-    pub fn trait_fn(self) -> syn::Type {
+    pub fn trait_fn(self) -> TokenStream {
         match self {
-            Overload::And => parse_quote!(bitand),
-            Overload::Or => parse_quote!(bitor),
-            Overload::Xor => parse_quote!(bitxor),
-            Overload::Shr => parse_quote!(shr),
+            Overload::And => quote!(bitand),
+            Overload::Or => quote!(bitor),
+            Overload::Xor => quote!(bitxor),
+            Overload::Shr => quote!(shr),
         }
     }
 
@@ -2495,19 +2492,19 @@ pub enum OverloadOp {
 }
 
 impl OverloadOp {
-    fn trait_ty(self) -> syn::Type {
+    fn trait_ty(self) -> TokenStream {
         match self {
             Self::Product(op) => op.trait_ty(),
             Self::Sandwich => Sandwich::trait_ty(),
         }
     }
-    fn trait_fn(self) -> Ident {
+    fn trait_fn(self) -> TokenStream {
         match self {
             Self::Product(op) => op.trait_fn(),
             Self::Sandwich => Sandwich::trait_fn(),
         }
     }
-    fn output(self, algebra: Algebra, lhs: Type, rhs: Type) -> Option<Type> {
+    fn output(self, algebra: &Algebra, lhs: Type, rhs: Type) -> Option<Type> {
         match self {
             OverloadOp::Product(op) => op.output(algebra, lhs, rhs),
             OverloadOp::Sandwich => Some(rhs),
@@ -2522,53 +2519,27 @@ mod tests {
 
     impl Algebra {
         pub fn test3() -> Self {
-            Self {
-                bases: &[
-                    Basis {
-                        char: 'x',
-                        sqr: Square::Pos,
-                    },
-                    Basis {
-                        char: 'y',
-                        sqr: Square::Zero,
-                    },
-                    Basis {
-                        char: 'z',
-                        sqr: Square::Neg,
-                    },
-                ],
-                slim: false,
-            }
+            Algebra::new(vec![
+                Basis {
+                    char: 'x',
+                    sqr: Square::Pos,
+                },
+                Basis {
+                    char: 'y',
+                    sqr: Square::Zero,
+                },
+                Basis {
+                    char: 'z',
+                    sqr: Square::Neg,
+                },
+            ])
         }
-    }
-
-    #[test]
-    #[ignore]
-    fn write_to_file() {
-        let path = "../output.rs";
-
-        let bases = Box::new([
-            Basis::pos('x'),
-            Basis::pos('y'),
-            Basis::pos('z'),
-            Basis::pos('t'),
-            Basis::pos('u'),
-            Basis::pos('v'),
-            Basis::pos('w'),
-        ]);
-        let algebra = Algebra {
-            bases: Box::leak(bases),
-            slim: true,
-        };
-
-        let output = format!("{}", algebra.define());
-        std::fs::write(path, output).unwrap();
     }
 
     #[test]
     fn define_type() {
         let tokens = Type::Grade(2)
-            .define(crate::algebra::tests::ga_3d())
+            .define(&crate::algebra::tests::ga_3d())
             .to_token_stream()
             .to_string();
         let expected = quote! {
@@ -2586,13 +2557,14 @@ mod tests {
 
     #[test]
     fn numeric_bases() {
-        let a = Algebra {
-            bases: &[Basis {
-                char: '1',
-                sqr: Square::Pos,
-            }],
-            slim: true,
-        };
-        assert_eq!("e1", Blades::from(a).nth(1).unwrap().field(a).to_string());
+        let a = Algebra::new(vec![Basis {
+            char: '1',
+            sqr: Square::Pos,
+        }]);
+
+        assert_eq!(
+            "e1",
+            Blades::from(&a).nth(1).unwrap().field_ref(&a).to_string()
+        );
     }
 }
