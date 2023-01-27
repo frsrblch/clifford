@@ -1,5 +1,4 @@
-use clifford::pga_3d::*;
-use std::ops::*;
+use pga_3d::*;
 
 #[test]
 fn rotor_sqrt() {

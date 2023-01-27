@@ -19,6 +19,7 @@ impl Algebra {
         let impl_one = self.types().filter_map(|ty| ty.impl_one(self));
         let impl_bytemuck = self.types().map(ImplBytemuck);
         let impl_float_type = self.types().map(ImplFloatType);
+        let impl_map = self.types().map(ImplMap);
 
         let impl_product_ops = self.type_tuples().flat_map(|(lhs, rhs)| {
             ProductOp::iter_all(self).filter_map(move |op| op.impl_for(self, lhs, rhs))
@@ -90,6 +91,10 @@ impl Algebra {
         let test_sample_unit = self.types().map(|ty| ty.test_sample_unit(self));
 
         quote!(
+            pub use geo_traits::*;
+            pub use num_traits::{one, zero, Float, FloatConst, One, Zero};
+            pub use std::ops::*;
+
             #(#structs)*
             #scalar_num_traits
             #scalar_float
@@ -101,6 +106,7 @@ impl Algebra {
             #(#impl_one)*
             #(#impl_bytemuck)*
             #(#impl_float_type)*
+            #(#impl_map)*
             #(#impl_product_ops)*
             #(#operator_overloads)*
             #(#unary_operator_overloads)*
@@ -617,11 +623,25 @@ impl ToTokens for ImplFloatType {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let ty = self.0;
         tokens.extend(quote! {
-            impl<T> geo_traits::FloatType for #ty<T>
-            where
-                T: num_traits::Float,
-            {
+            impl<T> geo_traits::FloatType for #ty<T> {
                 type Float = T;
+            }
+        });
+    }
+}
+
+struct ImplMap(Type);
+
+impl ToTokens for ImplMap {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let ty = self.0;
+        tokens.extend(quote! {
+            impl<T, U> geo_traits::Map<U> for #ty<T> {
+                type Output = #ty<U>;
+                #[inline]
+                fn map<F: Fn(T) -> U>(self, f: F) -> Self::Output {
+                    #ty::map(self, f)
+                }
             }
         });
     }

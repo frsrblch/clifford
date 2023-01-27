@@ -97,5 +97,10 @@ pub trait Unitize {
 }
 
 pub trait FloatType {
-    type Float: num_traits::Float;
+    type Float;
+}
+
+pub trait Map<U>: FloatType {
+    type Output: FloatType<Float = U>;
+    fn map<F: Fn(Self::Float) -> U>(self, f: F) -> Self::Output;
 }

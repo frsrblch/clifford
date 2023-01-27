@@ -1,4 +1,4 @@
-use clifford::cga_3d::*;
+use cga_3d::*;
 
 #[test]
 fn is_flat_tests() {
@@ -70,6 +70,7 @@ fn is_flat_tests() {
 fn invert<T, U>(t: T) -> T
 where
     T: FloatType + std::ops::Neg<Output = T>,
+    T::Float: Float,
     Vector<T::Float>: Geo<T, Output = U>,
     T: GradeProduct<U, Vector<T::Float>, Output = T>,
 {

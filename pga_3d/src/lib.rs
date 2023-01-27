@@ -1,7 +1,4 @@
-pub use geo_traits::*;
-pub use num_traits::{Float, FloatConst, One, Zero, one, zero};
-
-macros::algebra! {
+clifford::algebra! {
     x ^ 2 == 1,
     y ^ 2 == 1,
     z ^ 2 == 1,
@@ -11,7 +8,7 @@ macros::algebra! {
 #[inline]
 pub fn point<T>(x: T, y: T, z: T) -> Unit<Trivector<T>>
 where
-    T: Float,
+    T: One + Neg<Output = T>,
 {
     Unit::assert(Trivector {
         xyz: T::one(),
@@ -90,7 +87,7 @@ where
 
 impl<T> Trivector<T>
 where
-    T: Float,
+    T: std::ops::Neg<Output = T> + std::ops::Div<Output = T> + Copy,
 {
     /// Return the (x, y, z) coordinates
     #[inline]
@@ -105,7 +102,7 @@ where
 
 impl<T> Unit<Trivector<T>>
 where
-    T: Float,
+    T: std::ops::Neg<Output = T>,
 {
     /// Return the (x, y, z) coordinates
     #[inline]
@@ -225,7 +222,6 @@ impl<T: Float> Motor<T> {
     where
         Bivector<T>: std::ops::Mul<U, Output = Bivector<T>>,
     {
-        use std::ops::Mul;
         start * (start.inv() * end).log().mul(fraction).exp()
     }
 }

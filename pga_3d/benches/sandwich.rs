@@ -1,4 +1,4 @@
-use clifford::pga_3d::*;
+use pga_3d::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 criterion_main!(sandwich);

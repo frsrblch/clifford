@@ -1,0 +1,16 @@
+[package]
+name = "ga_3d"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bytemuck = "1.13.0"
+clifford = { version = "0.1.0", path = "../" }
+geo_traits = { version = "0.1.0", path = "../geo_traits" }
+num-traits = "0.2.15"
+rand = "0.8.5"
+
+[[test]]
+name = "ga_3d_tests"

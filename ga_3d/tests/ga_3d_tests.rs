@@ -1,4 +1,4 @@
-use clifford::ga_3d::*;
+use ga_3d::*;
 
 #[test]
 fn vector_inv() {

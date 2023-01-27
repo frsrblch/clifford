@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Fraser Balch"]
 
 [workspace]
-members = ["macros", "geo_traits"]
+members = ["macros", "geo_traits", "algebra", "ga_3d", "pga_3d", "cga_3d"]
 
 [dependencies]
 num-traits = "0.2.15"
@@ -13,28 +13,3 @@ rand = "0.8.5"
 bytemuck = "1.12.3"
 geo_traits = { path = "./geo_traits" }
 macros = { path = "./macros" }
-
-[dev-dependencies]
-criterion = "0.4.0"
-
-[[test]]
-name = "ga_3d_tests"
-required-features = ["ga_3d"]
-
-[[test]]
-name = "pga_3d_tests"
-required-features = ["pga_3d"]
-
-[[test]]
-name = "cga_3d_tests"
-required-features = ["cga_3d"]
-
-[features]
-ga_3d = []
-pga_3d = []
-cga_3d = []
-
-[[bench]]
-name = "sandwich"
-harness = false
-required-features = ["pga_3d"]

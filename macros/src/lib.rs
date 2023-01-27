@@ -1,7 +1,8 @@
 extern crate proc_macro;
 
+use crate::algebra::Basis;
+use algebra::Algebra;
 use syn::{parse::Parse, parse_macro_input, token::Comma, LitInt};
-use crate::algebra::{Algebra, Basis};
 
 mod algebra;
 mod code_gen;

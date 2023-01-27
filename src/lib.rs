@@ -100,16 +100,4 @@
 //!
 //! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features.html
 
-/// 3D Vectorspace Geometric Algbra
-#[cfg(feature = "ga_3d")]
-pub mod ga_3d;
-
-/// 3D Projective Geometric Algebra
-#[cfg(feature = "pga_3d")]
-pub mod pga_3d;
-
-/// 3D Conformal Geometric Algebra
-#[cfg(feature = "cga_3d")]
-pub mod cga_3d;
-
 pub use macros::{algebra, algebra_slim};

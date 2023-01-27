@@ -4,7 +4,7 @@ use std::iter::FromIterator;
 pub struct Algebra {
     pub bases: Vec<Basis>,
     pub fields: Vec<syn::Ident>,
-    /// If true, limits the amount of code generated at the cost of having a complete algebra
+    /// If true, limits the amount of code generated at the cost of not having a complete algebra
     pub slim: bool,
 }
 
@@ -143,10 +143,6 @@ impl Algebra {
 
     pub fn symmetrical_complements(&self) -> bool {
         Blades::from(self).all(|blade| self.left_comp(blade) == self.right_comp(blade))
-    }
-
-    pub fn grade(&self, grade: u32) -> impl Iterator<Item = Blade> + '_ {
-        Blades::from(self).filter(move |b| b.grade() == grade)
     }
 
     pub fn grades(&self) -> impl Iterator<Item = Type> + '_ {
@@ -456,8 +452,8 @@ pub enum Square {
 impl Square {
     fn blade(self) -> Blade {
         match self {
-            Self::Pos => Blade(0),
-            Self::Neg => -Blade(0),
+            Self::Pos => Blade::scalar(),
+            Self::Neg => -Blade::scalar(),
             Self::Zero => Blade::zero(),
         }
     }
@@ -485,7 +481,7 @@ impl Blade {
     }
 
     pub fn rev(self) -> Self {
-        let count = self.unsigned().count();
+        let count = self.count();
         let half = count / 2;
         let odd = half & 1 == 1;
         if odd {
@@ -985,6 +981,10 @@ pub(crate) mod tests {
         let s = Blade(0);
         assert_eq!(s, s.unsigned());
         assert_eq!(s, (-s).unsigned());
+
+        let z = Blade::zero();
+        assert_eq!(z, z.unsigned());
+        assert_eq!(z, (-z).unsigned());
     }
 
     #[test]
@@ -1035,11 +1035,6 @@ pub(crate) mod tests {
         let a = ga_2d();
         assert_eq!(Blade::zero(), a.geo(Blade(1), Blade::zero()));
         assert_eq!(Blade::zero(), a.geo(Blade::zero(), Blade(1)));
-    }
-
-    #[test]
-    fn zero_unsigned_is_zero() {
-        assert_eq!(Blade::zero(), Blade::zero().unsigned());
     }
 
     #[test]

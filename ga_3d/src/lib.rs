@@ -1,7 +1,4 @@
-pub use geo_traits::*;
-pub use num_traits::{one, zero, Float, FloatConst, One, Zero};
-
-macros::algebra! {
+clifford::algebra! {
     x ^ 2 == 1,
     y ^ 2 == 1,
     z ^ 2 == 1,

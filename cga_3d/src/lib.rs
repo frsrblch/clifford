@@ -1,9 +1,6 @@
 #![allow(non_snake_case)]
 
-pub use geo_traits::*;
-pub use num_traits::{one, zero, Float, FloatConst, One, Zero};
-
-macros::algebra! {
+clifford::algebra! {
     x ^ 2 == 1,
     y ^ 2 == 1,
     z ^ 2 == 1,
@@ -52,6 +49,7 @@ pub trait IsFlat {
 impl<T, U> IsFlat for T
 where
     T: FloatType + Wedge<Vector<T::Float>, Output = U> + Copy,
+    T::Float: Float,
     U: Zero,
 {
     fn is_flat(&self) -> bool {
