@@ -18,6 +18,8 @@ pub enum BinaryTrait {
     Antidot,
     Antigeo,
     Commutator,
+    LeftContraction,
+    RightContraction,
     Sandwich,
     Antisandwich,
     /// Overloads
@@ -56,6 +58,8 @@ impl BinaryTrait {
             Antidot => quote!(geo_traits::Antidot),
             Antigeo => quote!(geo_traits::Antigeo),
             Commutator => quote!(geo_traits::Commutator),
+            LeftContraction => quote!(geo_traits::LeftContraction),
+            RightContraction => quote!(geo_traits::RightContraction),
             Sandwich => quote!(geo_traits::Sandwich),
             Antisandwich => quote!(geo_traits::Antisandwich),
             BitAnd => quote!(std::ops::BitAnd),
@@ -85,6 +89,8 @@ impl BinaryTrait {
             Antidot => quote!(antidot),
             Antigeo => quote!(antigeo),
             Commutator => quote!(com),
+            LeftContraction => quote!(left_con),
+            RightContraction => quote!(right_con),
             Sandwich => quote!(sandwich),
             Antisandwich => quote!(antisandwich),
             BitAnd => quote!(bitand),
@@ -248,8 +254,8 @@ impl BinaryTrait {
                     }
                 })
             }
-            Mul | Geo | Dot | Wedge | Antigeo | Antidot | Antiwedge | Commutator | BitAnd
-            | BitOr | BitXor => {
+            Mul | Geo | Dot | Wedge | Antigeo | Antidot | Antiwedge | Commutator
+            | LeftContraction | RightContraction | BitAnd | BitOr | BitXor => {
                 if (lhs.is_float() || rhs.is_float())
                     && matches!(
                         self,
@@ -259,6 +265,8 @@ impl BinaryTrait {
                             | Antidot
                             | Antiwedge
                             | Commutator
+                            | LeftContraction
+                            | RightContraction
                             | BitAnd
                             | BitOr
                             | BitXor
@@ -295,6 +303,8 @@ impl BinaryTrait {
                                 Antidot => algebra.antidot(l, r),
                                 Antiwedge | BitAnd => algebra.antiwedge(l, r),
                                 Commutator => algebra.commutator(l, r),
+                                LeftContraction => algebra.left_con(l, r),
+                                RightContraction => algebra.right_con(l, r),
                                 _ => unimplemented!(),
                             };
                             let lv = lhs.access_field(self_var, l, algebra);
@@ -680,6 +690,12 @@ impl BinaryTrait {
                 .map(OverType::Type),
             Commutator => algebra
                 .product(lhs, rhs, Algebra::commutator)
+                .map(OverType::Type),
+            LeftContraction => algebra
+                .product(lhs, rhs, Algebra::left_con)
+                .map(OverType::Type),
+            RightContraction => algebra
+                .product(lhs, rhs, Algebra::right_con)
                 .map(OverType::Type),
             _ => unimplemented!(),
         }

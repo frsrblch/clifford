@@ -59,19 +59,6 @@ mod algebra_new {
         where
             Basis: From<B>,
         {
-            // let bases = bases.into_iter().map(Basis::from).collect::<Vec<_>>();
-            // let dim = bases.len();
-            // let mut algebra = Algebra {
-            //     bases,
-            //     fields: vec![],
-            //     ordering: BladeOrdering::new(dim),
-            // };
-            // BladeOrdering::configure(&mut algebra);
-            // let fields = Blades::from(&algebra)
-            //     .map(|blade| blade.field(&algebra))
-            //     .collect();
-            // algebra.fields = fields;
-            // algebra
             Self::new_with_fields(bases, [])
         }
 
@@ -259,6 +246,22 @@ impl Algebra {
         self.left_comp(output)
     }
 
+    pub(crate) fn left_con(&self, lhs: Blade, rhs: Blade) -> Blade {
+        if lhs.grade() <= rhs.grade() {
+            self.dot(lhs, rhs)
+        } else {
+            Blade::zero()
+        }
+    }
+
+    pub(crate) fn right_con(&self, lhs: Blade, rhs: Blade) -> Blade {
+        if lhs.grade() >= rhs.grade() {
+            self.dot(lhs, rhs)
+        } else {
+            Blade::zero()
+        }
+    }
+
     pub(crate) fn right_comp(&self, blade: Blade) -> Blade {
         if blade.is_zero() {
             return Blade::zero();
@@ -338,15 +341,11 @@ impl Algebra {
     }
 
     pub fn define(&self) -> TokenStream {
-        let mut tokens = quote!();
-
-        quote! {
+        let mut tokens = quote! {
             pub use geo_traits::*;
             pub use num_traits::{one, zero, Float, FloatConst, Inv, One, Zero};
             pub use std::ops::{Add, Sub, Mul, Div, AddAssign, SubAssign, MulAssign, DivAssign, Neg};
-            pub use bytemuck::{Pod, Zeroable};
-        }
-        .to_tokens(&mut tokens);
+        };
 
         Mag::define_all(&mut tokens);
 

@@ -377,3 +377,25 @@ fn manual_blade_ordering() {
     assert!(!algebra.ordering.is_flipped(Blade(2)));
     assert!(algebra.ordering.is_flipped(Blade(3)));
 }
+
+#[test]
+fn left_contraction() {
+    let a = ga_2d();
+    let x = Blade(0b1);
+    let xy = Blade(0b11);
+
+    assert_eq!(Blade(0b10), a.left_con(x, xy));
+    assert_eq!(Blade::zero(), a.left_con(xy, x));
+    assert_eq!(Blade(0), a.left_con(x, x));
+}
+
+#[test]
+fn right_contraction() {
+    let a = ga_2d();
+    let x = Blade(0b1);
+    let xy = Blade(0b11);
+
+    assert_eq!(Blade::zero(), a.right_con(x, xy));
+    assert_eq!(-Blade(0b10), a.right_con(xy, x));
+    assert_eq!(Blade(0), a.right_con(x, x));
+}
