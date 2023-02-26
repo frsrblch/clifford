@@ -31,8 +31,8 @@
 //! Inner products:
 //! - [x] Dot
 //! - [x] Antidot
-//! - [ ] Left contraction
-//! - [ ] Right contraction
+//! - [x] Left contraction
+//! - [x] Right contraction
 //!
 //! Outer products:
 //! - [x] Wedge
