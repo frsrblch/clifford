@@ -345,6 +345,7 @@ impl Algebra {
             pub use geo_traits::*;
             pub use num_traits::{one, zero, Float, FloatConst, Inv, One, Zero};
             pub use std::ops::{Add, Sub, Mul, Div, AddAssign, SubAssign, MulAssign, DivAssign, Neg};
+            pub use bytemuck::{Pod, Zeroable};
         };
 
         Mag::define_all(&mut tokens);
