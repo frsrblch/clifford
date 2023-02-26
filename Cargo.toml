@@ -2,14 +2,11 @@
 name = "clifford"
 version = "0.1.0"
 edition = "2021"
-authors = ["Fraser Balch"]
+authors = ["Fraser Balch <fraser.balch@gmail.com>"]
+keywords = ["clifford", "algebra", "geometric"]
 
 [workspace]
-members = ["macros", "geo_traits", "algebra", "ga_3d", "pga_3d", "cga_3d"]
+members = ["macros", "algebra"]
 
 [dependencies]
-num-traits = "0.2.15"
-rand = "0.8.5"
-bytemuck = "1.12.3"
-geo_traits = { path = "./geo_traits" }
 macros = { path = "./macros" }

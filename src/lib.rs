@@ -2,36 +2,26 @@
 //!
 //! [`Feature set`]
 //!
-//! Models of geometry:
-//! - [x] Vectorspace GA 3D
-//! - [x] Homogeneous PGA 3D
-//! - [ ] Conformal CGA 3D (experimental WIP)
-//!     - [x] Origin
-//!     - [x] Infinity
-//!     - [x] IsFlat
-//! - [ ] Minkowski
-//!
 //! Types:
 //! - [x] Grades
 //! - [x] Even-grade
 //! - [x] Odd-grade
 //! - [x] Multivector
-//! - [x] Unit
-//!     - [ ] Seamless use of unary and binary operations with `Unit<T>` types
+//! - [x] Unit typestate
+//!     - [x] Seamless use of unary and binary operations
 //!
 //! Generics:
 //! - [x] flexible generics (e.g., `Vector<T>: Mul<Scalar<U>, Output = Vector<V>> where T: Mul<U, Output = V>`)
-//! - [x] f32/f64 conversions
 //! - [x] FloatType trait (e.g., `Vector<T>: FloatType<Float = T>`)
 //!
 //! Functions:
 //! - [x] Grade selection (e.g., `Motor::bivector() -> Bivector`)
 //! - [x] fn new(...) -> Self { ... }
-//! - [x] `From<Grade>` for `Versor`/`Multivector`
+//! - [x] `From<Grade>` for `Motor`/`Flector`/`Multivector`
 //!
 //! Main products:
-//! - [x] Mul scalar
-//! - [x] Div scalar
+//! - [x] Mul
+//! - [x] Div
 //! - [x] Geometric
 //! - [x] Antigeometric
 //! - [x] Grade products
@@ -48,12 +38,6 @@
 //! - [x] Wedge
 //! - [x] Antiwedge (regressive)
 //!
-//! Interior products:
-//! - [ ] Right interior product
-//! - [ ] Left interior product
-//! - [ ] Right interior antiproduct
-//! - [ ] Left interior antiproduct
-//!
 //! Sum products:
 //! - [x] Addition
 //! - [x] Subtraction
@@ -62,8 +46,8 @@
 //! Assignment:
 //! - [x] AddAssign
 //! - [x] SubAssign
-//! - [x] MulAssign scalar
-//! - [x] DivAssign scalar
+//! - [x] MulAssign
+//! - [x] DivAssign
 //!
 //! Unary operations:
 //! - [x] Neg
@@ -96,8 +80,13 @@
 //!
 //! Rand:
 //! - [x] `Unit<T>` for r-vectors where 0 < r < n
-//! - [x] Random r-vector with norm < 1
+//! - [x] Random r-vector with norm <= 1
+//! - [x] Random r-vector with norm == 1
 //!
-//! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features.html
+//! Iter:
+//! - [x] std::iter::Sum
+//! - [x] std::iter::Product
+//!
+//! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features.
 
-pub use macros::{algebra, algebra_slim};
+pub use macros::algebra;
