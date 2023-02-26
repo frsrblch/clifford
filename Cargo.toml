@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Fraser Balch <fraser.balch@gmail.com>"]
 keywords = ["clifford", "algebra", "geometric"]
+license = "MIT"
 
 [workspace]
 members = ["macros", "algebra"]
