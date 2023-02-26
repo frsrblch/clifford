@@ -3,12 +3,11 @@
 //! [`Feature set`]
 //!
 //! Types:
-//! - [x] Grades
-//! - [x] Even-grade
-//! - [x] Odd-grade
+//! - [x] Grades (`Vector`, `Bivector`, etc)
+//! - [x] Even-grade (`Motor`)
+//! - [x] Odd-grade (`Flector`)
 //! - [x] Multivector
 //! - [x] Unit typestate
-//!     - [x] Seamless use of unary and binary operations
 //!
 //! Generics:
 //! - [x] flexible generics (e.g., `Vector<T>: Mul<Scalar<U>, Output = Vector<V>> where T: Mul<U, Output = V>`)
@@ -79,9 +78,8 @@
 //! - [x] Float for `Scalar<T>`
 //!
 //! Rand:
-//! - [x] `Unit<T>` for r-vectors where 0 < r < n
 //! - [x] Random r-vector with norm <= 1
-//! - [x] Random r-vector with norm == 1
+//! - [x] Random unit r-vector with norm == 1
 //!
 //! Iter:
 //! - [x] std::iter::Sum
