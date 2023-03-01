@@ -595,6 +595,10 @@ impl BinaryTrait {
                 let out_d = out.with_type_param(t, d);
 
                 let (bound, expr) = match Type::from(rhs) {
+                    ty if ty == out => (
+                        quote!(#int_t: #geo_ty<#lhs_t, Output = #out_d>),
+                        quote!(#geo_ty::#geo_fn(int, inv).assert()),
+                    ),
                     Type::Grade(_) => {
                         let fn_ident = Type::from(rhs).fn_ident();
                         (
