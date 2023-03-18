@@ -390,33 +390,7 @@ mod tests {
             }",
         )
         .unwrap();
-        dbg!(&algebra);
 
-        // let path = r#"C:\Users\Farseer\IdeaProjects\clifford\output.rs"#;
-        // std::fs::write(path, algebra.define().to_string()).unwrap();
-        // std::process::Command::new("rustfmt")
-        //     .arg(path)
-        //     .output()
-        //     .unwrap();
-    }
-
-    #[test]
-    fn cga_3d_parse() {
-        let algebra: crate::Algebra = syn::parse_str(
-            "bases {
-                x ^ 2 == 1,
-                y ^ 2 == 1,
-                z ^ 2 == 1,
-                e ^ 2 == 1,
-                E ^ 2 == -1,
-            },
-            blades {
-                xy, yz, zx, ez, ey, ex, zyx, exy, ezx, eyz, xyze,
-                xE, yE, zE, eE, yzE, zxE, xyE, ezE, eyE, exE, zyxE, exyE, ezxE, eyzE, xyzeE,
-            }",
-        )
-        .unwrap();
-        dbg!(&algebra);
-        // panic!("done");
+        assert_eq!(crate::tests::pga_3d(), algebra);
     }
 }
