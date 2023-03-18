@@ -10,5 +10,5 @@ license = "MIT"
 proc-macro = true
 
 [dependencies]
-syn = "1.0"
+syn = "2.0.0"
 algebra = { path = "../algebra" }

@@ -54,7 +54,7 @@ impl Parse for Bases {
         Ok(Self {
             bases_token: input.parse()?,
             brace: braced!(content in input),
-            bases: content.parse_terminated(Parse::parse)?,
+            bases: content.parse_terminated(Parse::parse, Token![,])?,
         })
     }
 }
@@ -218,7 +218,7 @@ impl Parse for Blades {
         Ok(Self {
             token: input.parse()?,
             brace: braced!(content in input),
-            blades: content.parse_terminated(Ident::parse)?,
+            blades: content.parse_terminated(Ident::parse, Token![,])?,
         })
     }
 }
