@@ -618,7 +618,7 @@ impl BinaryTrait {
                         quote!(#geo_ty::#geo_fn(int, inv).assert()),
                     ),
                     (_, out) => {                        
-                        let fn_ident = Type::from(out).fn_ident();
+                        let fn_ident = out.fn_ident();
                         (
                             quote!(#int_t: #geo_ty<#lhs_t, Output = #raw_out_t>),
                             quote!(#geo_ty::#geo_fn(int, inv).#fn_ident().assert()),
