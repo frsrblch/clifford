@@ -343,7 +343,7 @@ impl Algebra {
 
     pub fn define(&self) -> TokenStream {
         let mut tokens = quote! {
-            pub use geo_traits::*;
+            pub use clifford::*;
             pub use num_traits::{one, zero, Float, FloatConst, Inv, One, Zero};
             pub use std::ops::{Add, Sub, Mul, Div, AddAssign, SubAssign, MulAssign, DivAssign, Neg};
             pub use bytemuck::{Pod, Zeroable};

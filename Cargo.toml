@@ -11,3 +11,4 @@ members = ["macros", "algebra"]
 
 [dependencies]
 macros = { path = "./macros" }
+geo_traits = { path = "../geo_traits" }

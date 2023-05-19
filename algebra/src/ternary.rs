@@ -15,8 +15,8 @@ impl TernaryTrait {
 
     pub fn ty(self) -> TokenStream {
         match self {
-            Self::GradeProduct => quote!(geo_traits::GradeProduct),
-            Self::GradeAntiproduct => quote!(geo_traits::GradeAntiproduct),
+            Self::GradeProduct => quote!(clifford::GradeProduct),
+            Self::GradeAntiproduct => quote!(clifford::GradeAntiproduct),
         }
     }
 
