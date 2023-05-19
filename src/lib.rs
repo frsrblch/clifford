@@ -17,6 +17,7 @@
 //! - [x] Grade selection (e.g., `Motor::bivector() -> Bivector`)
 //! - [x] fn new(...) -> Self { ... }
 //! - [x] `From<Grade>` for `Motor`/`Flector`/`Multivector`
+//! - [ ] Index functions (`index`/`index_ref`/`index_mut`) for indexable `T` (e.g., `Vector<f32x8>`)
 //!
 //! Main products:
 //! - [x] Mul
@@ -54,6 +55,8 @@
 //! - [x] Right complement
 //! - [x] Reverse
 //! - [x] Antireverse
+//! - [ ] Grade Involution
+//! - [ ] Clifford Conjugate
 //!
 //! Norm-based operations:
 //! - [x] Norm
@@ -84,6 +87,11 @@
 //! Iter:
 //! - [x] std::iter::Sum
 //! - [x] std::iter::Product
+//!
+//! Approx:
+//! - [ ] AbsDiffEq
+//! - [ ] RelativeEq
+//! - [ ] UlpsEq
 //!
 //! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features.
 
