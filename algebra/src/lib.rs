@@ -184,15 +184,16 @@ impl Algebra {
             .filter_map(move |(i, b)| set.contains(i as u32).then_some(*b))
     }
 
-    pub(crate) fn product<T, F: Fn(&Algebra, Blade, Blade) -> Blade>(
+    pub(crate) fn product<T, U, F: Fn(&Algebra, Blade, Blade) -> Blade>(
         &self,
         lhs: T,
-        rhs: T,
+        rhs: U,
         f: F,
     ) -> Option<Type>
     where
-        Type: From<T>,
+        Type: From<T> + From<U>,
         T: Copy,
+        U: Copy,
     {
         let f = &f;
         TypeBlades::new(self, lhs)

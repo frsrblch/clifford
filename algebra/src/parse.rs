@@ -166,43 +166,7 @@ impl Parse for crate::Algebra {
             return Ok(crate::Algebra::from(algebra));
         }
 
-        Err(Error::new(input.span(), "unrecognized input, "))
-
-        // let mut bases = vec![];
-        // loop {
-        //     let char = input.parse::<syn::Ident>().and_then(|ident| {
-        //         let str = ident.to_string();
-        //         if str.len() == 1 {
-        //             Ok(str.chars().next().unwrap())
-        //         } else {
-        //             Err(Error::new(ident.span(), "bases must be a single character"))
-        //         }
-        //     })?;
-        //     let _caret = input.parse::<syn::token::Caret>()?;
-        //     let _two = input.parse::<LitInt>().and_then(|int| {
-        //         let u32 = int.base10_parse::<u32>()?;
-        //         if u32 == 2 {
-        //             Ok(int)
-        //         } else {
-        //             Err(Error::new(int.span(), "expected 2"))
-        //         }
-        //     })?;
-        //     let _eq = input.parse::<syn::Token![==]>()?;
-        //     let lit_int = input.parse::<LitInt>()?;
-        //     let sqr = match lit_int.base10_parse::<i32>()? {
-        //         -1 => Square::Neg,
-        //         0 => Square::Zero,
-        //         1 => Square::Pos,
-        //         _ => return Err(Error::new(lit_int.span(), "expected 1, 0, or -1")),
-        //     };
-        //     bases.push(crate::Basis { char, sqr });
-
-        //     let _: Comma = input.parse()?;
-
-        //     if input.is_empty() {
-        //         return Ok(crate::Algebra::new(bases));
-        //     }
-        // }
+        Err(Error::new(input.span(), "unrecognized input"))
     }
 }
 

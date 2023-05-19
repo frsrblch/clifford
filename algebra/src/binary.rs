@@ -274,13 +274,19 @@ impl BinaryTrait {
                 {
                     return Impl::None;
                 }
+
+                // prevents downstream crates from infinte type recursion
+                if lhs.is_float() && self == Mul {
+                    return Impl::None;
+                }
+
                 let (trait_ty, trait_fn) = self.ty_fn();
                 let (zero_ty, zero_fn) = UnaryTrait::Zero.ty_fn();
 
                 let Some(output) = self.product(lhs, rhs, algebra) else { return Impl::None };
 
                 let bounds_and_types = if matches!(self, Mul | Geo) {
-                    TraitBounds::geo_types(lhs, rhs, algebra)
+                    TraitBounds::geo_types(lhs, rhs, algebra, self)
                 } else {
                     TraitBounds::product_types(lhs, rhs)
                 };
@@ -377,7 +383,8 @@ impl BinaryTrait {
                 let (trait_ty, trait_fn) = self.ty_fn();
                 let (inv_ty, inv_fn) = UnaryTrait::Inverse.ty_fn();
                 let (zero_ty, zero_fn) = UnaryTrait::Zero.ty_fn();
-                let Some((mut bounds, [t, u, v], [a, b, c])) = TraitBounds::geo_types(lhs, rhs, algebra) else { return Impl::None };
+                let Some((mut bounds, [t, u, v], [a, b, c])) 
+                    = TraitBounds::geo_types(lhs, rhs, algebra, self) else { return Impl::None }; 
 
                 let lhs_t = lhs.with_type_param(t, a);
                 let rhs_u = rhs.with_type_param(u, b);
@@ -468,7 +475,12 @@ impl BinaryTrait {
                     (OverType::Float(_), _) => [Any.into(), B, Any.into()],
                     (_, OverType::Float(_)) => [Any.into(); 3],
                     _ => {
-                        bounds.insert(A.mul(B, A));
+                        if self == MulAssign {
+                            bounds.insert(A.mul(B, A));
+                        }
+                        if self == DivAssign {
+                            bounds.insert(A.div(B, A));
+                        }
                         [A, B, A]
                     }
                 };
@@ -581,7 +593,13 @@ impl BinaryTrait {
                 }
 
                 let Some(int) = algebra.product(lhs, rhs, Algebra::geo) else { return Impl::None };
-                let int = OverType::Type(int);
+                let Some(raw_out) = algebra.product(int, lhs, Algebra::geo) else { return Impl::None };
+
+                let out = match (Type::from(rhs), raw_out) {
+                    (Type::Grade(r), _) | (_, Type::Grade(r)) => Type::Grade(r),
+                    (rhs, _) => rhs,
+                };
+                
                 let (trait_ty, trait_fn) = self.ty_fn();
                 let (inv_ty, inv_fn) = UnaryTrait::Inverse.ty_fn();
                 let (geo_ty, geo_fn) = BinaryTrait::Geo.ty_fn();
@@ -591,25 +609,21 @@ impl BinaryTrait {
                 let lhs_t = lhs.with_type_param(t, a);
                 let rhs_t = rhs.with_type_param(t, b);
                 let int_t = int.with_type_param(t, c);
-                let Some(out) = algebra.product(int, lhs, Algebra::geo) else { return Impl::None };
-                let out_d = out.with_type_param(t, d);
+                let raw_out_t = raw_out.with_type_param(t, d);
+                let out_t = out.with_type_param(t, b);
 
-                let (bound, expr) = match Type::from(rhs) {
-                    ty if ty == out => (
-                        quote!(#int_t: #geo_ty<#lhs_t, Output = #out_d>),
+                let (bound, expr) = match (raw_out, out) {
+                    (raw_out, out) if raw_out == out => (
+                        quote!(#int_t: #geo_ty<#lhs_t, Output = #raw_out_t>),
                         quote!(#geo_ty::#geo_fn(int, inv).assert()),
                     ),
-                    Type::Grade(_) => {
-                        let fn_ident = Type::from(rhs).fn_ident();
+                    (_, out) => {                        
+                        let fn_ident = Type::from(out).fn_ident();
                         (
-                            quote!(#int_t: #geo_ty<#lhs_t, Output = #out_d>),
+                            quote!(#int_t: #geo_ty<#lhs_t, Output = #raw_out_t>),
                             quote!(#geo_ty::#geo_fn(int, inv).#fn_ident().assert()),
                         )
-                    }
-                    Type::Motor | Type::Flector | Type::Mv => (
-                        quote!(#int_t: #geo_ty<#lhs_t, Output = #out_d>),
-                        quote!(#geo_ty::#geo_fn(int, inv).assert()),
-                    ),
+                    },
                 };
 
                 Impl::Actual(quote! {
@@ -620,7 +634,7 @@ impl BinaryTrait {
                             + Copy,
                         #bound
                     {
-                        type Output = #rhs_t;
+                        type Output = #out_t;
                         #[inline]
                         fn #trait_fn(self, rhs: #rhs_t) -> Self::Output {
                             let inv = #inv_ty::#inv_fn(self);

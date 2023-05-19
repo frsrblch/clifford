@@ -227,7 +227,7 @@ impl UnaryTrait {
                 bounds.insert(A);
                 bounds.insert(ty_t_any.zero());
                 bounds.insert(ty_t_any.add(ty_t, ty_t_any));
-                let (params, where_clause) = bounds.params_and_where_clause();
+                let (params, where_clause) = bounds.clone().params_and_where_clause();
 
                 bounds.insert(Lifetime::A);
                 bounds.insert(ty_t.copy());
@@ -292,7 +292,7 @@ impl UnaryTrait {
 
                 bounds.insert(A);
                 bounds.insert(ty_t.mul(ty_t, ty_t));
-                let (params, where_clause) = bounds.params_and_where_clause();
+                let (params, where_clause) = bounds.clone().params_and_where_clause();
 
                 bounds.insert(Lifetime::A);
                 bounds.insert(ty_t.copy());
@@ -542,27 +542,54 @@ impl UnaryTrait {
                         return Impl::None;
                     }
 
+                    let blade_count = TypeBlades::new(algebra, ty).count();
+
                     let (trait_ty, trait_fn) = self.ty_fn();
                     let (rev_ty, rev_fn) = UnaryTrait::Reverse.ty_fn();
 
                     let inv_ty = {
+                        let (one_ty, one_fn) = UnaryTrait::One.ty_fn();
                         let (norm2_ty, norm2_fn) = UnaryTrait::Norm2.ty_fn();
                         let ty_t = inner.with_type_param(T, Mag::Any);
+
                         let s = &algebra.fields[Blade(0)];
 
                         let mut bounds = TraitBounds::default();
                         bounds.insert(ty_t.copy());
+
                         bounds.insert(T.copy());
+
                         bounds.insert(T.div(T, T));
                         bounds.insert(ty_t.norm2());
                         bounds.insert(ty_t.rev());
-                        let (params, where_clause) = bounds.params_and_where_clause();
 
-                        let fields = TypeFields::new(algebra, inner).map(|(_, field)| {
-                            quote! {
-                                #field: rev.#field / norm2
-                            }
-                        });
+                        let (fields, inv_norm2) = if blade_count >= 4 {
+                            bounds.insert(T.one());
+                            bounds.insert(T.mul(T, T));
+                            (
+                                TypeFields::new(algebra, inner)
+                                    .map(|(_, field)| {
+                                        quote! {
+                                            #field: rev.#field * inv_norm2
+                                        }
+                                    })
+                                    .collect::<Vec<_>>(),
+                                Some(quote!(let inv_norm2 = <T as #one_ty>::#one_fn() / norm2;)),
+                            )
+                        } else {
+                            (
+                                TypeFields::new(algebra, inner)
+                                    .map(|(_, field)| {
+                                        quote! {
+                                            #field: rev.#field / norm2
+                                        }
+                                    })
+                                    .collect::<Vec<_>>(),
+                                None,
+                            )
+                        };
+
+                        let (params, where_clause) = bounds.clone().params_and_where_clause();
 
                         quote! {
                             impl #params #trait_ty for #ty_t #where_clause {
@@ -571,6 +598,7 @@ impl UnaryTrait {
                                 fn #trait_fn(self) -> Self::Output {
                                     let rev = #rev_ty::#rev_fn(self);
                                     let norm2 = #norm2_ty::#norm2_fn(self).#s;
+                                    #inv_norm2
                                     #inner {
                                         #(#fields,)*
                                         marker: std::marker::PhantomData,

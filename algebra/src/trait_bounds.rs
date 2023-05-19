@@ -36,8 +36,8 @@ impl Insert<FloatParam> for TraitBounds {
     }
 }
 
-impl Insert<TraitBound<TypeParam>> for TraitBounds {
-    fn insert(&mut self, item: TraitBound<TypeParam>) {
+impl Insert<TraitBound> for TraitBounds {
+    fn insert(&mut self, item: TraitBound) {
         for t in item.generics() {
             self.insert(t);
         }
@@ -51,53 +51,9 @@ impl Insert<Lifetime> for TraitBounds {
     }
 }
 
-impl Insert<TraitBound<FloatParam>> for TraitBounds {
-    fn insert(&mut self, item: TraitBound<FloatParam>) {
-        for t in item.generics() {
-            self.bounds.entry(t.into()).or_default();
-        }
-        let item = match item {
-            TraitBound::Unary(unary) => TraitBound::Unary(UnaryTraitBound {
-                ty: TypeParam::from(unary.ty),
-                unary_trait: unary.unary_trait,
-                output: unary.output.map(TypeParam::from),
-            }),
-            TraitBound::Binary(binary) => TraitBound::Binary(BinaryTraitBound {
-                binary_trait: binary.binary_trait,
-                lhs: binary.lhs.into(),
-                rhs: binary.rhs.into(),
-                output: binary.output.map(TypeParam::from),
-            }),
-        };
-        self.insert(item);
-    }
-}
-
-impl Insert<TraitBound<ParameterizedType>> for TraitBounds {
-    fn insert(&mut self, item: TraitBound<ParameterizedType>) {
-        for t in item.generics() {
-            self.insert(t);
-        }
-        let item = match item {
-            TraitBound::Unary(unary) => TraitBound::Unary(UnaryTraitBound {
-                ty: TypeParam::from(unary.ty),
-                unary_trait: unary.unary_trait,
-                output: unary.output.map(TypeParam::from),
-            }),
-            TraitBound::Binary(binary) => TraitBound::Binary(BinaryTraitBound {
-                binary_trait: binary.binary_trait,
-                lhs: binary.lhs.into(),
-                rhs: binary.rhs.into(),
-                output: binary.output.map(TypeParam::from),
-            }),
-        };
-        self.insert(item);
-    }
-}
-
 #[derive(Debug, Default, Clone)]
 pub struct TraitBounds {
-    bounds: BTreeMap<TypeParam, BTreeSet<TraitBound<TypeParam>>>,
+    bounds: BTreeMap<TypeParam, BTreeSet<TraitBound>>,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -182,6 +138,7 @@ impl TraitBounds {
         lhs: OverType,
         rhs: OverType,
         algebra: &Algebra,
+        op: BinaryTrait,
     ) -> Option<(Self, [FloatParam; 3], [MagParam; 3])> {
         use FloatParam::{T, U, V};
         use Mag::Any;
@@ -229,7 +186,11 @@ impl TraitBounds {
                         == N
                 };
                 let abc = if output_can_be_unit {
-                    bounds.insert(A.mul(B, C));
+                    if op == BinaryTrait::Div {
+                        bounds.insert(A.div(B, C));
+                    } else {
+                        bounds.insert(A.mul(B, C));
+                    }
                     [A, B, C]
                 } else {
                     bounds.insert([A, B]);
@@ -337,7 +298,7 @@ impl TraitBounds {
         new
     }
 
-    pub fn params_and_where_clause(&self) -> (TokenStream, TokenStream) {
+    pub fn params_and_where_clause(self) -> (TokenStream, TokenStream) {
         let params = {
             let params = self
                 .bounds
@@ -401,6 +362,16 @@ impl std::ops::Mul for Mag {
     }
 }
 
+impl std::ops::Div for Mag {
+    type Output = Mag;
+    fn div(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Mag::Unit, Mag::Unit) => Mag::Unit,
+            _ => Mag::Any,
+        }
+    }
+}
+
 impl Mag {
     pub fn define_all(tokens: &mut TokenStream) {
         Self::iter()
@@ -441,6 +412,13 @@ impl Mag {
                 type Output = #output;
                 #[inline]
                 fn mul(self, _: #rhs) -> Self::Output {
+                    #output
+                }
+            }
+            impl std::ops::Div<#rhs> for #lhs {
+                type Output = #output;
+                #[inline]
+                fn div(self, _: #rhs) -> Self::Output {
                     #output
                 }
             }
@@ -487,10 +465,19 @@ impl MagParam {
         !matches!(self, Self::Mag(_))
     }
 
-    pub fn mul(self, rhs: Self, output: Self) -> TraitBound<TypeParam> {
+    pub fn mul(self, rhs: Self, output: Self) -> TraitBound {
         TraitBound::Binary(BinaryTraitBound {
             lhs: self.into(),
             binary_trait: BinaryTrait::Mul,
+            rhs: rhs.into(),
+            output: Some(output.into()),
+        })
+    }
+
+    pub fn div(self, rhs: Self, output: Self) -> TraitBound {
+        TraitBound::Binary(BinaryTraitBound {
+            lhs: self.into(),
+            binary_trait: BinaryTrait::Div,
             rhs: rhs.into(),
             output: Some(output.into()),
         })
@@ -528,10 +515,10 @@ impl FloatParam {
         !matches!(*self, FloatParam::Float(_))
     }
 
-    pub fn from(self, from: FloatParam) -> TraitBound<Self> {
+    pub fn from(self, from: FloatParam) -> TraitBound {
         BinaryTraitBound {
-            lhs: self,
-            rhs: from,
+            lhs: self.into(),
+            rhs: from.into(),
             binary_trait: BinaryTrait::From,
             output: None,
         }
@@ -539,107 +526,116 @@ impl FloatParam {
     }
 
     #[allow(clippy::should_implement_trait)]
-    pub fn neg(self) -> TraitBound<Self> {
+    pub fn neg(self) -> TraitBound {
         UnaryTraitBound {
-            ty: self,
+            ty: self.into(),
             unary_trait: UnaryTrait::Neg,
-            output: Some(self),
+            output: Some(self.into()),
         }
         .into()
     }
 
-    pub fn zero(self) -> TraitBound<Self> {
+    pub fn zero(self) -> TraitBound {
         UnaryTraitBound {
-            ty: self,
+            ty: self.into(),
             unary_trait: UnaryTrait::Zero,
             output: None,
         }
         .into()
     }
 
-    pub fn one(self) -> TraitBound<Self> {
+    pub fn one(self) -> TraitBound {
         UnaryTraitBound {
-            ty: self,
+            ty: self.into(),
             unary_trait: UnaryTrait::One,
             output: None,
         }
         .into()
     }
 
-    pub fn add(self, rhs: FloatParam, output: FloatParam) -> TraitBound<Self> {
+    pub fn add(self, rhs: FloatParam, output: FloatParam) -> TraitBound {
         BinaryTraitBound {
-            lhs: self,
+            lhs: self.into(),
             binary_trait: BinaryTrait::Add,
-            rhs,
-            output: Some(output),
+            rhs: rhs.into(),
+            output: Some(output.into()),
         }
         .into()
     }
 
-    pub fn sub(self, rhs: FloatParam, output: FloatParam) -> TraitBound<Self> {
+    pub fn sub(self, rhs: FloatParam, output: FloatParam) -> TraitBound {
         BinaryTraitBound {
-            lhs: self,
+            lhs: self.into(),
             binary_trait: BinaryTrait::Sub,
-            rhs,
-            output: Some(output),
+            rhs: rhs.into(),
+            output: Some(output.into()),
         }
         .into()
     }
 
-    pub fn add_assign(self, rhs: FloatParam) -> TraitBound<Self> {
+    pub fn add_assign(self, rhs: FloatParam) -> TraitBound {
         BinaryTraitBound {
-            lhs: self,
+            lhs: self.into(),
             binary_trait: BinaryTrait::AddAssign,
-            rhs,
+            rhs: rhs.into(),
             output: None,
         }
         .into()
     }
 
-    pub fn sub_assign(self, rhs: FloatParam) -> TraitBound<Self> {
+    pub fn sub_assign(self, rhs: FloatParam) -> TraitBound {
         BinaryTraitBound {
-            lhs: self,
+            lhs: self.into(),
             binary_trait: BinaryTrait::SubAssign,
-            rhs,
+            rhs: rhs.into(),
             output: None,
         }
         .into()
     }
 
-    pub fn mul(self, rhs: FloatParam, output: FloatParam) -> TraitBound<Self> {
+    pub fn mul(self, rhs: FloatParam, output: FloatParam) -> TraitBound {
         BinaryTraitBound {
-            lhs: self,
+            lhs: self.into(),
             binary_trait: BinaryTrait::Mul,
-            rhs,
-            output: Some(output),
+            rhs: rhs.into(),
+            output: Some(output.into()),
         }
         .into()
     }
 
-    pub fn div(self, rhs: FloatParam, output: FloatParam) -> TraitBound<Self> {
+    pub fn div(self, rhs: FloatParam, output: FloatParam) -> TraitBound {
         BinaryTraitBound {
-            lhs: self,
+            lhs: self.into(),
             binary_trait: BinaryTrait::Div,
-            rhs,
-            output: Some(output),
+            rhs: rhs.into(),
+            output: Some(output.into()),
         }
         .into()
     }
 
-    pub fn partial_eq(self, rhs: FloatParam) -> TraitBound<Self> {
+    pub fn partial_eq(self, rhs: FloatParam) -> TraitBound {
         BinaryTraitBound {
-            lhs: self,
-            rhs,
+            lhs: self.into(),
+            rhs: rhs.into(),
             binary_trait: BinaryTrait::PartialEq,
             output: None,
         }
         .into()
     }
 
-    pub fn copy(self) -> TraitBound<Self> {
+    pub fn copy(self) -> TraitBound {
         UnaryTraitBound {
-            ty: self,
+            ty: self.into(),
             unary_trait: UnaryTrait::Copy,
+            output: None,
+        }
+        .into()
+    }
+
+    pub fn inv(self) -> TraitBound {
+        UnaryTraitBound {
+            ty: self.into(),
+            unary_trait: UnaryTrait::Inverse,
             output: None,
         }
         .into()
@@ -667,105 +663,109 @@ impl ParameterizedType {
         }
     }
 
-    pub fn zero(self) -> TraitBound<Self> {
+    pub fn zero(self) -> TraitBound {
         UnaryTraitBound {
-            ty: self,
+            ty: self.into(),
             unary_trait: UnaryTrait::Zero,
             output: None,
         }
         .into()
     }
 
-    pub fn add(self, rhs: Self, output: Self) -> TraitBound<Self> {
+    pub fn add(self, rhs: Self, output: Self) -> TraitBound {
         BinaryTraitBound {
-            lhs: self,
+            lhs: self.into(),
             binary_trait: BinaryTrait::Add,
-            rhs,
-            output: Some(output),
+            rhs: rhs.into(),
+            output: Some(output.into()),
         }
         .into()
     }
 
-    pub fn sub(self, rhs: Self, output: Self) -> TraitBound<Self> {
+    pub fn sub(self, rhs: Self, output: Self) -> TraitBound {
         BinaryTraitBound {
-            lhs: self,
+            lhs: self.into(),
             binary_trait: BinaryTrait::Sub,
-            rhs,
-            output: Some(output),
+            rhs: rhs.into(),
+            output: Some(output.into()),
         }
         .into()
     }
 
-    pub fn mul(self, rhs: Self, output: Self) -> TraitBound<Self> {
+    pub fn mul(self, rhs: Self, output: Self) -> TraitBound {
         BinaryTraitBound {
-            lhs: self,
+            lhs: self.into(),
             binary_trait: BinaryTrait::Mul,
-            rhs,
-            output: Some(output),
+            rhs: rhs.into(),
+            output: Some(output.into()),
         }
         .into()
     }
 
-    pub fn div(self, rhs: Self, output: Self) -> TraitBound<Self> {
+    pub fn div(self, rhs: Self, output: Self) -> TraitBound {
         BinaryTraitBound {
-            lhs: self,
+            lhs: self.into(),
             binary_trait: BinaryTrait::Div,
-            rhs,
-            output: Some(output),
+            rhs: rhs.into(),
+            output: Some(output.into()),
         }
         .into()
     }
 
-    pub fn geo(self, rhs: Self, output: Self) -> TraitBound<Self> {
+    pub fn geo(self, rhs: Self, output: Self) -> TraitBound {
         BinaryTraitBound {
-            lhs: self,
+            lhs: self.into(),
             binary_trait: BinaryTrait::Geo,
-            rhs,
-            output: Some(output),
+            rhs: rhs.into(),
+            output: Some(output.into()),
         }
         .into()
     }
 
-    pub fn inv(self) -> TraitBound<Self> {
+    pub fn inv(self) -> TraitBound {
         UnaryTraitBound {
-            ty: self,
+            ty: self.into(),
             unary_trait: UnaryTrait::Inverse,
-            output: Some(self),
+            output: Some(self.into()),
         }
         .into()
     }
 
-    pub fn partial_eq(self, rhs: Self) -> TraitBound<Self> {
+    pub fn partial_eq(self, rhs: Self) -> TraitBound {
         BinaryTraitBound {
-            lhs: self,
+            lhs: self.into(),
             binary_trait: BinaryTrait::PartialEq,
-            rhs,
+            rhs: rhs.into(),
             output: None,
         }
         .into()
     }
 
-    pub fn norm2(self) -> TraitBound<Self> {
+    pub fn norm2(self) -> TraitBound {
         UnaryTraitBound {
-            ty: self,
+            ty: self.into(),
             unary_trait: UnaryTrait::Norm2,
-            output: Some(crate::Type::Grade(0).with_type_param(self.param, self.mag)),
+            output: Some(
+                crate::Type::Grade(0)
+                    .with_type_param(self.param, self.mag)
+                    .into(),
+            ),
         }
         .into()
     }
 
-    pub fn rev(self) -> TraitBound<Self> {
+    pub fn rev(self) -> TraitBound {
         UnaryTraitBound {
-            ty: self,
+            ty: self.into(),
             unary_trait: UnaryTrait::Reverse,
-            output: Some(self),
+            output: Some(self.into()),
         }
         .into()
     }
 
-    pub fn copy(self) -> TraitBound<Self> {
+    pub fn copy(self) -> TraitBound {
         UnaryTraitBound {
-            ty: self,
+            ty: self.into(),
             unary_trait: UnaryTrait::Copy,
             output: None,
         }
@@ -785,24 +785,24 @@ impl ToTokens for ParameterizedType {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub enum TraitBound<T> {
-    Unary(UnaryTraitBound<T>),
-    Binary(BinaryTraitBound<T>),
+pub enum TraitBound {
+    Unary(UnaryTraitBound),
+    Binary(BinaryTraitBound),
 }
 
-impl<T> From<UnaryTraitBound<T>> for TraitBound<T> {
-    fn from(value: UnaryTraitBound<T>) -> Self {
+impl From<UnaryTraitBound> for TraitBound {
+    fn from(value: UnaryTraitBound) -> Self {
         TraitBound::Unary(value)
     }
 }
 
-impl<T> From<BinaryTraitBound<T>> for TraitBound<T> {
-    fn from(value: BinaryTraitBound<T>) -> Self {
+impl From<BinaryTraitBound> for TraitBound {
+    fn from(value: BinaryTraitBound) -> Self {
         TraitBound::Binary(value)
     }
 }
 
-impl<T: ToTokens> ToTokens for TraitBound<T> {
+impl ToTokens for TraitBound {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match self {
             TraitBound::Unary(unary) => unary.to_tokens(tokens),
@@ -811,61 +811,23 @@ impl<T: ToTokens> ToTokens for TraitBound<T> {
     }
 }
 
-impl TraitBound<FloatParam> {
-    pub fn ty(&self) -> FloatParam {
-        match self {
-            TraitBound::Unary(unary) => unary.ty,
-            TraitBound::Binary(binary) => binary.lhs,
-        }
-    }
-
-    pub fn generics(&self) -> impl Iterator<Item = FloatParam> + '_ {
-        match self {
-            TraitBound::Unary(unary) => [Some(unary.ty), unary.output, None],
-            TraitBound::Binary(binary) => [Some(binary.lhs), Some(binary.rhs), binary.output],
-        }
-        .into_iter()
-        .flatten()
-        .filter(FloatParam::is_generic)
-    }
-
-    pub fn copy_params(&self) -> impl Iterator<Item = FloatParam> + '_ {
-        match self {
-            TraitBound::Unary(unary) => unary.copy_params(),
-            TraitBound::Binary(binary) => binary.copy_params(),
-        }
-        .into_iter()
-        .flatten()
-        .filter(FloatParam::is_generic)
-    }
-}
-
-impl TraitBound<ParameterizedType> {
-    pub fn ty(&self) -> ParameterizedType {
-        match self {
-            TraitBound::Unary(unary) => unary.ty,
-            TraitBound::Binary(binary) => binary.lhs,
-        }
-    }
-    pub fn generics(&self) -> impl Iterator<Item = FloatParam> + '_ {
-        match self {
-            TraitBound::Unary(unary) => [Some(unary.ty), unary.output, None],
-            TraitBound::Binary(binary) => [Some(binary.lhs), Some(binary.rhs), binary.output],
-        }
-        .map(|opt| opt.map(|ty| ty.param))
-        .into_iter()
-        .flatten()
-        .filter(FloatParam::is_generic)
-    }
-}
-
-impl TraitBound<TypeParam> {
+impl TraitBound {
     pub fn ty(&self) -> TypeParam {
         match self {
             TraitBound::Unary(unary) => unary.ty,
             TraitBound::Binary(binary) => binary.lhs,
         }
     }
+
+    pub fn copy_params(&self) -> impl Iterator<Item = TypeParam> + '_ {
+        match self {
+            TraitBound::Unary(unary) => unary.copy_params(),
+            TraitBound::Binary(binary) => binary.copy_params(),
+        }
+        .into_iter()
+        .flatten()
+    }
+
     pub fn generics(&self) -> impl Iterator<Item = TypeParam> + '_ {
         match self {
             TraitBound::Unary(unary) => [Some(unary.ty), unary.output, None],
@@ -878,13 +840,13 @@ impl TraitBound<TypeParam> {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct UnaryTraitBound<T> {
-    pub ty: T,
+pub struct UnaryTraitBound {
+    pub ty: TypeParam,
     pub unary_trait: UnaryTrait,
-    pub output: Option<T>,
+    pub output: Option<TypeParam>,
 }
 
-impl<T: ToTokens> ToTokens for UnaryTraitBound<T> {
+impl ToTokens for UnaryTraitBound {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let UnaryTraitBound {
             unary_trait,
@@ -900,8 +862,8 @@ impl<T: ToTokens> ToTokens for UnaryTraitBound<T> {
     }
 }
 
-impl<T: Copy> UnaryTraitBound<T> {
-    pub fn copy_params(&self) -> [Option<T>; 2] {
+impl UnaryTraitBound {
+    pub fn copy_params(&self) -> [Option<TypeParam>; 2] {
         use UnaryTrait::*;
         match self.unary_trait {
             Norm2 | Norm => [Some(self.ty), None],
@@ -911,14 +873,14 @@ impl<T: Copy> UnaryTraitBound<T> {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct BinaryTraitBound<T> {
-    pub lhs: T,
+pub struct BinaryTraitBound {
+    pub lhs: TypeParam,
     pub binary_trait: BinaryTrait,
-    pub rhs: T,
-    pub output: Option<T>,
+    pub rhs: TypeParam,
+    pub output: Option<TypeParam>,
 }
 
-impl<T: ToTokens> ToTokens for BinaryTraitBound<T> {
+impl ToTokens for BinaryTraitBound {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let BinaryTraitBound {
             binary_trait,
@@ -934,8 +896,8 @@ impl<T: ToTokens> ToTokens for BinaryTraitBound<T> {
     }
 }
 
-impl<T: Copy> BinaryTraitBound<T> {
-    pub fn copy_params(&self) -> [Option<T>; 2] {
+impl BinaryTraitBound {
+    pub fn copy_params(&self) -> [Option<TypeParam>; 2] {
         use BinaryTrait::*;
         match self.binary_trait {
             Mul | Div => [Some(self.lhs), Some(self.rhs)],
