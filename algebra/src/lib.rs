@@ -710,9 +710,9 @@ impl Type {
 
     pub fn define(self, algebra: &Algebra) -> TokenStream {
         let derive = if TypeBlades::new(algebra, self).nth(1).is_some() {
-            quote!(#[derive(Debug, Default, Copy, Clone, Eq, Hash)])
+            quote!(#[derive(Default, Copy, Clone, Eq, Hash)])
         } else {
-            quote!(#[derive(Debug, Default, Copy, Clone, Eq, Ord, PartialOrd, Hash)])
+            quote!(#[derive(Default, Copy, Clone, Eq, Ord, PartialOrd, Hash)])
         };
         let ident = self.ident();
         let fields = SortedTypeBlades::new(algebra, self).map(|blade| {
@@ -745,6 +745,34 @@ impl Type {
                 }
             })
         });
+
+        let impl_debug = {
+            let debug_fields = SortedTypeBlades::new(algebra, self).map(|blade| {
+                let field = &algebra.fields[blade];
+                let field_lit = syn::LitStr::new(&field.to_string(), field.span());
+                quote! {
+                    if !num_traits::Zero::is_zero(&self.#field) {
+                        debug_struct.field(#field_lit, &self.#field);
+                    } else {
+                        non_exhaustive = true;
+                    }
+                }
+            });
+            quote! {
+                impl<T: std::fmt::Debug + num_traits::Zero, M> std::fmt::Debug for #ident<T, M> {
+                    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                        let mut debug_struct = f.debug_struct(std::any::type_name::<Self>());
+                        let mut non_exhaustive = false;
+                        #(#debug_fields)*
+                        if non_exhaustive {
+                            debug_struct.finish_non_exhaustive()
+                        }   else {
+                            debug_struct.finish()
+                        }
+                    }
+                }
+            }
+        };
 
         let map_fields =
             TypeFields::new(algebra, self).map(|(_, field)| quote!(#field: f(self.#field)));
@@ -818,6 +846,8 @@ impl Type {
                 #(#fields)*
                 pub marker: std::marker::PhantomData<M>,
             }
+
+            #impl_debug
 
             impl<T> std::ops::Deref for #ident<T, Unit> {
                 type Target = #ident<T, Any>;
