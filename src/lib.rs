@@ -55,8 +55,8 @@
 //! - [x] Right complement
 //! - [x] Reverse
 //! - [x] Antireverse
-//! - [ ] Grade Involution
-//! - [ ] Clifford Conjugate
+//! - [x] Grade Involution
+//! - [x] Clifford Conjugate
 //!
 //! Norm-based operations:
 //! - [x] Norm

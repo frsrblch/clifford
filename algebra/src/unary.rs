@@ -15,6 +15,8 @@ pub enum UnaryTrait {
     LeftComp,
     RightComp,
     Reverse,
+    GradeInvolution,
+    CliffordConjugate,
     Inverse,
     Unitize,
     Norm2,
@@ -51,6 +53,8 @@ impl UnaryTrait {
             Unitize => quote!(clifford::Unitize),
             Inverse => quote!(num_traits::Inv),
             Reverse => quote!(clifford::Reverse),
+            GradeInvolution => quote!(clifford::GradeInvolution),
+            CliffordConjugate => quote!(clifford::CliffordConjugate),
             Zero => quote!(num_traits::Zero),
             One => quote!(num_traits::One),
             Norm2 => quote!(clifford::Norm2),
@@ -76,6 +80,8 @@ impl UnaryTrait {
             Unitize => quote!(unit),
             Inverse => quote!(inv),
             Reverse => quote!(rev),
+            GradeInvolution => quote!(grade_involution),
+            CliffordConjugate => quote!(conjugate),
             Zero => quote!(zero),
             One => quote!(one),
             Norm2 => quote!(norm2),
@@ -123,9 +129,15 @@ impl UnaryTrait {
                 }
                 OverType::Float(_) => Impl::External,
             },
-            Reverse => match ty {
+            Reverse | GradeInvolution | CliffordConjugate => match ty {
                 OverType::Type(ty) => {
                     let (trait_ty, trait_fn) = self.ty_fn();
+                    let f = match self {
+                        Reverse => Blade::rev,
+                        GradeInvolution => Blade::grade_involution,
+                        CliffordConjugate => Blade::clifford_conjugate,
+                        _ => unimplemented!(),
+                    };
                     let mut bounds = TraitBounds::default();
                     bounds.insert(T);
                     bounds.insert(A);
@@ -133,7 +145,7 @@ impl UnaryTrait {
                     let fields = TypeBlades::new(algebra, ty)
                         .map(|blade| {
                             let field = &algebra.fields[blade];
-                            if blade.rev() == blade {
+                            if f(blade) == blade {
                                 quote!(#field: self.#field,)
                             } else {
                                 bounds.insert(T.neg());

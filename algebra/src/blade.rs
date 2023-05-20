@@ -35,8 +35,29 @@ impl Blade {
     pub fn rev(self) -> Self {
         let count = self.count();
         let half = count / 2;
-        let odd = half & 1 == 1;
+        let rev = half & 1 == 1;
+        if rev {
+            -self
+        } else {
+            self
+        }
+    }
+
+    pub fn grade_involution(self) -> Self {
+        let odd = self.count() & 1 == 1;
         if odd {
+            -self
+        } else {
+            self
+        }
+    }
+
+    pub fn clifford_conjugate(self) -> Self {
+        let count = self.count();
+        let half = count / 2;
+        let rev = half & 1 == 1;
+        let odd = self.count() & 1 == 1;
+        if rev ^ odd {
             -self
         } else {
             self
@@ -304,5 +325,23 @@ mod tests {
         let z = Blade::zero();
         assert_eq!(0, z.grade());
         assert_eq!(0, (-z).grade());
+    }
+
+    #[test]
+    fn grade_involution() {
+        assert_eq!(Blade::scalar(), Blade::scalar().grade_involution());
+        assert_eq!(-Blade(0b1), Blade(0b1).grade_involution());
+        assert_eq!(Blade(0b11), Blade(0b11).grade_involution());
+        assert_eq!(-Blade(0b111), Blade(0b111).grade_involution());
+        assert_eq!(Blade(0b1111), Blade(0b1111).grade_involution());
+    }
+
+    #[test]
+    fn clifford_conjugate() {
+        assert_eq!(Blade::scalar(), Blade::scalar().clifford_conjugate());
+        assert_eq!(-Blade(0b1), Blade(0b1).clifford_conjugate());
+        assert_eq!(-Blade(0b11), Blade(0b11).clifford_conjugate());
+        assert_eq!(Blade(0b111), Blade(0b111).clifford_conjugate());
+        assert_eq!(Blade(0b1111), Blade(0b1111).clifford_conjugate());
     }
 }
