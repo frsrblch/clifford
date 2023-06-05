@@ -747,7 +747,17 @@ impl Type {
         });
 
         let impl_debug = {
-            let debug_fields = SortedTypeBlades::new(algebra, self).map(|blade| {
+            let blades = SortedTypeBlades::new(algebra, self);
+            let check_zero = blades
+                .clone()
+                .map(|blade| {
+                    let field = &algebra.fields[blade];
+                    quote! {
+                        num_traits::Zero::is_zero(&self.#field)
+                    }
+                })
+                .collect::<syn::punctuated::Punctuated<_, syn::Token![&&]>>();
+            let debug_fields = blades.map(|blade| {
                 let field = &algebra.fields[blade];
                 let field_lit = syn::LitStr::new(&field.to_string(), field.span());
                 quote! {
@@ -761,12 +771,21 @@ impl Type {
             quote! {
                 impl<T: std::fmt::Debug + num_traits::Zero, M> std::fmt::Debug for #ident<T, M> {
                     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                        let mut debug_struct = f.debug_struct(std::any::type_name::<Self>());
+                        let ty = std::any::type_name::<Self>();
+
+                        let all_zero = #check_zero;
+                        if all_zero {
+                            return f.debug_tuple(ty).field(&<T as num_traits::Zero>::zero()).finish();
+                        }
+
+                        let mut debug_struct = f.debug_struct(ty);
                         let mut non_exhaustive = false;
                         #(#debug_fields)*
-                        if non_exhaustive {
+                        if all_zero {
+                            write!(f, "(0)")
+                        } else if non_exhaustive {
                             debug_struct.finish_non_exhaustive()
-                        }   else {
+                        } else {
                             debug_struct.finish()
                         }
                     }
