@@ -807,40 +807,33 @@ impl Type {
             quote!()
         };
 
-        let const_basis = if self == Type::Grade(1) {
-            // TODO think this through
-            let m = if algebra.all_bases_positive() {
-                Mag::Unit
-            } else {
-                Mag::Any
-            };
-            let n = algebra.dim() as usize;
-            let vectors = TypeFields::new(algebra, self).map(|(_, f)| {
-                let fields = TypeFields::new(algebra, self).map(|(_, g)| {
-                    if f == g {
-                        quote!(#g: num_traits::one())
+        let const_basis = {
+            let consts = TypeFields::new(algebra, self).map(|(bf, f)| {
+                let m = if algebra.dot(bf, bf).is_zero() {
+                    Mag::Any
+                } else {
+                    Mag::Unit
+                };
+                let const_ident = Ident::new(&f.to_string().to_uppercase(), f.span());
+                let fields = TypeFields::new(algebra, self).map(|(bg, g)| {
+                    if bf == bg {
+                        quote!(#g: <T as clifford::OneConst>::ONE)
                     } else {
-                        quote!(#g: num_traits::zero())
+                        quote!(#g: <T as clifford::ZeroConst>::ZERO)
                     }
                 });
                 quote! {
-                    #ident::<T, #m> {
+                    pub const #const_ident: #ident<T, #m> = #ident {
                         #(#fields,)*
-                        marker: std::marker::PhantomData,
-                    }
+                        marker: std::marker::PhantomData
+                    };
                 }
             });
-            Some(quote! {
-                impl<T: num_traits::One + num_traits::Zero> #ident<T, #m> {
-                    pub fn bases() -> [Self; #n] {
-                        [
-                            #(#vectors,)*
-                        ]
-                    }
+            quote! {
+                impl<T> #ident<T> where T: clifford::OneConst + clifford::ZeroConst {
+                    #(#consts)*
                 }
-            })
-        } else {
-            None
+            }
         };
 
         let allow_clippy_too_many_arguments = TypeBlades::new(algebra, self)

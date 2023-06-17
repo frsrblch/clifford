@@ -18,6 +18,9 @@
 //! - [x] fn new(...) -> Self { ... }
 //! - [x] `From<Grade>` for `Motor`/`Flector`/`Multivector`
 //! - [ ] Index functions (`index`/`index_ref`/`index_mut`) for indexable `T` (e.g., `Vector<f32x8>`)
+//! 
+//! Consts:
+//! - [x] Blade constants (e.g., Vector::X)
 //!
 //! Main products:
 //! - [x] Mul
