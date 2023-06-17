@@ -96,7 +96,7 @@
 //! - [ ] RelativeEq
 //! - [ ] UlpsEq
 //!
-//! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features.
+//! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features
 
 pub use macros::algebra;
 pub use geo_traits::*;
