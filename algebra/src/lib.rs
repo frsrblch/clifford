@@ -1314,6 +1314,7 @@ fn impl_num_traits_for_scalar() -> TokenStream {
             ($($fn_:ident,)*) => {
                 impl<T> num_traits::FloatConst for Scalar<T> where T: num_traits::FloatConst {
                     $(
+                        #[allow(non_snake_case)]
                         fn $fn_() -> Self {
                             Scalar::new(T::$fn_())
                         }
