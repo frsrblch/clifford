@@ -601,7 +601,7 @@ impl BinaryTrait {
                 };
                 
                 let (trait_ty, trait_fn) = self.ty_fn();
-                let (inv_ty, inv_fn) = UnaryTrait::Inverse.ty_fn();
+                let (rev_ty, rev_fn) = UnaryTrait::Reverse.ty_fn();
                 let (geo_ty, geo_fn) = BinaryTrait::Geo.ty_fn();
                 let t = FloatParam::T;
                 let [a, b, c, d] = [MagParam::A, MagParam::B, MagParam::C, MagParam::D];
@@ -612,16 +612,18 @@ impl BinaryTrait {
                 let raw_out_t = raw_out.with_type_param(t, d);
                 let out_t = out.with_type_param(t, b);
 
+                let rev = quote!(#rev_ty::#rev_fn(self));
+                let intermediate = quote!(#geo_ty::#geo_fn(self, rhs));
                 let (bound, expr) = match (raw_out, out) {
                     (raw_out, out) if raw_out == out => (
                         quote!(#int_t: #geo_ty<#lhs_t, Output = #raw_out_t>),
-                        quote!(#geo_ty::#geo_fn(int, inv).assert()),
+                        quote!(#geo_ty::#geo_fn(#intermediate, #rev).assert()),
                     ),
                     (_, out) => {                        
                         let fn_ident = out.fn_ident();
                         (
                             quote!(#int_t: #geo_ty<#lhs_t, Output = #raw_out_t>),
-                            quote!(#geo_ty::#geo_fn(int, inv).#fn_ident().assert()),
+                            quote!(#geo_ty::#geo_fn(#intermediate, #rev).#fn_ident().assert()),
                         )
                     },
                 };
@@ -629,7 +631,7 @@ impl BinaryTrait {
                 Impl::Actual(quote! {
                     impl<T, A, B, C, D> #trait_ty<#rhs_t> for #lhs_t
                     where
-                        #lhs_t: #inv_ty<Output = #lhs_t>
+                        #lhs_t: #rev_ty<Output = #lhs_t>
                             + #geo_ty<#rhs_t, Output = #int_t>
                             + Copy,
                         #bound
@@ -637,8 +639,6 @@ impl BinaryTrait {
                         type Output = #out_t;
                         #[inline]
                         fn #trait_fn(self, rhs: #rhs_t) -> Self::Output {
-                            let inv = #inv_ty::#inv_fn(self);
-                            let int = #geo_ty::#geo_fn(self, rhs);
                             #expr
                         }
                     }
