@@ -781,9 +781,7 @@ impl Type {
                         let mut debug_struct = f.debug_struct(ty);
                         let mut non_exhaustive = false;
                         #(#debug_fields)*
-                        if all_zero {
-                            write!(f, "(0)")
-                        } else if non_exhaustive {
+                        if non_exhaustive {
                             debug_struct.finish_non_exhaustive()
                         } else {
                             debug_struct.finish()
