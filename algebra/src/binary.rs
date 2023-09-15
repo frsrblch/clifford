@@ -137,7 +137,10 @@ impl BinaryTrait {
                 let output = Type::from(lhs) + Type::from(rhs);
                 let (trait_ty, trait_fn) = self.ty_fn();
                 let (from_ty, from_fn) = BinaryTrait::From.ty_fn();
-                let Some((mut bounds, [t, u, v], [a, b, c])) = TraitBounds::sum_types(lhs, rhs) else { return Impl::None };
+                let Some((mut bounds, [t, u, v], [a, b, c])) = TraitBounds::sum_types(lhs, rhs)
+                else {
+                    return Impl::None;
+                };
                 let lhs_t = lhs.with_type_param(t, a);
                 let rhs_u = rhs.with_type_param(u, b);
                 let output_v = output.with_type_param(v, c);
@@ -283,14 +286,18 @@ impl BinaryTrait {
                 let (trait_ty, trait_fn) = self.ty_fn();
                 let (zero_ty, zero_fn) = UnaryTrait::Zero.ty_fn();
 
-                let Some(output) = self.product(lhs, rhs, algebra) else { return Impl::None };
+                let Some(output) = self.product(lhs, rhs, algebra) else {
+                    return Impl::None;
+                };
 
                 let bounds_and_types = if matches!(self, Mul | Geo) {
                     TraitBounds::geo_types(lhs, rhs, algebra, self)
                 } else {
                     TraitBounds::product_types(lhs, rhs)
                 };
-                let Some((mut bounds, [t, u, v], [a, b, c])) = bounds_and_types else { return Impl::None };
+                let Some((mut bounds, [t, u, v], [a, b, c])) = bounds_and_types else {
+                    return Impl::None;
+                };
                 let lhs_t = lhs.with_type_param(t, a);
                 let rhs_u = rhs.with_type_param(u, b);
                 let output_v = output.with_type_param(v, c);
@@ -383,12 +390,17 @@ impl BinaryTrait {
                 let (trait_ty, trait_fn) = self.ty_fn();
                 let (inv_ty, inv_fn) = UnaryTrait::Inverse.ty_fn();
                 let (zero_ty, zero_fn) = UnaryTrait::Zero.ty_fn();
-                let Some((mut bounds, [t, u, v], [a, b, c])) 
-                    = TraitBounds::geo_types(lhs, rhs, algebra, self) else { return Impl::None }; 
+                let Some((mut bounds, [t, u, v], [a, b, c])) =
+                    TraitBounds::geo_types(lhs, rhs, algebra, self)
+                else {
+                    return Impl::None;
+                };
 
                 let lhs_t = lhs.with_type_param(t, a);
                 let rhs_u = rhs.with_type_param(u, b);
-                let Some(output) = algebra.product(lhs, rhs, Algebra::geo) else { return Impl::None };
+                let Some(output) = algebra.product(lhs, rhs, Algebra::geo) else {
+                    return Impl::None;
+                };
                 let output_v = output.with_type_param(v, c);
                 let self_var = &quote!(self);
                 let inv_var = &quote!(inv);
@@ -448,7 +460,9 @@ impl BinaryTrait {
                 })
             }
             MulAssign | DivAssign => {
-                let Some(output) = BinaryTrait::Mul.product(lhs, rhs, algebra) else { return Impl::None };
+                let Some(output) = BinaryTrait::Mul.product(lhs, rhs, algebra) else {
+                    return Impl::None;
+                };
                 if lhs != output {
                     return Impl::None;
                 }
@@ -592,14 +606,18 @@ impl BinaryTrait {
                     _ => {}
                 }
 
-                let Some(int) = algebra.product(lhs, rhs, Algebra::geo) else { return Impl::None };
-                let Some(raw_out) = algebra.product(int, lhs, Algebra::geo) else { return Impl::None };
+                let Some(int) = algebra.product(lhs, rhs, Algebra::geo) else {
+                    return Impl::None;
+                };
+                let Some(raw_out) = algebra.product(int, lhs, Algebra::geo) else {
+                    return Impl::None;
+                };
 
                 let out = match (Type::from(rhs), raw_out) {
                     (Type::Grade(r), _) | (_, Type::Grade(r)) => Type::Grade(r),
                     (rhs, _) => rhs,
                 };
-                
+
                 let (trait_ty, trait_fn) = self.ty_fn();
                 let (rev_ty, rev_fn) = UnaryTrait::Reverse.ty_fn();
                 let (geo_ty, geo_fn) = BinaryTrait::Geo.ty_fn();
@@ -619,13 +637,13 @@ impl BinaryTrait {
                         quote!(#int_t: #geo_ty<#lhs_t, Output = #raw_out_t>),
                         quote!(#geo_ty::#geo_fn(#intermediate, #rev).assert()),
                     ),
-                    (_, out) => {                        
+                    (_, out) => {
                         let fn_ident = out.fn_ident();
                         (
                             quote!(#int_t: #geo_ty<#lhs_t, Output = #raw_out_t>),
                             quote!(#geo_ty::#geo_fn(#intermediate, #rev).#fn_ident().assert()),
                         )
-                    },
+                    }
                 };
 
                 Impl::Actual(quote! {
@@ -739,14 +757,10 @@ impl BinaryTrait {
                     }
 
                     {
-                        let mut lhs = Value::gen(lhs_inner, algebra);
-                        let mut rhs = Value::gen(rhs_inner, algebra);
-                        lhs.unit(algebra);
-                        rhs.unit(algebra);
+                        let lhs = Value::try_gen_unit(lhs_inner, algebra)?;
+                        let rhs = Value::try_gen_unit(rhs_inner, algebra)?;
                         let product = lhs.mul(&rhs, algebra)?;
-                        if product.blades.iter().any(|b| b.is_nan())
-                            || (product.norm(algebra) - 1.).abs() > 1e-10
-                        {
+                        if !product.is_finite() || !product.is_unit(algebra) {
                             return None;
                         }
                     }
@@ -763,13 +777,13 @@ impl BinaryTrait {
 
                     let lhs_fields = TypeFields::new(algebra, lhs_inner).map(|(_, field)| {
                         quote! {
-                            #field: rand::Rng::gen::<f64>(&mut rng) * 2. - 1.,
+                            #field: rand::Rng::gen_range(&mut rng, -1.0..1.0),
                         }
                     });
 
                     let rhs_fields = TypeFields::new(algebra, rhs_inner).map(|(_, field)| {
                         quote! {
-                            #field: rand::Rng::gen::<f64>(&mut rng) * 2. - 1.,
+                            #field: rand::Rng::gen_range(&mut rng, -1.0..1.0),
                         }
                     });
 

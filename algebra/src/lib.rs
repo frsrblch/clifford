@@ -1196,7 +1196,7 @@ impl Value {
         let mut rng = rand::thread_rng();
         let mut blades = vec![0f64; 2usize.pow(algebra.dim())];
         for blade in TypeBlades::new(algebra, ty) {
-            blades[blade] = rand::Rng::gen::<f64>(&mut rng) * 2. - 1.;
+            blades[blade] = rand::Rng::gen_range(&mut rng, -1.0..1.0);
         }
         Value { ty, blades }
     }
@@ -1204,6 +1204,21 @@ impl Value {
     pub fn unit(&mut self, algebra: &Algebra) {
         let norm = self.norm(algebra);
         self.blades.iter_mut().for_each(|b| *b /= norm);
+    }
+
+    pub fn try_gen_unit(ty: Type, algebra: &Algebra) -> Option<Self> {
+        for _ in 0..20 {
+            let mut value = Self::gen(ty, algebra);
+            value.unit(algebra);
+            if value.is_finite() {
+                return Some(value);
+            }
+        }
+        None
+    }
+
+    pub fn is_finite(&self) -> bool {
+        self.blades.iter().all(|f| f.is_finite())
     }
 
     pub fn norm(&self, algebra: &Algebra) -> f64 {

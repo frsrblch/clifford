@@ -171,7 +171,7 @@ impl TraitBounds {
                 let output_can_be_unit = {
                     const N: usize = 10;
                     (0..N)
-                        .filter(|_| {
+                        .all(|_| {
                             let mut lhs = Value::gen(lhs.into(), algebra);
                             let mut rhs = Value::gen(rhs.into(), algebra);
                             lhs.unit(algebra);
@@ -182,8 +182,6 @@ impl TraitBounds {
                                 false
                             }
                         })
-                        .count()
-                        == N
                 };
                 let abc = if output_can_be_unit {
                     if op == BinaryTrait::Div {
