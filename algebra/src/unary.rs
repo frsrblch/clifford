@@ -743,7 +743,7 @@ impl UnaryTrait {
                                 has_non_zero = true;
                                 bounds.insert(t.mul(t, t));
                                 bounds.insert(t.sub(t, t));
-                                quote!(#field: rand::Rng::gen::<#t>(rng) * two - one)
+                                quote!(#field: rand::Rng::gen_range(rng, -one..=one))
                             }
                         })
                         .collect::<Vec<_>>();
@@ -756,23 +756,17 @@ impl UnaryTrait {
 
                     let inner_t = inner.with_type_param(t, Mag::Any);
                     bounds.insert(inner_t.norm2());
-                    let return_expr = quote!(return v;);
-                    let return_unit_expr = quote! {
-                        return (v / Scalar::new(norm2.sqrt())).assert();
-                    };
                     let (params, where_clause) = bounds.params_and_where_clause();
 
                     Impl::Actual(quote! {
                         impl #params rand::distributions::Distribution<#ty_t> for rand::distributions::Standard
                         #where_clause
-                            rand::distributions::Standard: rand::distributions::Distribution<#t>,
-                            #t: num_traits::Float,
-
+                            #t: num_traits::Float + rand::distributions::uniform::SampleUniform,
+                            std::ops::RangeInclusive<#t>: rand::distributions::uniform::SampleRange<#t>,
                         {
                             #[inline]
                             fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) ->  #ty_t {
                                 let one = <#t as #one_ty>::#one_fn();
-                                let two = one + one;
                                 for _ in 0..64 {
                                     let v = #inner {
                                         #(#fields,)*
@@ -780,7 +774,7 @@ impl UnaryTrait {
                                     };
                                     let norm2 = #norm2_ty::#norm2_fn(v).#s;
                                     if norm2 <= one {
-                                        #return_expr
+                                        return v;
                                     }
                                 }
                                 panic!("unable to find unit value for {}", std::any::type_name::<Self>());
@@ -788,14 +782,12 @@ impl UnaryTrait {
                         }
                         impl #params rand::distributions::Distribution<#unit_t> for rand::distributions::Standard
                         #where_clause
-                            rand::distributions::Standard: rand::distributions::Distribution<#t>,
-                            #t: num_traits::Float,
-
+                            #t: num_traits::Float + rand::distributions::uniform::SampleUniform,
+                            std::ops::RangeInclusive<#t>: rand::distributions::uniform::SampleRange<#t>,
                         {
                             #[inline]
                             fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) ->  #unit_t {
                                 let one = <#t as #one_ty>::#one_fn();
-                                let two = one + one;
                                 for _ in 0..64 {
                                     let v = #inner {
                                         #(#fields,)*
@@ -803,7 +795,7 @@ impl UnaryTrait {
                                     };
                                     let norm2 = #norm2_ty::#norm2_fn(v).#s;
                                     if norm2 <= one {
-                                        #return_unit_expr
+                                        return (v / Scalar::new(norm2.sqrt())).assert()
                                     }
                                 }
                                 panic!("unable to find unit value for {}", std::any::type_name::<Self>());
