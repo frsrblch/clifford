@@ -22,7 +22,6 @@ pub enum UnaryTrait {
     Norm2,
     Norm,
     FloatType,
-    /// num_traits
     Zero,
     One,
     /// Bytemuck,
@@ -51,12 +50,12 @@ impl UnaryTrait {
             LeftComp => quote!(clifford::LeftComplement),
             RightComp => quote!(clifford::RightComplement),
             Unitize => quote!(clifford::Unitize),
-            Inverse => quote!(num_traits::Inv),
+            Inverse => quote!(clifford::Inv),
             Reverse => quote!(clifford::Reverse),
             GradeInvolution => quote!(clifford::GradeInvolution),
             CliffordConjugate => quote!(clifford::CliffordConjugate),
-            Zero => quote!(num_traits::Zero),
-            One => quote!(num_traits::One),
+            Zero => quote!(clifford::Zero),
+            One => quote!(clifford::One),
             Norm2 => quote!(clifford::Norm2),
             Norm => quote!(clifford::Norm),
             Pod => quote!(bytemuck::Pod),
@@ -340,11 +339,23 @@ impl UnaryTrait {
                             #field: #trait_ty::#trait_fn(),
                         }
                     });
+
+                    let geo_traits_zero_ty = quote!(clifford::ZeroConst);
+                    let const_fields =
+                        TypeFields::new(algebra, ty).map(|(_, field)| quote!(#field: T::ZERO,));
+                    let ty_t = ty.with_type_param(T, Mag::Any);
                     Impl::Actual(quote! {
-                        impl<T> #trait_ty for #ty<T, Any>
+                        impl<T> #geo_traits_zero_ty for #ty_t where T: #geo_traits_zero_ty {
+                            const ZERO: #ty_t = #ty {
+                                #(#const_fields)*
+                                marker: std::marker::PhantomData,
+                            };
+                        }
+
+                        impl<T> #trait_ty for #ty_t
                         where
                             T: #trait_ty + PartialEq,
-                            #ty<T, Any>: std::ops::Add<Output = #ty<T, Any>>,
+                            #ty_t: std::ops::Add<Output = #ty<T, Any>>,
                         {
                             #[inline]
                             fn #trait_fn() -> Self {
@@ -395,7 +406,32 @@ impl UnaryTrait {
                         .collect::<Vec<_>>();
 
                     let (params, where_clause) = bounds.params_and_where_clause();
+
+                    let geo_traits_one_ty = quote!(clifford::OneConst);
+                    let mut zero_bound = false;
+                    let const_fields = TypeFields::new(algebra, ty)
+                        .map(|(blade, field)| {
+                            if blade == Blade::scalar() {
+                                quote!(#field: T::ONE,)
+                            } else {
+                                zero_bound = true;
+                                quote!(#field: T::ZERO,)
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    let plus_geo_traits_zero_ty = if zero_bound {
+                        quote!(+ clifford::ZeroConst)
+                    } else {
+                        quote!()
+                    };
+
                     Impl::Actual(quote! {
+                        impl #params #geo_traits_one_ty for #ty_t where T: #geo_traits_one_ty #plus_geo_traits_zero_ty {
+                            const ONE: #ty_t = #ty {
+                                #(#const_fields)*
+                                marker: std::marker::PhantomData,
+                            };
+                        }
                         impl #params #trait_ty for #ty_t #where_clause {
                             #[inline]
                             fn #trait_fn() -> Self {
@@ -484,14 +520,14 @@ impl UnaryTrait {
                         impl<T, A> #trait_ty for #ty_t
                         where
                             #ty_t: #norm2_ty<Output = #scalar_t> + Copy,
-                            T: num_traits::Float,
+                            T: clifford::Number,
                         {
                             type Output = #scalar_t;
                             #[inline]
                             fn #trait_fn(self) -> Self::Output {
                                 let s2 = #norm2_ty::#norm2_fn(self).#s;
                                 #scalar {
-                                    #s: num_traits::Float::sqrt(s2),
+                                    #s: Sqrt::sqrt(s2),
                                     marker: std::marker::PhantomData,
                                 }
                             }
@@ -761,7 +797,7 @@ impl UnaryTrait {
                     Impl::Actual(quote! {
                         impl #params rand::distributions::Distribution<#ty_t> for rand::distributions::Standard
                         #where_clause
-                            #t: num_traits::Float + rand::distributions::uniform::SampleUniform,
+                            #t: clifford::Number + rand::distributions::uniform::SampleUniform,
                             std::ops::RangeInclusive<#t>: rand::distributions::uniform::SampleRange<#t>,
                         {
                             #[inline]
@@ -782,7 +818,7 @@ impl UnaryTrait {
                         }
                         impl #params rand::distributions::Distribution<#unit_t> for rand::distributions::Standard
                         #where_clause
-                            #t: num_traits::Float + rand::distributions::uniform::SampleUniform,
+                            #t: clifford::Number + rand::distributions::uniform::SampleUniform,
                             std::ops::RangeInclusive<#t>: rand::distributions::uniform::SampleRange<#t>,
                         {
                             #[inline]
@@ -865,7 +901,7 @@ impl UnaryTrait {
                             let product = value * inv;
                             let expected = #product {
                                 #s: 1f64,
-                                ..num_traits::zero()
+                                ..clifford::Zero::zero()
                             };
                             let diff = product - expected;
                             assert!(#norm2_ty::#norm2_fn(diff).#s.abs() < 1e-10);
@@ -908,7 +944,7 @@ impl UnaryTrait {
                             let product = unit * #rev_ty::#rev_fn(unit);
                             let expected = #product {
                                 #s: 1f64,
-                                ..num_traits::zero()
+                                ..clifford::Zero::zero()
                             };
                             let diff = product - expected;
                             assert!(#norm2_ty::#norm2_fn(diff).#s.abs() < 1e-10);

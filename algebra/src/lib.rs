@@ -344,7 +344,6 @@ impl Algebra {
     pub fn define(&self) -> TokenStream {
         let mut tokens = quote! {
             pub use clifford::*;
-            pub use num_traits::{one, zero, Float, FloatConst, Inv, One, Zero};
             pub use std::ops::{Add, Sub, Mul, Div, AddAssign, SubAssign, MulAssign, DivAssign, Neg};
             pub use bytemuck::{Pod, Zeroable};
         };
@@ -753,7 +752,7 @@ impl Type {
                 .map(|blade| {
                     let field = &algebra.fields[blade];
                     quote! {
-                        num_traits::Zero::is_zero(&self.#field)
+                        clifford::Zero::is_zero(&self.#field)
                     }
                 })
                 .collect::<syn::punctuated::Punctuated<_, syn::Token![&&]>>();
@@ -761,7 +760,7 @@ impl Type {
                 let field = &algebra.fields[blade];
                 let field_lit = syn::LitStr::new(&field.to_string(), field.span());
                 quote! {
-                    if !num_traits::Zero::is_zero(&self.#field) {
+                    if !clifford::Zero::is_zero(&self.#field) {
                         debug_struct.field(#field_lit, &self.#field);
                     } else {
                         non_exhaustive = true;
@@ -769,13 +768,13 @@ impl Type {
                 }
             });
             quote! {
-                impl<T: std::fmt::Debug + num_traits::Zero, M> std::fmt::Debug for #ident<T, M> {
+                impl<T: std::fmt::Debug + clifford::Zero, M> std::fmt::Debug for #ident<T, M> {
                     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                         let ty = std::any::type_name::<Self>();
 
                         let all_zero = #check_zero;
                         if all_zero {
-                            return f.debug_tuple(ty).field(&<T as num_traits::Zero>::zero()).finish();
+                            return f.debug_tuple(ty).field(&<T as clifford::Zero>::zero()).finish();
                         }
 
                         let mut debug_struct = f.debug_struct(ty);
@@ -794,12 +793,12 @@ impl Type {
         let map_fields =
             TypeFields::new(algebra, self).map(|(_, field)| quote!(#field: f(self.#field)));
 
-        let num_traits = if self == Type::Grade(0) {
-            let num_traits = impl_num_traits_for_scalar();
-            let float = impl_float_for_scalar(algebra);
+        let numeric_traits = if self == Type::Grade(0) {
+            let numeric_traits = impl_numeric_traits_for_scalar();
+            let number = impl_number_for_scalar(algebra);
             quote! {
-                #num_traits
-                #float
+                #numeric_traits
+                #number
             }
         } else {
             quote!()
@@ -898,7 +897,7 @@ impl Type {
 
             #const_basis
 
-            #num_traits
+            #numeric_traits
         }
     }
 
@@ -1257,75 +1256,12 @@ impl Value {
     }
 }
 
-fn impl_num_traits_for_scalar() -> TokenStream {
+fn impl_numeric_traits_for_scalar() -> TokenStream {
     quote! {
-        macro_rules! impl_to_primitive {
-            ( $($fn_ident:ident, $T:ty,)* ) => {
-                impl<T> num_traits::ToPrimitive for Scalar<T>
-                where
-                    T: num_traits::ToPrimitive,
-                {
-                    $(
-                        fn $fn_ident(&self) -> Option<$T> {
-                            self.s.$fn_ident()
-                        }
-                    )*
-                }
-            };
-        }
-
-        impl_to_primitive! {
-            to_i64, i64,
-            to_u64, u64,
-            to_isize, isize,
-            to_usize, usize,
-            to_i8, i8,
-            to_u8, u8,
-            to_i16, i16,
-            to_u16, u16,
-            to_i32, i32,
-            to_u32, u32,
-            to_u128, u128,
-            to_i128, i128,
-            to_f32, f32,
-            to_f64, f64,
-        }
-
-        macro_rules! impl_from_primitive {
-            ( $($fn_ident:ident, $T:ty,)* ) => {
-                impl<T> num_traits::FromPrimitive for Scalar<T>
-                where
-                    T: num_traits::FromPrimitive,
-                {
-                    $(
-                        fn $fn_ident(t: $T) -> Option<Self> {
-                            T::$fn_ident(t).map(|s| Scalar::new(s))
-                        }
-                    )*
-                }
-            };
-        }
-
-        impl_from_primitive! {
-            from_i64, i64,
-            from_u64, u64,
-            from_isize, isize,
-            from_usize, usize,
-            from_i8, i8,
-            from_u8, u8,
-            from_i16, i16,
-            from_u16, u16,
-            from_i32, i32,
-            from_u32, u32,
-            from_u128, u128,
-            from_i128, i128,
-            from_f32, f32,
-            from_f64, f64,
-        }
 
         macro_rules! impl_float_const_for_scalar {
             ($($fn_:ident,)*) => {
-                impl<T> num_traits::FloatConst for Scalar<T> where T: num_traits::FloatConst {
+                impl<T> FloatConst for Scalar<T> where T: FloatConst {
                     $(
                         #[allow(non_snake_case)]
                         fn $fn_() -> Self {
@@ -1353,15 +1289,6 @@ fn impl_num_traits_for_scalar() -> TokenStream {
             LOG2_E,
             PI,
             SQRT_2,
-        }
-
-        impl<T> num_traits::NumCast for Scalar<T>
-        where
-            T: num_traits::NumCast + num_traits::ToPrimitive,
-        {
-            fn from<N: num_traits::ToPrimitive>(n: N) -> Option<Self> {
-                T::from(n).map(|s| Scalar::new(s))
-            }
         }
 
         impl<T> std::ops::Rem for Scalar<T>
@@ -1416,319 +1343,106 @@ fn impl_num_traits_for_scalar() -> TokenStream {
     }
 }
 
-fn impl_float_for_scalar(algebra: &Algebra) -> TokenStream {
+fn impl_number_for_scalar(algebra: &Algebra) -> TokenStream {
     if UnaryTrait::Inverse.no_impl(OverType::Type(Type::Grade(0)), algebra) {
         return quote!();
     }
 
     quote! {
-        impl<T> num_traits::Num for Scalar<T>
-        where
-            T: num_traits::Float,
-        {
-            type FromStrRadixErr = T::FromStrRadixErr;
+        impl<T: Sqrt> Sqrt for Scalar<T> {
+            type Output = Scalar<T::Output>;
             #[inline]
-            fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
-                T::from_str_radix(str, radix).map(|s| Scalar {
-                    s,
-                    marker: std::marker::PhantomData,
-                })
+            fn sqrt(self) -> Self::Output {
+                self.map(Sqrt::sqrt)
             }
         }
 
-        impl<T> num_traits::Float for Scalar<T>
-        where
-            T: num_traits::Float,
-        {
+        impl<T: Ln> Ln for Scalar<T> {
+            type Output = Scalar<T::Output>;
             #[inline]
-            fn nan() -> Self {
-                Scalar::new(T::nan())
+            fn ln(self) -> Self::Output {
+                self.map(Ln::ln)
             }
+        }
 
+        impl<T: Exp> Exp for Scalar<T> {
+            type Output = Scalar<T::Output>;
             #[inline]
-            fn infinity() -> Self {
-                Scalar::new(T::infinity())
+            fn exp(self) -> Self::Output {
+                self.map(Exp::exp)
             }
+        }
 
+        impl<T: Trig> Trig for Scalar<T> {
+            type Output = Scalar<T::Output>;
+
+            const TAU: Self = Scalar {
+                s: T::TAU,
+                marker: std::marker::PhantomData,
+            };
             #[inline]
-            fn neg_infinity() -> Self {
-                Scalar::new(T::neg_infinity())
+            fn sin(self) -> Self::Output {
+                self.map(Trig::sin)
             }
-
             #[inline]
-            fn neg_zero() -> Self {
-                Scalar::new(T::neg_zero())
+            fn cos(self) -> Self::Output {
+                self.map(Trig::cos)
             }
-
             #[inline]
-            fn min_value() -> Self {
-                Scalar::new(T::min_value())
-            }
-
-            #[inline]
-            fn min_positive_value() -> Self {
-                Scalar::new(T::min_positive_value())
-            }
-
-            #[inline]
-            fn max_value() -> Self {
-                Scalar::new(T::max_value())
-            }
-
-            #[inline]
-            fn is_nan(self) -> bool {
-                self.s.is_nan()
-            }
-
-            #[inline]
-            fn is_infinite(self) -> bool {
-                self.s.is_infinite()
-            }
-
-            #[inline]
-            fn is_finite(self) -> bool {
-                self.s.is_finite()
-            }
-
-            #[inline]
-            fn is_normal(self) -> bool {
-                self.s.is_normal()
-            }
-
-            #[inline]
-            fn classify(self) -> std::num::FpCategory {
-                self.s.classify()
-            }
-
-            #[inline]
-            fn floor(self) -> Self {
-                self.map(num_traits::Float::floor)
-            }
-
-            #[inline]
-            fn ceil(self) -> Self {
-                self.map(num_traits::Float::ceil)
-            }
-
-            #[inline]
-            fn round(self) -> Self {
-                self.map(num_traits::Float::round)
-            }
-
-            #[inline]
-            fn trunc(self) -> Self {
-                self.map(num_traits::Float::trunc)
-            }
-
-            #[inline]
-            fn fract(self) -> Self {
-                self.map(num_traits::Float::fract)
-            }
-
-            #[inline]
-            fn abs(self) -> Self {
-                self.map(num_traits::Float::abs)
-            }
-
-            #[inline]
-            fn signum(self) -> Self {
-                self.map(num_traits::Float::signum)
-            }
-
-            #[inline]
-            fn is_sign_positive(self) -> bool {
-                self.s.is_sign_positive()
-            }
-
-            #[inline]
-            fn is_sign_negative(self) -> bool {
-                self.s.is_sign_negative()
-            }
-
-            #[inline]
-            fn mul_add(self, a: Self, b: Self) -> Self {
-                Scalar::new(self.s.mul_add(a.s, b.s))
-            }
-
-            #[inline]
-            fn recip(self) -> Self {
-                Scalar::new(self.s.recip())
-            }
-
-            #[inline]
-            fn powi(self, n: i32) -> Self {
-                Scalar::new(self.s.powi(n))
-            }
-
-            #[inline]
-            fn powf(self, n: Self) -> Self {
-                Scalar::new(self.s.powf(n.s))
-            }
-
-            #[inline]
-            fn sqrt(self) -> Self {
-                self.map(num_traits::Float::sqrt)
-            }
-
-            #[inline]
-            fn exp(self) -> Self {
-                self.map(num_traits::Float::exp)
-            }
-
-            #[inline]
-            fn exp2(self) -> Self {
-                self.map(num_traits::Float::exp2)
-            }
-
-            #[inline]
-            fn ln(self) -> Self {
-                self.map(num_traits::Float::ln)
-            }
-
-            #[inline]
-            fn log(self, base: Self) -> Self {
-                Scalar::new(self.s.log(base.s))
-            }
-
-            #[inline]
-            fn log2(self) -> Self {
-                self.map(num_traits::Float::log2)
-            }
-
-            #[inline]
-            fn log10(self) -> Self {
-                self.map(num_traits::Float::log10)
-            }
-
-            #[inline]
-            fn max(self, other: Self) -> Self {
-                Scalar::new(self.s.max(other.s))
-            }
-
-            #[inline]
-            fn min(self, other: Self) -> Self {
-                Scalar::new(self.s.min(other.s))
-            }
-
-            #[inline]
-            fn abs_sub(self, other: Self) -> Self {
-                Scalar::new(self.s.abs_sub(other.s))
-            }
-
-            #[inline]
-            fn cbrt(self) -> Self {
-                self.map(num_traits::Float::cbrt)
-            }
-
-            #[inline]
-            fn hypot(self, other: Self) -> Self {
-                Scalar::new(self.s.hypot(other.s))
-            }
-
-            #[inline]
-            fn sin(self) -> Self {
-                self.map(num_traits::Float::sin)
-            }
-
-            #[inline]
-            fn cos(self) -> Self {
-                self.map(num_traits::Float::cos)
-            }
-
-            #[inline]
-            fn tan(self) -> Self {
-                self.map(num_traits::Float::tan)
-            }
-
-            #[inline]
-            fn asin(self) -> Self {
-                self.map(num_traits::Float::asin)
-            }
-
-            #[inline]
-            fn acos(self) -> Self {
-                self.map(num_traits::Float::acos)
-            }
-
-            #[inline]
-            fn atan(self) -> Self {
-                self.map(num_traits::Float::atan)
-            }
-
-            #[inline]
-            fn atan2(self, other: Self) -> Self {
-                Scalar::new(self.s.atan2(other.s))
-            }
-
-            #[inline]
-            fn sin_cos(self) -> (Self, Self) {
+            fn sin_cos(self) -> (Self::Output, Self::Output) {
                 let (sin, cos) = self.s.sin_cos();
                 (Scalar::new(sin), Scalar::new(cos))
             }
-
             #[inline]
-            fn exp_m1(self) -> Self {
-                self.map(num_traits::Float::exp_m1)
+            fn tan(self) -> Self::Output {
+                self.map(Trig::tan)
             }
-
             #[inline]
-            fn ln_1p(self) -> Self {
-                self.map(num_traits::Float::ln_1p)
+            fn asin(self) -> Self::Output {
+                self.map(Trig::asin)
             }
-
             #[inline]
-            fn sinh(self) -> Self {
-                self.map(num_traits::Float::sinh)
+            fn acos(self) -> Self::Output {
+                self.map(Trig::acos)
             }
-
             #[inline]
-            fn cosh(self) -> Self {
-                self.map(num_traits::Float::cosh)
+            fn atan(self) -> Self::Output {
+                self.map(Trig::atan)
             }
-
             #[inline]
-            fn tanh(self) -> Self {
-                self.map(num_traits::Float::tanh)
+            fn atan2(self, y: Self) -> Self::Output {
+                Scalar::new(self.s.atan2(y.s))
             }
-
             #[inline]
-            fn asinh(self) -> Self {
-                self.map(num_traits::Float::asinh)
+            fn sinh(self) -> Self::Output {
+                self.map(Trig::sinh)
             }
-
             #[inline]
-            fn acosh(self) -> Self {
-                self.map(num_traits::Float::acosh)
+            fn cosh(self) -> Self::Output {
+                self.map(Trig::cosh)
             }
-
             #[inline]
-            fn atanh(self) -> Self {
-                self.map(num_traits::Float::atanh)
+            fn tanh(self) -> Self::Output {
+                self.map(Trig::tanh)
             }
-
             #[inline]
-            fn integer_decode(self) -> (u64, i16, i8) {
-                self.s.integer_decode()
+            fn asinh(self) -> Self::Output {
+                self.map(Trig::asinh)
             }
-
             #[inline]
-            fn epsilon() -> Self {
-                Scalar { s: T::epsilon(), marker: std::marker::PhantomData }
+            fn acosh(self) -> Self::Output {
+                self.map(Trig::acosh)
             }
-
             #[inline]
-            fn to_degrees(self) -> Self {
-                self.map(num_traits::Float::to_degrees)
+            fn atanh(self) -> Self::Output {
+                self.map(Trig::atanh)
             }
+        }
 
+        impl<T: FromF64> FromF64 for Scalar<T> {
             #[inline]
-            fn to_radians(self) -> Self {
-                self.map(num_traits::Float::to_radians)
-            }
-
-            #[inline]
-            fn copysign(self, sign: Self) -> Self {
-                Scalar { s: self.s.copysign(sign.s), marker: std::marker::PhantomData }
+            fn from_f64(value: f64) -> Self {
+                Scalar::new(T::from_f64(value))
             }
         }
     }
