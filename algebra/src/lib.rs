@@ -709,9 +709,9 @@ impl Type {
 
     pub fn define(self, algebra: &Algebra) -> TokenStream {
         let derive = if TypeBlades::new(algebra, self).nth(1).is_some() {
-            quote!(#[derive(Default, Copy, Clone, Eq, Hash)])
+            quote!(#[derive(Eq, Hash)])
         } else {
-            quote!(#[derive(Default, Copy, Clone, Eq, Ord, PartialOrd, Hash)])
+            quote!(#[derive(Eq, Ord, PartialOrd, Hash)])
         };
         let ident = self.ident();
         let fields = SortedTypeBlades::new(algebra, self).map(|blade| {
@@ -790,6 +790,63 @@ impl Type {
             }
         };
 
+        let impl_default_any = {
+            let ty_t = quote!(#ident<T, Any>);
+            let fields = TypeFields::new(algebra, self).map(|(_, field)| {
+                quote! { #field: Default::default() }
+            });
+            quote! {
+                impl<T: Default> Default for #ty_t {
+                    fn default() -> Self {
+                        #ident {
+                            #(#fields,)*
+                            marker: std::marker::PhantomData
+                        }
+                    }
+                }
+            }
+        };
+        let impl_default_unit = if self == Type::Motor {
+            let ty_t = quote!(#ident<T, Unit>);
+            let fields = TypeFields::new(algebra, self).map(|(blade, field)| {
+                if blade == Blade::scalar() {
+                    quote! { #field: one() }
+                } else {
+                    quote! { #field: Default::default() }
+                }
+            });
+            quote! {
+                impl<T: Default + One> Default for #ty_t {
+                    fn default() -> Self {
+                        #ident {
+                            #(#fields,)*
+                            marker: std::marker::PhantomData
+                        }
+                    }
+                }
+            }
+        } else {
+            quote!()
+        };
+
+        let impl_copy_clone = {
+            let ty_t = quote!(#ident<T, A>);
+            let fields = TypeFields::new(algebra, self).map(|(_, field)| {
+                quote! { #field: self.#field.clone() }
+            });
+            quote! {
+                impl<T: Clone, A> Clone for #ty_t {
+                    fn clone(&self) -> Self {
+                        #ident {
+                            #(#fields,)*
+                            marker: std::marker::PhantomData,
+                        }
+                    }
+                }
+                impl<T: Copy, A> Copy for #ty_t {}
+            }
+        };
+
         let map_fields =
             TypeFields::new(algebra, self).map(|(_, field)| quote!(#field: f(self.#field)));
 
@@ -857,14 +914,9 @@ impl Type {
             }
 
             #impl_debug
-
-            impl<T> std::ops::Deref for #ident<T, Unit> {
-                type Target = #ident<T, Any>;
-
-                fn deref(&self) -> &Self::Target {
-                    unsafe { std::mem::transmute(self) }
-                }
-            }
+            #impl_default_any
+            #impl_default_unit
+            #impl_copy_clone
 
             impl<T> #ident<T, Any> {
                 #[inline]
