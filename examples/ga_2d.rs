@@ -6,4 +6,3 @@ clifford::algebra! {
         y ^ 2 == 1,
     }
 }
-

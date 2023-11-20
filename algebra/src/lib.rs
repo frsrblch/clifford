@@ -904,6 +904,11 @@ impl Type {
             algebra.dim()
         );
 
+        let n = proc_macro2::Literal::usize_unsuffixed(TypeBlades::new(algebra, self).count());
+        let array_fields = &TypeFields::new(algebra, self)
+            .map(|(_, f)| f)
+            .collect::<Vec<_>>();
+
         quote! {
             #[doc = #d]
             #[repr(C)]
@@ -921,7 +926,7 @@ impl Type {
             impl<T> #ident<T, Any> {
                 #[inline]
                 #allow_clippy_too_many_arguments
-                pub fn new(#(#new_params),*) -> #ident<T, Any> {
+                pub const fn new(#(#new_params),*) -> #ident<T, Any> {
                     #ident {
                         #(#new_fields,)*
                         marker: std::marker::PhantomData,
@@ -943,6 +948,23 @@ impl Type {
                     #ident {
                         #(#assert_fields,)*
                         marker: std::marker::PhantomData,
+                    }
+                }
+
+                #[doc = "Convert the value to an array"]
+                #[inline]
+                pub fn to_array(self) -> [T; #n] {
+                    let #ident { #(#array_fields,)* .. } = self;
+                    [#(#array_fields),*]
+                }
+
+                #[doc = "Create a value from an array"]
+                #[inline]
+                pub fn from_array(array: [T; #n]) -> Self {
+                    let [#(#array_fields),*] = array;
+                    #ident {
+                        #(#array_fields,)*
+                        marker: std::marker::PhantomData
                     }
                 }
             }
