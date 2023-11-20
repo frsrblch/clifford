@@ -101,37 +101,11 @@ impl UnaryTrait {
 
         use UnaryTrait::*;
         match self {
-            Neg => match ty {
-                OverType::Type(ty) => {
-                    let (trait_ty, trait_fn) = self.ty_fn();
-                    let mut bounds = TraitBounds::default();
-                    bounds.insert(T.neg());
-                    bounds.insert(A);
-                    let ty_t = ty.with_type_param(T, A);
-                    let fields = TypeBlades::new(algebra, ty).map(|blade| {
-                        let field = &algebra.fields[blade];
-                        quote!(#field: -self.#field)
-                    });
-                    let (params, where_clause) = bounds.params_and_where_clause();
-                    Impl::Actual(quote! {
-                        impl #params #trait_ty for #ty_t #where_clause {
-                            type Output = #ty_t;
-                            #[inline]
-                            fn #trait_fn(self) -> Self::Output {
-                                #ty {
-                                    #(#fields,)*
-                                    marker: std::marker::PhantomData,
-                                }
-                            }
-                        }
-                    })
-                }
-                OverType::Float(_) => Impl::External,
-            },
-            Reverse | GradeInvolution | CliffordConjugate => match ty {
+            Neg | Reverse | GradeInvolution | CliffordConjugate => match ty {
                 OverType::Type(ty) => {
                     let (trait_ty, trait_fn) = self.ty_fn();
                     let f = match self {
+                        Neg => std::ops::Neg::neg,
                         Reverse => Blade::rev,
                         GradeInvolution => Blade::grade_involution,
                         CliffordConjugate => Blade::clifford_conjugate,
@@ -166,7 +140,10 @@ impl UnaryTrait {
                         }
                     })
                 }
-                OverType::Float(_) => Impl::None,
+                OverType::Float(_) => match self {
+                    Neg => Impl::External,
+                    _ => Impl::None,
+                },
             },
             Dual | LeftComp | RightComp | Not => {
                 match (self, algebra.symmetric_complements()) {

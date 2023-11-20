@@ -31,7 +31,7 @@ impl Blade {
             Blade::zero()
         }
     }
-
+    
     pub fn rev(self) -> Self {
         let count = self.count();
         let half = count / 2;
