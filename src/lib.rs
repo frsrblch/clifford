@@ -70,6 +70,8 @@
 //! Norm-based operations:
 //! - [x] Norm
 //! - [x] Norm2
+//! - [ ] Antinorm
+//! - [ ] Antinorm2
 //! - [x] Inverse
 //! - [x] Unitize
 //!

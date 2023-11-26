@@ -1472,22 +1472,6 @@ fn impl_number_for_scalar(algebra: &Algebra) -> TokenStream {
                 self.map(Trig::tan)
             }
             #[inline]
-            fn asin(self) -> Self::Output {
-                self.map(Trig::asin)
-            }
-            #[inline]
-            fn acos(self) -> Self::Output {
-                self.map(Trig::acos)
-            }
-            #[inline]
-            fn atan(self) -> Self::Output {
-                self.map(Trig::atan)
-            }
-            #[inline]
-            fn atan2(self, y: Self) -> Self::Output {
-                Scalar::new(self.s.atan2(y.s))
-            }
-            #[inline]
             fn sinh(self) -> Self::Output {
                 self.map(Trig::sinh)
             }
@@ -1499,17 +1483,38 @@ fn impl_number_for_scalar(algebra: &Algebra) -> TokenStream {
             fn tanh(self) -> Self::Output {
                 self.map(Trig::tanh)
             }
+        }
+
+        impl<T: InvTrig> InvTrig for Scalar<T> {
+            type Output = Scalar<T::Output>;
+
+            #[inline]
+            fn asin(self) -> Self::Output {
+                self.map(InvTrig::asin)
+            }
+            #[inline]
+            fn acos(self) -> Self::Output {
+                self.map(InvTrig::acos)
+            }
+            #[inline]
+            fn atan(self) -> Self::Output {
+                self.map(InvTrig::atan)
+            }
+            #[inline]
+            fn atan2(self, y: Self) -> Self::Output {
+                Scalar::new(self.s.atan2(y.s))
+            }
             #[inline]
             fn asinh(self) -> Self::Output {
-                self.map(Trig::asinh)
+                self.map(InvTrig::asinh)
             }
             #[inline]
             fn acosh(self) -> Self::Output {
-                self.map(Trig::acosh)
+                self.map(InvTrig::acosh)
             }
             #[inline]
             fn atanh(self) -> Self::Output {
-                self.map(Trig::atanh)
+                self.map(InvTrig::atanh)
             }
         }
 
