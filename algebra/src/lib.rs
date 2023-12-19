@@ -913,7 +913,7 @@ impl Type {
             #[doc = #d]
             #[repr(C)]
             #derive
-            pub struct #ident<T, M = Any> {
+            pub struct #ident<T = f64, M = Any> {
                 #(#fields)*
                 pub marker: std::marker::PhantomData<M>,
             }

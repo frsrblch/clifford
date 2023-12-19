@@ -12,7 +12,7 @@
 //! Generics:
 //! - [x] Flexible generics (e.g., `Vector<T>: Mul<Scalar<U>, Output = Vector<V>> where T: Mul<U, Output = V>`)
 //! - [x] FloatType trait (e.g., `Vector<T>: FloatType<Float = T>`)
-//! - [ ] Default float type (e.g., `struct Vector<T = f64, M = Any>` { .. })
+//! - [x] Default float type (e.g., `struct Vector<T = f64, M = Any>` { .. })
 //! - [ ] Option for fixed float type (no generic type parameter `T`)
 //! - [ ] Replace individual generic traits with `geo_traits::Number` and `geo_traits::Numbers`ga_
 //!
