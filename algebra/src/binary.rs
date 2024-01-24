@@ -232,19 +232,21 @@ impl BinaryTrait {
                 let rhs_t = rhs.with_type_param(u, b);
 
                 let fields = TypeBlades::new(algebra, lhs).filter_map(|blade| {
-                    rhs.contains_blade(blade).then(|| {
+                    if rhs.contains_blade(blade) {
                         let lhs_access = lhs.access_field(&quote!(self), blade, algebra);
                         let rhs_access = rhs.access_field(&quote!(rhs), blade, algebra);
                         if lhs.is_float() {
-                            quote! {
+                            Some(quote! {
                                 #trait_ty::#trait_fn(#lhs_access, #rhs_access);
-                            }
+                            })
                         } else {
-                            quote! {
+                            Some(quote! {
                                 #trait_ty::#trait_fn(&mut #lhs_access, #rhs_access);
-                            }
+                            })
                         }
-                    })
+                    } else {
+                        None
+                    }
                 });
 
                 let (params, where_clause) = bounds.params_and_where_clause();
