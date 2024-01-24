@@ -21,6 +21,7 @@
 //! - [x] fn new(...) -> Self { ... }
 //! - [x] `From<Grade>` for `Motor`/`Flector`/`Multivector`
 //! - [x] `to_array` and `from_array`
+//! - [x] 'to_f32' and `to_f64` functions
 //! - [ ] Index functions (`index`/`index_ref`/`index_mut`) for indexable `T` (e.g., `Vector<f32x8>`)
 //! - [ ] Implement operations that take by reference for values that are not `Copy`
 //! - [ ] Implement Display to print objects as a sum of blades or zero

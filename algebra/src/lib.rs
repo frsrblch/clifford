@@ -933,6 +933,18 @@ impl Type {
                     }
                 }
             }
+            impl<M> #ident<f32, M> {
+                #[inline]
+                pub fn to_f64(self) -> #ident<f64, M> {
+                    self.map(|t| t as f64).assert()
+                }
+            }
+            impl<M> #ident<f64, M> {
+                #[inline]
+                pub fn to_f32(self) -> #ident<f32, M> {
+                    self.map(|t| t as f32).assert()
+                }
+            }
             impl<T, M> #ident<T, M> {
                 #[inline]
                 pub fn map<F: Fn(T) -> U, U>(self, f: F) -> #ident<U> {
