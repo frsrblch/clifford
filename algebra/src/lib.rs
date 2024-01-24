@@ -348,8 +348,6 @@ impl Algebra {
             pub use bytemuck::{Pod, Zeroable};
         };
 
-        Mag::define_all(&mut tokens);
-
         for ty in OverType::iter(self) {
             ty.define(self).to_tokens(&mut tokens);
         }
@@ -1185,11 +1183,8 @@ impl OverType {
 
     pub fn iter(algebra: &Algebra) -> impl Iterator<Item = Self> + '_ {
         let types = algebra.types().map(OverType::Type);
-        // let unit_types = algebra.types().map(Unit).map(OverType::Unit);
         let floats = Float::iter().map(OverType::Float);
-        types
-            // .chain(unit_types)
-            .chain(floats)
+        types.chain(floats)
     }
 
     pub fn iter_tuples(algebra: &Algebra) -> impl Iterator<Item = (Self, Self)> + '_ {

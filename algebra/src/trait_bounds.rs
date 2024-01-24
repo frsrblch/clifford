@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
-use strum::{EnumIter, IntoEnumIterator};
+use strum::EnumIter;
 
 use crate::{Algebra, BinaryTrait, Float, OverType, UnaryTrait, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -170,18 +170,17 @@ impl TraitBounds {
             _ => {
                 let output_can_be_unit = {
                     const N: usize = 10;
-                    (0..N)
-                        .all(|_| {
-                            let mut lhs = Value::gen(lhs.into(), algebra);
-                            let mut rhs = Value::gen(rhs.into(), algebra);
-                            lhs.unit(algebra);
-                            rhs.unit(algebra);
-                            if let Some(output) = lhs.mul(&rhs, algebra) {
-                                output.is_unit(algebra)
-                            } else {
-                                false
-                            }
-                        })
+                    (0..N).all(|_| {
+                        let mut lhs = Value::gen(lhs.into(), algebra);
+                        let mut rhs = Value::gen(rhs.into(), algebra);
+                        lhs.unit(algebra);
+                        rhs.unit(algebra);
+                        if let Some(output) = lhs.mul(&rhs, algebra) {
+                            output.is_unit(algebra)
+                        } else {
+                            false
+                        }
+                    })
                 };
                 let abc = if output_can_be_unit {
                     if op == BinaryTrait::Div {
@@ -366,60 +365,6 @@ impl std::ops::Div for Mag {
         match (self, rhs) {
             (Mag::Unit, Mag::Unit) => Mag::Unit,
             _ => Mag::Any,
-        }
-    }
-}
-
-impl Mag {
-    pub fn define_all(tokens: &mut TokenStream) {
-        Self::iter()
-            .map(Self::define)
-            .for_each(|ts: TokenStream| ts.to_tokens(tokens));
-        Self::tuples()
-            .map(Self::define_mul)
-            .for_each(|ts: TokenStream| ts.to_tokens(tokens));
-    }
-
-    pub fn tuples() -> impl Iterator<Item = (Self, Self)> {
-        Self::iter().flat_map(|lhs| Self::iter().map(move |rhs| (lhs, rhs)))
-    }
-
-    pub fn define(self) -> TokenStream {
-        match self {
-            Self::Any => {
-                quote! {
-                    #[doc = "A type state that represents a k-vector of arbitrary magnitude."]
-                    #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-                    pub struct #self;
-                }
-            }
-            Self::Unit => {
-                quote! {
-                    #[doc = "A type state that represents a k-vector of magnitude one."]
-                    #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-                    pub struct #self;
-                }
-            }
-        }
-    }
-
-    pub fn define_mul((lhs, rhs): (Self, Self)) -> TokenStream {
-        let output = lhs * rhs;
-        quote! {
-            impl std::ops::Mul<#rhs> for #lhs {
-                type Output = #output;
-                #[inline]
-                fn mul(self, _: #rhs) -> Self::Output {
-                    #output
-                }
-            }
-            impl std::ops::Div<#rhs> for #lhs {
-                type Output = #output;
-                #[inline]
-                fn div(self, _: #rhs) -> Self::Output {
-                    #output
-                }
-            }
         }
     }
 }
