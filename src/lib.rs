@@ -37,6 +37,7 @@
 //! - [x] Grade products
 //! - [x] Grade antiproducts
 //! - [x] Commutator
+//! - [x] Grade Filter (replaces grade products, to be used by Sandwich ops)
 //!
 //! Inner products:
 //! - [x] Dot

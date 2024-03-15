@@ -31,6 +31,7 @@ pub enum BinaryTrait {
     From,
     PartialEq,
     // SubsetOf
+    GradeFilter,
 }
 
 impl ToTokens for BinaryTrait {
@@ -68,6 +69,7 @@ impl BinaryTrait {
             Shr => quote!(std::ops::Shr),
             From => quote!(std::convert::From),
             PartialEq => quote!(std::cmp::PartialEq),
+            GradeFilter => quote!(geo_traits::GradeFilter),
         }
     }
 
@@ -99,6 +101,7 @@ impl BinaryTrait {
             Shr => quote!(shr),
             From => quote!(from),
             PartialEq => quote!(eq),
+            GradeFilter => quote!(grade_filter),
         }
     }
 
@@ -108,7 +111,7 @@ impl BinaryTrait {
 
     pub fn define(self, lhs: OverType, rhs: OverType, algebra: &Algebra) -> Impl<TokenStream> {
         use BinaryTrait::*;
-        use FloatParam::{T, V};
+        use FloatParam::{T, U, V};
         use Mag::Any;
         use MagParam::{A, B};
 
@@ -669,7 +672,7 @@ impl BinaryTrait {
                     if lhs.is_float() {
                         Impl::External
                     } else {
-                        let (trait_ty, trait_fn) = PartialEq.ty_fn();
+                        let (trait_ty, trait_fn) = self.ty_fn();
                         let mut bounds = TraitBounds::default();
                         bounds.insert(T.partial_eq(T));
                         bounds.insert([A, B]);
@@ -694,6 +697,56 @@ impl BinaryTrait {
                 } else {
                     Impl::None
                 }
+            }
+            GradeFilter => {
+                if !rhs.contains(lhs) || lhs.is_float() || rhs.is_float() {
+                    return Impl::None;
+                }
+                let OverType::Type(lhs) = lhs else {
+                    return Impl::None;
+                };
+                let OverType::Type(rhs) = rhs else {
+                    return Impl::None;
+                };
+                let (trait_ty, trait_fn) = self.ty_fn();
+                let lhs_t = lhs.with_type_param(T, A);
+                let out_t = if TypeGrades::new(algebra, lhs).all(|g| rhs.contains_grade(g)) {
+                    rhs.with_type_param(T, A)
+                } else {
+                    rhs.with_type_param(T, Mag::Any)
+                };
+                let rhs_u = rhs.with_type_param(U, B);
+                let mut bounds = TraitBounds::default();
+                bounds.insert([T, U]);
+                bounds.insert([A, B]);
+                let fields = TypeFields::new(algebra, rhs).map(|(b, f)| {
+                    if lhs.contains_grade(b.grade()) {
+                        quote!(#f: self.#f)
+                    } else {
+                        bounds.insert(T.zero());
+                        quote!(#f: T::zero())
+                    }
+                });
+                let expr = if lhs == rhs {
+                    quote!(self)
+                } else {
+                    quote! {
+                        #rhs {
+                            #(#fields,)*
+                            marker: std::marker::PhantomData,
+                        }
+                    }
+                };
+                let (params, where_clause) = bounds.params_and_where_clause();
+                Impl::Actual(quote! {
+                    impl #params #trait_ty<#rhs_u> for #lhs_t #where_clause {
+                        type Output = #out_t;
+                        #[inline]
+                        fn #trait_fn(self, _target: #rhs_u) -> Self::Output {
+                            #expr
+                        }
+                    }
+                })
             }
         }
     }
