@@ -128,6 +128,10 @@ impl BinaryTrait {
             };
         }
 
+        if lhs.is_float() {
+            return Impl::None;
+        }
+
         match self {
             Add | Sub => {
                 if lhs.is_float() && rhs.is_float() {
