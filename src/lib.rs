@@ -33,10 +33,8 @@
 //! - [x] Div
 //! - [x] Geometric
 //! - [x] Antigeometric
-//! - [x] Grade products
-//! - [x] Grade antiproducts
 //! - [x] Commutator
-//! - [x] Grade Filter (replaces grade products, to be used by Sandwich ops)
+//! - [x] Grade Filter
 //!
 //! Inner products:
 //! - [x] Dot
