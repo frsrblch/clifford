@@ -69,7 +69,7 @@ impl BinaryTrait {
             Shr => quote!(std::ops::Shr),
             From => quote!(std::convert::From),
             PartialEq => quote!(std::cmp::PartialEq),
-            GradeFilter => quote!(geo_traits::GradeFilter),
+            GradeFilter => quote!(clifford::GradeFilter),
         }
     }
 
@@ -137,7 +137,9 @@ impl BinaryTrait {
                         Impl::None
                     };
                 }
-                let output = Type::from(lhs) + Type::from(rhs);
+                let Some(output) = Type::from(lhs) + Type::from(rhs) else {
+                    return Impl::None;
+                };
                 let (trait_ty, trait_fn) = self.ty_fn();
                 let (from_ty, from_fn) = BinaryTrait::From.ty_fn();
                 let Some((mut bounds, [t, u, v], [a, b, c])) = TraitBounds::sum_types(lhs, rhs)
@@ -208,7 +210,7 @@ impl BinaryTrait {
                 })
             }
             AddAssign | SubAssign => {
-                if Type::from(lhs) != Type::from(lhs) + Type::from(rhs) {
+                if Some(Type::from(lhs)) != Type::from(lhs) + Type::from(rhs) {
                     return Impl::None;
                 }
 
@@ -408,61 +410,127 @@ impl BinaryTrait {
                 };
                 let output_v = output.with_type_param(v, c);
                 let self_var = &quote!(self);
-                let inv_var = &quote!(inv);
-                bounds.insert(rhs_u.inv());
-                let fields = TypeFields::new(algebra, output)
-                    .map(|(blade, field)| {
-                        let mut sum = quote!();
-                        for (l, r) in algebra.blade_tuples(lhs, rhs) {
-                            let out = algebra.geo(l, r);
-                            let lv = lhs.access_field(self_var, l, algebra);
-                            let rv = rhs.access_field(inv_var, r, algebra);
-                            if out == blade {
-                                if sum.is_empty() {
-                                    bounds.insert(t.mul(u, v));
-                                    quote!(#lv * #rv)
-                                } else {
-                                    bounds.insert(t.mul(u, v));
-                                    bounds.insert(v.add(v, v));
-                                    quote!(+ #lv * #rv)
+
+                let generate_with_div = |mut bounds: TraitBounds| {
+                    let rhs_var = &quote!(rhs);
+                    let fields = TypeFields::new(algebra, output)
+                        .map(|(blade, field)| {
+                            let mut sum = quote!();
+                            for (l, r) in algebra.blade_tuples(lhs, rhs) {
+                                let out = algebra.geo(l, r);
+                                let lv = lhs.access_field(self_var, l, algebra);
+                                let rv = rhs.access_field(rhs_var, r, algebra);
+                                if out == blade {
+                                    if sum.is_empty() {
+                                        bounds.insert(t.div(u, v));
+                                        quote!(#lv / #rv)
+                                    } else {
+                                        bounds.insert(t.div(u, v));
+                                        bounds.insert(v.add(v, v));
+                                        quote!(+ #lv / #rv)
+                                    }
+                                    .to_tokens(&mut sum);
+                                } else if out == -blade {
+                                    if sum.is_empty() {
+                                        bounds.insert(t.div(u, v));
+                                        bounds.insert(v.neg());
+                                        quote!(-(#lv / #rv))
+                                    } else {
+                                        bounds.insert(t.div(u, v));
+                                        bounds.insert(v.sub(v, v));
+                                        quote!(- #lv / #rv)
+                                    }
+                                    .to_tokens(&mut sum);
                                 }
-                                .to_tokens(&mut sum);
-                            } else if out == -blade {
-                                if sum.is_empty() {
-                                    bounds.insert(t.mul(u, v));
-                                    bounds.insert(v.neg());
-                                    quote!(-(#lv * #rv))
-                                } else {
-                                    bounds.insert(t.mul(u, v));
-                                    bounds.insert(v.sub(v, v));
-                                    quote!(- #lv * #rv)
-                                }
-                                .to_tokens(&mut sum);
                             }
-                        }
-                        if sum.is_empty() {
-                            bounds.insert(V.zero());
-                            quote!(#field: #zero_ty::#zero_fn())
-                        } else {
-                            quote!(#field: #sum)
+                            if sum.is_empty() {
+                                bounds.insert(V.zero());
+                                quote!(#field: #zero_ty::#zero_fn())
+                            } else {
+                                quote!(#field: #sum)
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    let (params, where_clause) = bounds.params_and_where_clause();
+                    Impl::Actual(quote! {
+                        impl #params #trait_ty<#rhs_u> for #lhs_t #where_clause {
+                            type Output = #output_v;
+                            #[inline]
+                            #[allow(clippy::suspicious_arithmetic_impl)]
+                            fn #trait_fn(self, rhs: #rhs_u) -> Self::Output {
+                                #output {
+                                    #(#fields,)*
+                                    marker: std::marker::PhantomData,
+                                }
+                            }
                         }
                     })
-                    .collect::<Vec<_>>();
-                let (params, where_clause) = bounds.params_and_where_clause();
-                Impl::Actual(quote! {
-                    impl #params #trait_ty<#rhs_u> for #lhs_t #where_clause {
-                        type Output = #output_v;
-                        #[inline]
-                        #[allow(clippy::suspicious_arithmetic_impl)]
-                        fn #trait_fn(self, rhs: #rhs_u) -> Self::Output {
-                            let inv = #inv_ty::#inv_fn(rhs);
-                            #output {
-                                #(#fields,)*
-                                marker: std::marker::PhantomData,
-                            }
-                        }
+                };
+
+                // TODO use division for single bladed types
+                match rhs {
+                    OverType::Type(rhs_ty) if algebra.type_blades(rhs_ty).count() == 1 => {
+                        generate_with_div(bounds)
                     }
-                })
+                    OverType::Float(_) => generate_with_div(bounds),
+                    _ => {
+                        let inv_var = &quote!(inv);
+                        bounds.insert(rhs_u.inv());
+                        let fields = TypeFields::new(algebra, output)
+                            .map(|(blade, field)| {
+                                let mut sum = quote!();
+                                for (l, r) in algebra.blade_tuples(lhs, rhs) {
+                                    let out = algebra.geo(l, r);
+                                    let lv = lhs.access_field(self_var, l, algebra);
+                                    let rv = rhs.access_field(inv_var, r, algebra);
+                                    if out == blade {
+                                        if sum.is_empty() {
+                                            bounds.insert(t.mul(u, v));
+                                            quote!(#lv * #rv)
+                                        } else {
+                                            bounds.insert(t.mul(u, v));
+                                            bounds.insert(v.add(v, v));
+                                            quote!(+ #lv * #rv)
+                                        }
+                                        .to_tokens(&mut sum);
+                                    } else if out == -blade {
+                                        if sum.is_empty() {
+                                            bounds.insert(t.mul(u, v));
+                                            bounds.insert(v.neg());
+                                            quote!(-(#lv * #rv))
+                                        } else {
+                                            bounds.insert(t.mul(u, v));
+                                            bounds.insert(v.sub(v, v));
+                                            quote!(- #lv * #rv)
+                                        }
+                                        .to_tokens(&mut sum);
+                                    }
+                                }
+                                if sum.is_empty() {
+                                    bounds.insert(V.zero());
+                                    quote!(#field: #zero_ty::#zero_fn())
+                                } else {
+                                    quote!(#field: #sum)
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        let (params, where_clause) = bounds.params_and_where_clause();
+                        Impl::Actual(quote! {
+                            impl #params #trait_ty<#rhs_u> for #lhs_t #where_clause {
+                                type Output = #output_v;
+                                #[inline]
+                                #[allow(clippy::suspicious_arithmetic_impl)]
+                                fn #trait_fn(self, rhs: #rhs_u) -> Self::Output {
+                                    let inv = #inv_ty::#inv_fn(rhs);
+                                    #output {
+                                        #(#fields,)*
+                                        marker: std::marker::PhantomData,
+                                    }
+                                }
+                            }
+                        })
+                    }
+                }
             }
             MulAssign | DivAssign => {
                 let Some(output) = BinaryTrait::Mul.product(lhs, rhs, algebra) else {
