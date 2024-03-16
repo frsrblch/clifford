@@ -98,8 +98,8 @@ impl UnaryTrait {
     pub fn define(self, ty: OverType, algebra: &Algebra) -> Impl<TokenStream> {
         use FloatParam::T;
         use MagParam::A;
-
         use UnaryTrait::*;
+
         match self {
             Neg | Reverse | GradeInvolution | CliffordConjugate => match ty {
                 OverType::Type(ty) => {
