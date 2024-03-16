@@ -697,9 +697,9 @@ impl Type {
 
     pub fn define(self, algebra: &Algebra) -> TokenStream {
         let derive = if TypeBlades::new(algebra, self).nth(1).is_some() {
-            quote!(#[derive(Eq, Hash)])
+            quote!(#[derive(Debug, Eq, Hash)])
         } else {
-            quote!(#[derive(Eq, Ord, PartialOrd, Hash)])
+            quote!(#[derive(Debug, Eq, Ord, PartialOrd, Hash)])
         };
         let ident = self.ident();
         let fields = SortedTypeBlades::new(algebra, self).map(|blade| {
@@ -732,51 +732,6 @@ impl Type {
                 }
             })
         });
-
-        let impl_debug = {
-            let blades = SortedTypeBlades::new(algebra, self);
-            let check_zero = blades
-                .clone()
-                .map(|blade| {
-                    let field = &algebra.fields[blade];
-                    quote! {
-                        clifford::Zero::is_zero(&self.#field)
-                    }
-                })
-                .collect::<syn::punctuated::Punctuated<_, syn::Token![&&]>>();
-            let debug_fields = blades.map(|blade| {
-                let field = &algebra.fields[blade];
-                let field_lit = syn::LitStr::new(&field.to_string(), field.span());
-                quote! {
-                    if !clifford::Zero::is_zero(&self.#field) {
-                        debug_struct.field(#field_lit, &self.#field);
-                    } else {
-                        non_exhaustive = true;
-                    }
-                }
-            });
-            quote! {
-                impl<T: std::fmt::Debug + clifford::Zero, M> std::fmt::Debug for #ident<T, M> {
-                    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                        let ty = std::any::type_name::<Self>();
-
-                        let all_zero = #check_zero;
-                        if all_zero {
-                            return f.debug_tuple(ty).field(&<T as clifford::Zero>::zero()).finish();
-                        }
-
-                        let mut debug_struct = f.debug_struct(ty);
-                        let mut non_exhaustive = false;
-                        #(#debug_fields)*
-                        if non_exhaustive {
-                            debug_struct.finish_non_exhaustive()
-                        } else {
-                            debug_struct.finish()
-                        }
-                    }
-                }
-            }
-        };
 
         let impl_default_any = {
             let ty_t = quote!(#ident<T, Any>);
@@ -906,7 +861,6 @@ impl Type {
                 pub marker: std::marker::PhantomData<M>,
             }
 
-            #impl_debug
             #impl_default_any
             #impl_default_unit
             #impl_copy_clone
