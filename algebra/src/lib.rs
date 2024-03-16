@@ -5,7 +5,6 @@ pub mod trait_bounds;
 
 mod binary;
 mod parse;
-mod ternary;
 mod unary;
 
 #[cfg(test)]
@@ -21,7 +20,6 @@ use strum::{EnumIter, IntoEnumIterator};
 
 use crate::binary::BinaryTrait;
 use crate::blade::Blade;
-use crate::ternary::TernaryTrait;
 use crate::trait_bounds::*;
 use crate::unary::UnaryTrait;
 
