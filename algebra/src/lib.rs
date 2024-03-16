@@ -362,14 +362,6 @@ impl Algebra {
             i.to_tokens(&mut tokens);
         }
 
-        for i in TernaryTrait::iter().flat_map(|op| {
-            OverType::iter_tuples(self).flat_map(move |(lhs, rhs)| {
-                self.grades().map(move |out| op.define(lhs, rhs, out, self))
-            })
-        }) {
-            i.to_tokens(&mut tokens);
-        }
-
         let unary_tests = self
             .types()
             .cartesian_product(UnaryTrait::iter())
