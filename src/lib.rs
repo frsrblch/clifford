@@ -6,7 +6,6 @@
 //! - [x] Grades (`Vector`, `Bivector`, etc)
 //! - [x] Even-grade (`Motor`)
 //! - [x] Odd-grade (`Flector`)
-//! - [x] Multivector
 //! - [x] Unit typestate
 //!
 //! Generics:

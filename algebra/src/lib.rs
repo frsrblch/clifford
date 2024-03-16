@@ -334,8 +334,8 @@ impl Algebra {
             }
             false
         };
-        let multiple_grade_types = IntoIterator::into_iter([Type::Motor, Type::Flector, Type::Mv])
-            .filter(contains_multiple_grades);
+        let multiple_grade_types =
+            IntoIterator::into_iter([Type::Motor, Type::Flector]).filter(contains_multiple_grades);
         self.grades().chain(multiple_grade_types)
     }
 
@@ -1043,32 +1043,32 @@ impl Type {
 }
 
 impl std::ops::Add for Type {
-    type Output = Type;
+    type Output = Option<Type>;
 
     fn add(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
-            (lhs, rhs) if lhs == Type::Mv || rhs == Type::Mv => Type::Mv,
-            (lhs, rhs) if (lhs == rhs) => lhs,
+            (lhs, rhs) if lhs == Type::Mv || rhs == Type::Mv => None,
+            (lhs, rhs) if (lhs == rhs) => Some(lhs),
             (Type::Grade(lhs), Type::Grade(rhs)) => match (lhs.is_even(), rhs.is_even()) {
-                (true, true) => Type::Motor,
-                (false, false) => Type::Flector,
-                _ => Type::Mv,
+                (true, true) => Some(Type::Motor),
+                (false, false) => Some(Type::Flector),
+                _ => None,
             },
             (Type::Grade(g), Type::Motor) | (Type::Motor, Type::Grade(g)) => {
                 if g.is_even() {
-                    Type::Motor
+                    Some(Type::Motor)
                 } else {
-                    Type::Mv
+                    None
                 }
             }
             (Type::Flector, Type::Grade(g)) | (Type::Grade(g), Type::Flector) => {
                 if g.is_even() {
-                    Type::Mv
+                    None
                 } else {
-                    Type::Flector
+                    Some(Type::Flector)
                 }
             }
-            (Type::Flector, Type::Motor) | (Type::Motor, Type::Flector) => Type::Mv,
+            (Type::Flector, Type::Motor) | (Type::Motor, Type::Flector) => None,
             _ => unreachable!(),
         }
     }
@@ -1108,7 +1108,7 @@ impl FromIterator<Blade> for Option<Type> {
             Some(Type::Grade(grade))
         } else {
             match (has_even, has_odd) {
-                (true, true) => Some(Type::Mv),
+                (true, true) => None,
                 (true, false) => Some(Type::Motor),
                 (false, true) => Some(Type::Flector),
                 (false, false) => None,
