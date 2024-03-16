@@ -58,8 +58,8 @@ impl UnaryTrait {
             One => quote!(clifford::One),
             Norm2 => quote!(clifford::Norm2),
             Norm => quote!(clifford::Norm),
-            Pod => quote!(bytemuck::Pod),
-            Zeroable => quote!(bytemuck::Zeroable),
+            Pod => quote!(clifford::Pod),
+            Zeroable => quote!(clifford::Zeroable),
             FloatType => quote!(clifford::FloatType),
             Rand => quote!(rand::distribution::Distribution),
         }

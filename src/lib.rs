@@ -105,5 +105,6 @@
 //!
 //! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features
 
+pub use bytemuck::{Pod, Zeroable};
 pub use geo_traits::*;
 pub use macros::algebra;
