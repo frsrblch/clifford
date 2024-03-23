@@ -343,7 +343,6 @@ impl Algebra {
         let mut tokens = quote! {
             pub use clifford::*;
             pub use std::ops::{Add, Sub, Mul, Div, AddAssign, SubAssign, MulAssign, DivAssign, Neg};
-            pub use bytemuck::{Pod, Zeroable};
         };
 
         for ty in OverType::iter(self) {
