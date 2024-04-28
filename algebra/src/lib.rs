@@ -1399,11 +1399,13 @@ fn impl_number_for_scalar(algebra: &Algebra) -> TokenStream {
 
         impl<T: Trig> Trig for Scalar<T> {
             type Output = Scalar<T::Output>;
-
-            const TAU: Self = Scalar {
-                s: T::TAU,
+            #[inline]
+            fn tau() -> Self {
+                Scalar {
+                    s: T::tau(),
                 marker: std::marker::PhantomData,
-            };
+                }
+            }
             #[inline]
             fn sin(self) -> Self::Output {
                 self.map(Trig::sin)
