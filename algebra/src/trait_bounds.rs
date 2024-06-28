@@ -478,6 +478,15 @@ impl FloatParam {
         .into()
     }
 
+    pub fn sqrt(self) -> TraitBound {
+        UnaryTraitBound {
+            ty: self.into(),
+            unary_trait: UnaryTrait::Sqrt,
+            output: Some(self.into()),
+        }
+        .into()
+    }
+
     pub fn zero(self) -> TraitBound {
         UnaryTraitBound {
             ty: self.into(),

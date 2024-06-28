@@ -26,6 +26,7 @@ pub enum UnaryTrait {
     FloatType,
     Zero,
     One,
+    Sqrt,
     /// Bytemuck,
     Pod,
     Zeroable,
@@ -58,6 +59,7 @@ impl UnaryTrait {
             CliffordConjugate => quote!(clifford::CliffordConjugate),
             Zero => quote!(clifford::Zero),
             One => quote!(clifford::One),
+            Sqrt => quote!(clifford::Sqrt),
             Norm2 => quote!(clifford::Norm2),
             Norm => quote!(clifford::Norm),
             Antinorm2 => quote!(clifford::Antinorm2),
@@ -87,6 +89,7 @@ impl UnaryTrait {
             CliffordConjugate => quote!(conjugate),
             Zero => quote!(zero),
             One => quote!(one),
+            Sqrt => quote!(sqrt),
             Norm2 => quote!(norm2),
             Norm => quote!(norm),
             Antinorm2 => quote!(antinorm2),
@@ -107,6 +110,12 @@ impl UnaryTrait {
         use UnaryTrait::*;
 
         match self {
+            Sqrt => match ty {
+                OverType::Type(Type::Grade(0 | 2))
+                | OverType::Type(Type::Motor)
+                | OverType::Float(_) => Impl::External,
+                _ => Impl::None,
+            },
             Neg | Reverse | GradeInvolution | CliffordConjugate => match ty {
                 OverType::Type(ty) => {
                     let (trait_ty, trait_fn) = self.ty_fn();
@@ -511,29 +520,82 @@ impl UnaryTrait {
             },
             Norm | Antinorm => match ty {
                 OverType::Type(_) => {
-                    let squared = if self == Norm { Norm2 } else { Antinorm2 };
+                    let mut bounds = TraitBounds::default();
+                    bounds.insert(MagParam::A);
+                    bounds.insert(T.copy());
 
-                    if squared.no_impl(ty, algebra) {
+                    let Some(output) = TypeBlades::new(algebra, ty)
+                        .map(|b| {
+                            if self == Norm {
+                                algebra.dot(b, b.rev())
+                            } else {
+                                algebra.antidot(b, algebra.antirev(b))
+                            }
+                        })
+                        .collect::<Option<Type>>()
+                    else {
                         return Impl::None;
-                    }
+                    };
+                    let output_t = output.with_type_param(T, A);
+
+                    let fields = TypeFields::new(algebra, output)
+                        .map(|(blade, field)| {
+                            let sum =
+                                TypeFields::new(algebra, ty).fold(quote!(), |mut ts, (b, f)| {
+                                    let product = if self == Norm {
+                                        algebra.dot(b, b.rev())
+                                    } else {
+                                        algebra.antidot(b, algebra.antirev(b))
+                                    };
+                                    if product.unsigned() != blade.unsigned() {
+                                        return ts;
+                                    } else {
+                                        bounds.insert(T.mul(T, T));
+                                    }
+                                    if product.is_positive() {
+                                        if ts.is_empty() {
+                                            quote!(self.#f * self.#f)
+                                        } else {
+                                            bounds.insert(T.add(T, T));
+                                            quote!(+ self.#f * self.#f)
+                                        }
+                                        .to_tokens(&mut ts)
+                                    } else if product.is_negative() {
+                                        if ts.is_empty() {
+                                            bounds.insert(T.neg());
+                                            quote!(-(self.#f * self.#f))
+                                        } else {
+                                            bounds.insert(T.sub(T, T));
+                                            quote!(- self.#f * self.#f)
+                                        }
+                                        .to_tokens(&mut ts)
+                                    }
+                                    ts
+                                });
+
+                            let sum = if sum.is_empty() {
+                                bounds.insert(T.zero());
+                                let (zero_ty, zero_fn) = UnaryTrait::Zero.ty_fn();
+                                quote!(#zero_ty::#zero_fn())
+                            } else {
+                                bounds.insert(T.sqrt());
+                                quote!(clifford::Sqrt::sqrt(#sum))
+                            };
+
+                            quote!(#field: #sum)
+                        })
+                        .collect::<Vec<_>>();
+
                     let (trait_ty, trait_fn) = self.ty_fn();
-                    let (squared_ty, squared_fn) = squared.ty_fn();
                     let ty_t = ty.with_type_param(T, A);
-                    let scalar = Type::Grade(0);
-                    let scalar_t = Type::Grade(0).with_type_param(T, A);
-                    let s = &algebra.fields[Blade(0)];
+                    let (params, where_clause) = bounds.params_and_where_clause();
                     Impl::Actual(quote! {
-                        impl<T, A> #trait_ty for #ty_t
-                        where
-                            #ty_t: #squared_ty<Output = #scalar_t> + Copy,
-                            T: clifford::Number,
-                        {
-                            type Output = #scalar_t;
+                        impl #params #trait_ty for #ty_t #where_clause {
+                            type Output = #output_t;
                             #[inline]
                             fn #trait_fn(self) -> Self::Output {
-                                let s2 = #squared_ty::#squared_fn(self).#s;
-                                #scalar {
-                                    #s: Sqrt::sqrt(s2),
+                                #output {
+                                    #(#fields,)*
                                     marker: std::marker::PhantomData,
                                 }
                             }
