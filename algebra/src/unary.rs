@@ -447,55 +447,60 @@ impl UnaryTrait {
                     else {
                         return Impl::None;
                     };
-                    let scalar = Type::Grade(0);
-                    let scalar_ty = Type::Grade(0).with_type_param(T, MagParam::A);
-                    let mut sum =
-                        TypeFields::new(algebra, ty).fold(quote!(), |mut ts, (b, field)| {
-                            let product = if self == Norm2 {
-                                algebra.dot(b, b.rev())
-                            } else {
-                                algebra.antidot(b, algebra.antirev(b))
-                            };
-                            if product.is_zero() {
-                                return ts;
-                            } else {
-                                bounds.insert(T.mul(T, T));
-                            }
-                            if product.is_positive() {
-                                if ts.is_empty() {
-                                    quote!(self.#field * self.#field)
-                                } else {
-                                    bounds.insert(T.add(T, T));
-                                    quote!(+ self.#field * self.#field)
-                                }
-                                .to_tokens(&mut ts)
-                            } else if product.is_negative() {
-                                if ts.is_empty() {
-                                    bounds.insert(T.neg());
-                                    quote!(-(self.#field * self.#field))
-                                } else {
-                                    bounds.insert(T.sub(T, T));
-                                    quote!(- self.#field * self.#field)
-                                }
-                                .to_tokens(&mut ts)
-                            }
-                            ts
-                        });
+                    let output_ty = output.with_type_param(T, MagParam::A);
+                    let fields = TypeFields::new(algebra, output)
+                        .map(|(blade, field)| {
+                            let mut sum =
+                                TypeFields::new(algebra, ty).fold(quote!(), |mut ts, (b, f)| {
+                                    let product = if self == Norm2 {
+                                        algebra.dot(b, b.rev())
+                                    } else {
+                                        algebra.antidot(b, algebra.antirev(b))
+                                    };
+                                    if product.unsigned() != blade.unsigned() {
+                                        return ts;
+                                    } else {
+                                        bounds.insert(T.mul(T, T));
+                                    }
+                                    if product.is_positive() {
+                                        if ts.is_empty() {
+                                            quote!(self.#f * self.#f)
+                                        } else {
+                                            bounds.insert(T.add(T, T));
+                                            quote!(+ self.#f * self.#f)
+                                        }
+                                        .to_tokens(&mut ts)
+                                    } else if product.is_negative() {
+                                        if ts.is_empty() {
+                                            bounds.insert(T.neg());
+                                            quote!(-(self.#f * self.#f))
+                                        } else {
+                                            bounds.insert(T.sub(T, T));
+                                            quote!(- self.#f * self.#f)
+                                        }
+                                        .to_tokens(&mut ts)
+                                    }
+                                    ts
+                                });
 
-                    if sum.is_empty() {
-                        bounds.insert(T.zero());
-                        let (zero_ty, zero_fn) = UnaryTrait::Zero.ty_fn();
-                        quote!(#zero_ty::#zero_fn()).to_tokens(&mut sum);
-                    }
+                            if sum.is_empty() {
+                                bounds.insert(T.zero());
+                                let (zero_ty, zero_fn) = UnaryTrait::Zero.ty_fn();
+                                quote!(#zero_ty::#zero_fn()).to_tokens(&mut sum);
+                            }
+
+                            quote!(#field: #sum)
+                        })
+                        .collect::<Vec<_>>();
 
                     let (params, where_clause) = bounds.params_and_where_clause();
                     Impl::Actual(quote! {
                         impl #params #trait_ty for #ty_t #where_clause {
-                            type Output = #scalar_ty;
+                            type Output = #output_ty;
                             #[inline]
                             fn #trait_fn(self) -> Self::Output {
-                                #scalar {
-                                    s: #sum,
+                                #output {
+                                    #(#fields,)*
                                     marker: std::marker::PhantomData,
                                 }
                             }
