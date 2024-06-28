@@ -261,6 +261,12 @@ impl Algebra {
         }
     }
 
+    pub(crate) fn antirev(&self, blade: Blade) -> Blade {
+        let comp = self.right_comp(blade);
+        let rev = comp.rev();
+        self.left_comp(rev)
+    }
+
     pub(crate) fn right_comp(&self, blade: Blade) -> Blade {
         if blade.is_zero() {
             return Blade::zero();
@@ -1403,7 +1409,7 @@ fn impl_number_for_scalar(algebra: &Algebra) -> TokenStream {
             fn tau() -> Self {
                 Scalar {
                     s: T::tau(),
-                marker: std::marker::PhantomData,
+                    marker: std::marker::PhantomData,
                 }
             }
             #[inline]

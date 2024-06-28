@@ -21,6 +21,8 @@ pub enum UnaryTrait {
     Unitize,
     Norm2,
     Norm,
+    Antinorm2,
+    Antinorm,
     FloatType,
     Zero,
     One,
@@ -58,6 +60,8 @@ impl UnaryTrait {
             One => quote!(clifford::One),
             Norm2 => quote!(clifford::Norm2),
             Norm => quote!(clifford::Norm),
+            Antinorm2 => quote!(clifford::Antinorm2),
+            Antinorm => quote!(clifford::Antinorm),
             Pod => quote!(clifford::Pod),
             Zeroable => quote!(clifford::Zeroable),
             FloatType => quote!(clifford::FloatType),
@@ -85,6 +89,8 @@ impl UnaryTrait {
             One => quote!(one),
             Norm2 => quote!(norm2),
             Norm => quote!(norm),
+            Antinorm2 => quote!(antinorm2),
+            Antinorm => quote!(antinorm),
             Zeroable => quote!(zeroed),
             FloatType | Pod => unimplemented!(),
             Rand => quote!(sample),
@@ -422,18 +428,34 @@ impl UnaryTrait {
                 }
                 OverType::Float(_) => Impl::External,
             },
-            Norm2 => match ty {
+            Norm2 | Antinorm2 => match ty {
                 OverType::Type(_) => {
                     let mut bounds = TraitBounds::default();
                     bounds.insert(MagParam::A);
                     bounds.insert(T.copy());
                     let (trait_ty, trait_fn) = self.ty_fn();
                     let ty_t = ty.with_type_param(T, MagParam::A);
+                    let Some(output) = TypeBlades::new(algebra, ty)
+                        .map(|b| {
+                            if self == Norm2 {
+                                algebra.dot(b, b.rev())
+                            } else {
+                                algebra.antidot(b, algebra.antirev(b))
+                            }
+                        })
+                        .collect::<Option<Type>>()
+                    else {
+                        return Impl::None;
+                    };
                     let scalar = Type::Grade(0);
                     let scalar_ty = Type::Grade(0).with_type_param(T, MagParam::A);
                     let mut sum =
                         TypeFields::new(algebra, ty).fold(quote!(), |mut ts, (b, field)| {
-                            let product = algebra.dot(b, b.rev());
+                            let product = if self == Norm2 {
+                                algebra.dot(b, b.rev())
+                            } else {
+                                algebra.antidot(b, algebra.antirev(b))
+                            };
                             if product.is_zero() {
                                 return ts;
                             } else {
@@ -482,13 +504,15 @@ impl UnaryTrait {
                 }
                 OverType::Float(_) => Impl::None,
             },
-            Norm => match ty {
+            Norm | Antinorm => match ty {
                 OverType::Type(_) => {
-                    if UnaryTrait::Norm2.no_impl(ty, algebra) {
+                    let squared = if self == Norm { Norm2 } else { Antinorm2 };
+
+                    if squared.no_impl(ty, algebra) {
                         return Impl::None;
                     }
                     let (trait_ty, trait_fn) = self.ty_fn();
-                    let (norm2_ty, norm2_fn) = UnaryTrait::Norm2.ty_fn();
+                    let (squared_ty, squared_fn) = squared.ty_fn();
                     let ty_t = ty.with_type_param(T, A);
                     let scalar = Type::Grade(0);
                     let scalar_t = Type::Grade(0).with_type_param(T, A);
@@ -496,13 +520,13 @@ impl UnaryTrait {
                     Impl::Actual(quote! {
                         impl<T, A> #trait_ty for #ty_t
                         where
-                            #ty_t: #norm2_ty<Output = #scalar_t> + Copy,
+                            #ty_t: #squared_ty<Output = #scalar_t> + Copy,
                             T: clifford::Number,
                         {
                             type Output = #scalar_t;
                             #[inline]
                             fn #trait_fn(self) -> Self::Output {
-                                let s2 = #norm2_ty::#norm2_fn(self).#s;
+                                let s2 = #squared_ty::#squared_fn(self).#s;
                                 #scalar {
                                     #s: Sqrt::sqrt(s2),
                                     marker: std::marker::PhantomData,
