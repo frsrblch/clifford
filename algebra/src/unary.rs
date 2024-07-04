@@ -1,3 +1,5 @@
+use constructor::{Constructor, ConstructorItem};
+
 use super::*;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, EnumIter, Hash)]
@@ -118,6 +120,9 @@ impl UnaryTrait {
             },
             Neg | Reverse | GradeInvolution | CliffordConjugate => match ty {
                 OverType::Type(ty) => {
+                    let mut bounds = TraitBounds::default();
+                    bounds.insert(T);
+                    bounds.insert(A);
                     let (trait_ty, trait_fn) = self.ty_fn();
                     let f = match self {
                         Neg => std::ops::Neg::neg,
@@ -126,31 +131,22 @@ impl UnaryTrait {
                         CliffordConjugate => Blade::clifford_conjugate,
                         _ => unimplemented!(),
                     };
-                    let mut bounds = TraitBounds::default();
-                    bounds.insert(T);
-                    bounds.insert(A);
-                    let ty_t = ty.with_type_param(T, A);
-                    let fields = TypeBlades::new(algebra, ty)
-                        .map(|blade| {
-                            let field = &algebra.fields[blade];
-                            if f(blade) == blade {
-                                quote!(#field: self.#field,)
-                            } else {
-                                bounds.insert(T.neg());
-                                quote!(#field: -self.#field,)
-                            }
-                        })
-                        .collect::<Vec<_>>();
+                    let Some(constructor) = Constructor::unary(
+                        algebra,
+                        &mut bounds,
+                        TypeFields::new(algebra, ty),
+                        |(blade, field)| ConstructorItem::new(f(blade), quote!(self.#field)),
+                    ) else {
+                        return Impl::None;
+                    };
+                    let ty_t = constructor.ty.with_type_param(T, A);
                     let (params, where_clause) = bounds.params_and_where_clause();
                     Impl::Actual(quote! {
                         impl #params #trait_ty for #ty_t #where_clause {
                             type Output = #ty_t;
                             #[inline]
                             fn #trait_fn(self) -> Self::Output {
-                                #ty {
-                                    #(#fields)*
-                                    marker: std::marker::PhantomData,
-                                }
+                                #constructor
                             }
                         }
                     })
@@ -162,53 +158,48 @@ impl UnaryTrait {
             },
             Dual | LeftComp | RightComp | Not => {
                 match (self, algebra.symmetric_complements()) {
-                    (Dual | Not, false) | (LeftComp | RightComp, true) => return Impl::None,
+                    (Dual | Not, false) => return Impl::None,
+                    (LeftComp | RightComp, true) => return Impl::None,
                     _ => {}
                 };
                 match ty {
                     OverType::Type(ty) => {
-                        let mut bounds = TraitBounds::with_param(T);
+                        let mut bounds = TraitBounds::default();
+                        bounds.insert(T);
                         bounds.insert(A);
                         let (trait_ty, trait_fn) = self.ty_fn();
-                        let output = ty.complement(algebra);
-                        let fields = TypeFields::new(algebra, output)
-                            .map(|(blade, field)| {
-                                // these are left comp and right comp are reversed
-                                // because we're looking at the complement of the
-                                let comp = if self == LeftComp {
-                                    algebra.right_comp(blade)
-                                } else {
-                                    algebra.left_comp(blade)
-                                };
-                                let sign = if comp.is_negative() {
-                                    bounds.insert(T.neg());
-                                    quote!(-)
-                                } else {
-                                    quote!()
-                                };
-                                let comp_field = &algebra.fields[comp];
-                                quote! {
-                                    #field: #sign self.#comp_field,
-                                }
-                            })
-                            .collect::<Vec<_>>();
 
-                        let output_ty = if algebra.all_bases_positive() {
-                            output.with_type_param(T, A)
-                        } else {
-                            output.with_type_param(T, MagParam::Mag(Mag::Any))
+                        let f = {
+                            let mut get_output: Box<dyn FnMut(Blade) -> Blade> = match self {
+                                Dual | LeftComp | Not => Box::new(|blade| algebra.left_comp(blade)),
+                                RightComp => Box::new(|blade| algebra.right_comp(blade)),
+                                _ => unreachable!(),
+                            };
+                            move |blade| {
+                                let output = get_output(blade);
+                                let field = &algebra.fields[blade];
+                                ConstructorItem::new(output, quote!(self.#field))
+                            }
                         };
 
+                        let blades = TypeBlades::new(algebra, ty);
+                        let constructor = Constructor::unary(algebra, &mut bounds, blades, f);
+                        let Some(constructor) = constructor else {
+                            return Impl::None;
+                        };
+                        let mag = if algebra.all_bases_positive() {
+                            A
+                        } else {
+                            MagParam::Mag(Mag::Any)
+                        };
+                        let output_ty = constructor.ty.with_type_param(T, mag);
                         let (params, where_clause) = bounds.params_and_where_clause();
                         Impl::Actual(quote! {
                             impl #params #trait_ty for #ty<T, A> #where_clause {
                                 type Output = #output_ty;
                                 #[inline]
                                 fn #trait_fn(self) -> Self::Output {
-                                    #output {
-                                        #(#fields)*
-                                        marker: std::marker::PhantomData,
-                                    }
+                                    #constructor
                                 }
                             }
                         })

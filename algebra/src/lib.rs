@@ -6,6 +6,7 @@ pub mod trait_bounds;
 mod binary;
 mod parse;
 mod unary;
+mod constructor;
 
 #[cfg(test)]
 mod tests;

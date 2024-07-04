@@ -8,6 +8,25 @@ impl std::fmt::Debug for Blade {
     }
 }
 
+impl Ord for Blade {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match self.unsigned().0.cmp(&other.unsigned().0) {
+            std::cmp::Ordering::Equal => match (self.is_negative(), other.is_negative()) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                (true, true) | (false, false) => std::cmp::Ordering::Equal,
+            },
+            cmp => cmp,
+        }
+    }
+}
+
+impl PartialOrd for Blade {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl Blade {
     const SIGN: u32 = 1 << 31;
     const ZERO: u32 = 1 << 30;
@@ -31,7 +50,7 @@ impl Blade {
             Blade::zero()
         }
     }
-    
+
     pub fn rev(self) -> Self {
         let count = self.count();
         let half = count / 2;
