@@ -662,7 +662,7 @@ impl BinaryTrait {
             Sandwich | Antisandwich | Shr => {
                 // TODO rework with SubsetOf traits rather than GradeProduct
                 match Type::from(lhs) {
-                    Type::Mv | Type::Grade(0) => return None,
+                    Type::Grade(0) => return None,
                     Type::Grade(g) if g == algebra.dim() => return None,
                     _ => {}
                 }

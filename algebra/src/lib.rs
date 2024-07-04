@@ -656,7 +656,6 @@ pub enum Type {
     Grade(u32),
     Motor,
     Flector,
-    Mv,
 }
 
 impl Display for Type {
@@ -690,7 +689,6 @@ impl Type {
 
     pub fn contains_grade(&self, grade: u32) -> bool {
         match self {
-            Type::Mv => true,
             Type::Flector => grade & 1 == 1,
             Type::Motor => grade & 1 != 1,
             Type::Grade(g) => grade == *g,
@@ -958,7 +956,6 @@ impl Type {
             },
             Type::Motor => "Motor",
             Type::Flector => "Flector",
-            Type::Mv => "Multivector",
         }
     }
 
@@ -985,7 +982,6 @@ impl Type {
                     Type::Flector
                 }
             }
-            Type::Mv => Type::Mv,
         }
     }
 
@@ -1003,7 +999,6 @@ impl std::ops::Add for Type {
 
     fn add(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
-            (lhs, rhs) if lhs == Type::Mv || rhs == Type::Mv => None,
             (lhs, rhs) if (lhs == rhs) => Some(lhs),
             (Type::Grade(lhs), Type::Grade(rhs)) => match (lhs.is_even(), rhs.is_even()) {
                 (true, true) => Some(Type::Motor),
@@ -1114,16 +1109,10 @@ impl OverType {
             (lhs, Type::Grade(g)) => lhs.contains_grade(g),
             (Type::Grade(_), Type::Motor) => false,
             (Type::Grade(_), Type::Flector) => false,
-            (Type::Grade(_), Type::Mv) => false,
             (Type::Motor, Type::Motor) => true,
             (Type::Motor, Type::Flector) => false,
-            (Type::Motor, Type::Mv) => false,
             (Type::Flector, Type::Motor) => false,
             (Type::Flector, Type::Flector) => true,
-            (Type::Flector, Type::Mv) => false,
-            (Type::Mv, Type::Motor) => true,
-            (Type::Mv, Type::Flector) => true,
-            (Type::Mv, Type::Mv) => true,
         }
     }
 

@@ -260,10 +260,6 @@ fn type_grades_iter() {
         vec![1, 3],
         TypeGrades::new(&a, Type::Flector).collect::<Vec<_>>()
     );
-    assert_eq!(
-        vec![0, 1, 2, 3, 4],
-        TypeGrades::new(&a, Type::Mv).collect::<Vec<_>>()
-    );
 }
 
 #[test]
@@ -336,35 +332,6 @@ fn blade_products() {
     assert_eq!(xyz, a.geo(z, xy));
     assert_eq!(xyz, a.geo(y, zx));
     assert_eq!(xyz, a.geo(zx, y));
-}
-
-#[test]
-fn print_blade_ordering() {
-    let a = pga_3d();
-    let blades = SortedTypeBlades::new(&a, Type::Mv);
-
-    print!(" ,");
-    for r in blades.clone() {
-        print!("'{},", &a.fields[r]);
-    }
-    println!();
-
-    for l in blades.clone() {
-        print!("'{},", &a.fields[l]);
-        for r in blades.clone() {
-            let p = a.geo(l, r);
-            if p.is_zero() {
-                print!("'0,");
-            } else if p.is_positive() {
-                print!("'{},", &a.fields[p])
-            } else {
-                print!("'-{},", &a.fields[p])
-            }
-        }
-        println!();
-    }
-
-    // panic!("done");
 }
 
 #[test]

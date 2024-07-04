@@ -770,7 +770,6 @@ impl UnaryTrait {
             }
             Rand => match ty {
                 OverType::Float(_) => Some(Impl::External),
-                OverType::Type(Type::Mv) => None,
                 OverType::Type(Type::Motor) | OverType::Type(Type::Flector) => {
                     let mut bounds = TraitBounds::default();
                     let (t, a) = (T, A);
@@ -930,7 +929,6 @@ impl UnaryTrait {
                     Type::Flector => {
                         quote!(rng.gen::<#vec_t>() * rng.gen::<#vec_t>() * rng.gen::<#vec_t>())
                     }
-                    Type::Mv => return None,
                 };
                 Some(quote! {
                     #[test]
@@ -974,7 +972,6 @@ impl UnaryTrait {
                     Type::Flector => {
                         quote!(rng.gen::<#vec_t_unit>() * rng.gen::<#vec_t_unit>() * rng.gen::<#vec_t_unit>())
                     }
-                    Type::Mv => return None,
                 };
                 Some(quote! {
                     #[test]
