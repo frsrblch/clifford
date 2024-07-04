@@ -106,7 +106,7 @@ impl UnaryTrait {
         (self.ty(), self.fn_ident())
     }
 
-    pub fn define(self, ty: OverType, algebra: &Algebra) -> Impl<TokenStream> {
+    pub fn define(self, ty: OverType, algebra: &Algebra) -> Option<Impl<TokenStream>> {
         use FloatParam::T;
         use MagParam::A;
         use UnaryTrait::*;
@@ -115,8 +115,8 @@ impl UnaryTrait {
             Sqrt => match ty {
                 OverType::Type(Type::Grade(0 | 2))
                 | OverType::Type(Type::Motor)
-                | OverType::Float(_) => Impl::External,
-                _ => Impl::None,
+                | OverType::Float(_) => Some(Impl::External),
+                _ => None,
             },
             Neg | Reverse | GradeInvolution | CliffordConjugate => match ty {
                 OverType::Type(ty) => {
@@ -131,17 +131,15 @@ impl UnaryTrait {
                         CliffordConjugate => Blade::clifford_conjugate,
                         _ => unimplemented!(),
                     };
-                    let Some(constructor) = Constructor::unary(
+                    let constructor = Constructor::unary(
                         algebra,
                         &mut bounds,
                         TypeFields::new(algebra, ty),
                         |(blade, field)| ConstructorItem::new(f(blade), quote!(self.#field)),
-                    ) else {
-                        return Impl::None;
-                    };
+                    )?;
                     let ty_t = constructor.ty.with_type_param(T, A);
                     let (params, where_clause) = bounds.params_and_where_clause();
-                    Impl::Actual(quote! {
+                    Some(Impl::Actual(quote! {
                         impl #params #trait_ty for #ty_t #where_clause {
                             type Output = #ty_t;
                             #[inline]
@@ -149,17 +147,17 @@ impl UnaryTrait {
                                 #constructor
                             }
                         }
-                    })
+                    }))
                 }
                 OverType::Float(_) => match self {
-                    Neg => Impl::External,
-                    _ => Impl::None,
+                    Neg => Some(Impl::External),
+                    _ => None,
                 },
             },
             Dual | LeftComp | RightComp | Not => {
                 match (self, algebra.symmetric_complements()) {
-                    (Dual | Not, false) => return Impl::None,
-                    (LeftComp | RightComp, true) => return Impl::None,
+                    (Dual | Not, false) => return None,
+                    (LeftComp | RightComp, true) => return None,
                     _ => {}
                 };
                 match ty {
@@ -183,10 +181,7 @@ impl UnaryTrait {
                         };
 
                         let blades = TypeBlades::new(algebra, ty);
-                        let constructor = Constructor::unary(algebra, &mut bounds, blades, f);
-                        let Some(constructor) = constructor else {
-                            return Impl::None;
-                        };
+                        let constructor = Constructor::unary(algebra, &mut bounds, blades, f)?;
                         let mag = if algebra.all_bases_positive() {
                             A
                         } else {
@@ -194,7 +189,7 @@ impl UnaryTrait {
                         };
                         let output_ty = constructor.ty.with_type_param(T, mag);
                         let (params, where_clause) = bounds.params_and_where_clause();
-                        Impl::Actual(quote! {
+                        Some(Impl::Actual(quote! {
                             impl #params #trait_ty for #ty<T, A> #where_clause {
                                 type Output = #output_ty;
                                 #[inline]
@@ -202,14 +197,14 @@ impl UnaryTrait {
                                     #constructor
                                 }
                             }
-                        })
+                        }))
                     }
-                    OverType::Float(_) => Impl::None,
+                    OverType::Float(_) => None,
                 }
             }
             Sum => {
                 if ty.is_float() {
-                    return Impl::External;
+                    return Some(Impl::External);
                 }
 
                 let (trait_ty, trait_fn) = self.ty_fn();
@@ -227,7 +222,7 @@ impl UnaryTrait {
                 bounds.insert(ty_t.copy());
                 let (params1, where_clause1) = bounds.params_and_where_clause();
 
-                Impl::Actual(quote! {
+                Some(Impl::Actual(quote! {
                     impl #params #trait_ty<#ty_t> for #ty_t_any #where_clause {
                         fn #trait_fn<I>(iter: I) -> Self where I: Iterator<Item = #ty_t> {
                             iter.fold(<#ty_t_any as #zero_ty>::#zero_fn(), |sum, item| {
@@ -242,17 +237,17 @@ impl UnaryTrait {
                             })
                         }
                     }
-                })
+                }))
             }
             Product => {
                 if ty.is_float() {
-                    return Impl::External;
+                    return Some(Impl::External);
                 }
 
                 let inner = Type::from(ty);
                 if algebra.product(ty, ty, Algebra::geo) != Some(inner) || !inner.contains(Blade(0))
                 {
-                    return Impl::None;
+                    return None;
                 }
 
                 let (trait_ty, trait_fn) = self.ty_fn();
@@ -292,7 +287,7 @@ impl UnaryTrait {
                 bounds.insert(ty_t.copy());
                 let (params1, where_clause1) = bounds.params_and_where_clause();
 
-                Impl::Actual(quote! {
+                Some(Impl::Actual(quote! {
                     impl #params #trait_ty<#ty_t> for #ty_t #where_clause {
                         fn #trait_fn<I>(iter: I) -> Self where I: Iterator<Item = #ty_t> {
                             iter.fold(#one_expr, |sum, item| {
@@ -307,13 +302,13 @@ impl UnaryTrait {
                             })
                         }
                     }
-                })
+                }))
             }
             Zero => match ty {
                 OverType::Type(ty) => {
                     // Zero requires Add<Self, Output = Self>
                     if BinaryTrait::Add.no_impl(OverType::Type(ty), OverType::Type(ty), algebra) {
-                        return Impl::None;
+                        return None;
                     }
 
                     let (trait_ty, trait_fn) = self.ty_fn();
@@ -327,7 +322,7 @@ impl UnaryTrait {
                     let const_fields =
                         TypeFields::new(algebra, ty).map(|(_, field)| quote!(#field: T::ZERO,));
                     let ty_t = ty.with_type_param(T, Mag::Any);
-                    Impl::Actual(quote! {
+                    Some(Impl::Actual(quote! {
                         impl<T> #geo_traits_zero_ty for #ty_t where T: #geo_traits_zero_ty {
                             const ZERO: #ty_t = #ty {
                                 #(#const_fields)*
@@ -352,15 +347,15 @@ impl UnaryTrait {
                                 <Self as #trait_ty>::#trait_fn().eq(self)
                             }
                         }
-                    })
+                    }))
                 }
-                OverType::Float(_) => Impl::External,
+                OverType::Float(_) => Some(Impl::External),
             },
             One => match ty {
                 OverType::Type(ty) => {
                     // One requires Mul<Self, Output = Self>
                     if BinaryTrait::Mul.no_impl(OverType::Type(ty), OverType::Type(ty), algebra) {
-                        return Impl::None;
+                        return None;
                     }
 
                     let (trait_ty, trait_fn) = self.ty_fn();
@@ -408,7 +403,7 @@ impl UnaryTrait {
                         quote!()
                     };
 
-                    Impl::Actual(quote! {
+                    Some(Impl::Actual(quote! {
                         impl #params #geo_traits_one_ty for #ty_t where T: #geo_traits_one_ty #plus_geo_traits_zero_ty {
                             const ONE: #ty_t = #ty {
                                 #(#const_fields)*
@@ -424,9 +419,9 @@ impl UnaryTrait {
                                 }
                             }
                         }
-                    })
+                    }))
                 }
-                OverType::Float(_) => Impl::External,
+                OverType::Float(_) => Some(Impl::External),
             },
             Norm2 | Antinorm2 => match ty {
                 OverType::Type(_) => {
@@ -435,7 +430,7 @@ impl UnaryTrait {
                     bounds.insert(T.copy());
                     let (trait_ty, trait_fn) = self.ty_fn();
                     let ty_t = ty.with_type_param(T, MagParam::A);
-                    let Some(output) = TypeBlades::new(algebra, ty)
+                    let output = TypeBlades::new(algebra, ty)
                         .map(|b| {
                             if self == Norm2 {
                                 algebra.dot(b, b.rev())
@@ -443,10 +438,7 @@ impl UnaryTrait {
                                 algebra.antidot(b, algebra.antirev(b))
                             }
                         })
-                        .collect::<Option<Type>>()
-                    else {
-                        return Impl::None;
-                    };
+                        .collect::<Option<Type>>()?;
                     let output_ty = output.with_type_param(T, MagParam::A);
                     let fields = TypeFields::new(algebra, output)
                         .map(|(blade, field)| {
@@ -494,7 +486,7 @@ impl UnaryTrait {
                         .collect::<Vec<_>>();
 
                     let (params, where_clause) = bounds.params_and_where_clause();
-                    Impl::Actual(quote! {
+                    Some(Impl::Actual(quote! {
                         impl #params #trait_ty for #ty_t #where_clause {
                             type Output = #output_ty;
                             #[inline]
@@ -505,9 +497,9 @@ impl UnaryTrait {
                                 }
                             }
                         }
-                    })
+                    }))
                 }
-                OverType::Float(_) => Impl::None,
+                OverType::Float(_) => None,
             },
             Norm | Antinorm => match ty {
                 OverType::Type(_) => {
@@ -515,7 +507,7 @@ impl UnaryTrait {
                     bounds.insert(MagParam::A);
                     bounds.insert(T.copy());
 
-                    let Some(output) = TypeBlades::new(algebra, ty)
+                    let output = TypeBlades::new(algebra, ty)
                         .map(|b| {
                             if self == Norm {
                                 algebra.dot(b, b.rev())
@@ -523,10 +515,7 @@ impl UnaryTrait {
                                 algebra.antidot(b, algebra.antirev(b))
                             }
                         })
-                        .collect::<Option<Type>>()
-                    else {
-                        return Impl::None;
-                    };
+                        .collect::<Option<Type>>()?;
                     let output_t = output.with_type_param(T, A);
 
                     let fields = TypeFields::new(algebra, output)
@@ -580,7 +569,7 @@ impl UnaryTrait {
                     let (trait_ty, trait_fn) = self.ty_fn();
                     let ty_t = ty.with_type_param(T, A);
                     let (params, where_clause) = bounds.params_and_where_clause();
-                    Impl::Actual(quote! {
+                    Some(Impl::Actual(quote! {
                         impl #params #trait_ty for #ty_t #where_clause {
                             type Output = #output_t;
                             #[inline]
@@ -591,16 +580,16 @@ impl UnaryTrait {
                                 }
                             }
                         }
-                    })
+                    }))
                 }
-                OverType::Float(_) => Impl::None,
+                OverType::Float(_) => None,
             },
             Unitize => match ty {
                 OverType::Type(ty) => {
                     if UnaryTrait::Norm.no_impl(ty, algebra)
                         || BinaryTrait::Div.no_impl(ty, Type::Grade(0), algebra)
                     {
-                        return Impl::None;
+                        return None;
                     }
 
                     for _ in 0..10 {
@@ -608,7 +597,7 @@ impl UnaryTrait {
                         value.unit(algebra);
                         let norm = value.norm(algebra);
                         if (norm - 1.).abs() > 1e-10 {
-                            return Impl::None;
+                            return None;
                         }
                     }
 
@@ -618,7 +607,7 @@ impl UnaryTrait {
                     let ty_t = ty.with_type_param(T, Mag::Any);
                     let scalar_t = Type::Grade(0).with_type_param(T, Mag::Any);
                     let unit_ty = ty.with_type_param(T, Mag::Unit);
-                    Impl::Actual(quote! {
+                    Some(Impl::Actual(quote! {
                         impl<T> #trait_ty for #ty_t
                         where
                             #ty_t: #norm_ty<Output = #scalar_t> + #div_ty<#scalar_t, Output = #ty_t> + Copy,
@@ -637,16 +626,16 @@ impl UnaryTrait {
                                 self
                             }
                         }
-                    })
+                    }))
                 }
-                _ => Impl::None,
+                _ => None,
             },
             Inverse => match ty {
                 OverType::Type(inner) => {
                     if UnaryTrait::Norm2.no_impl(ty, algebra)
                         || UnaryTrait::Reverse.no_impl(ty, algebra)
                     {
-                        return Impl::None;
+                        return None;
                     }
 
                     let blade_count = TypeBlades::new(algebra, ty).count();
@@ -731,57 +720,57 @@ impl UnaryTrait {
                         }
                     };
 
-                    Impl::Actual(quote! {
+                    Some(Impl::Actual(quote! {
                         #inv_ty
                         #inv_unit
-                    })
+                    }))
                 }
-                OverType::Float(_) => Impl::External,
+                OverType::Float(_) => Some(Impl::External),
             },
             Pod => {
                 if ty.is_float() {
-                    return Impl::External;
+                    return Some(Impl::External);
                 }
                 let trait_ty = self.ty();
                 let zeroable_ty = UnaryTrait::Zeroable.ty();
                 let ty_t = ty.with_type_param(T, MagParam::A);
-                Impl::Actual(quote! {
+                Some(Impl::Actual(quote! {
                     unsafe impl<T, A> #trait_ty for #ty_t
                     where
                         T: #zeroable_ty + #trait_ty,
                         Self: Copy + 'static,
                     {}
-                })
+                }))
             }
             Zeroable => {
                 // while unit types are not valid in a zeroed state, they are still memory safe
                 if ty.is_float() {
-                    return Impl::External;
+                    return Some(Impl::External);
                 }
                 let ty_t = ty.with_type_param(T, MagParam::A);
                 let trait_ty = self.ty();
-                Impl::Actual(quote! {
+                Some(Impl::Actual(quote! {
                     unsafe impl<T, A> #trait_ty for #ty_t
                     where
                         T: #trait_ty,
                     {}
-                })
+                }))
             }
             FloatType => {
                 if ty.is_float() {
-                    return Impl::None;
+                    return None;
                 }
                 let trait_ty = self.ty();
                 let ty_t = ty.with_type_param(T, A);
-                Impl::Actual(quote! {
+                Some(Impl::Actual(quote! {
                     impl<T, A> #trait_ty for #ty_t {
                         type Float = T;
                     }
-                })
+                }))
             }
             Rand => match ty {
-                OverType::Float(_) => Impl::External,
-                OverType::Type(Type::Mv) => Impl::None,
+                OverType::Float(_) => Some(Impl::External),
+                OverType::Type(Type::Mv) => None,
                 OverType::Type(Type::Motor) | OverType::Type(Type::Flector) => {
                     let mut bounds = TraitBounds::default();
                     let (t, a) = (T, A);
@@ -806,7 +795,7 @@ impl UnaryTrait {
                     };
                     let (params, where_clause) = bounds.params_and_where_clause();
 
-                    Impl::Actual(quote! {
+                    Some(Impl::Actual(quote! {
                         impl #params rand::distributions::Distribution<#ty_t> for rand::distributions::Standard
                             #where_clause
                                 rand::distributions::Standard: rand::distributions::Distribution<#t> + rand::distributions::Distribution<#vec_t>,
@@ -816,7 +805,7 @@ impl UnaryTrait {
                                 #expr
                             }
                         }
-                    })
+                    }))
                 }
                 OverType::Type(Type::Grade(_)) => {
                     let inner = Type::from(ty);
@@ -844,7 +833,7 @@ impl UnaryTrait {
                         .collect::<Vec<_>>();
 
                     if !has_non_zero {
-                        return Impl::None;
+                        return None;
                     }
 
                     let s = &algebra.fields[Blade(0)];
@@ -853,7 +842,7 @@ impl UnaryTrait {
                     bounds.insert(inner_t.norm2());
                     let (params, where_clause) = bounds.params_and_where_clause();
 
-                    Impl::Actual(quote! {
+                    Some(Impl::Actual(quote! {
                         impl #params rand::distributions::Distribution<#ty_t> for rand::distributions::Standard
                         #where_clause
                             #t: clifford::Number + rand::distributions::uniform::SampleUniform,
@@ -896,28 +885,22 @@ impl UnaryTrait {
                                 panic!("unable to find unit value for {}", std::any::type_name::<Self>());
                             }
                         }
-                    })
+                    }))
                 }
             },
-            Copy => {
-                if ty.is_float() {
-                    Impl::External
-                } else {
-                    Impl::Internal
-                }
-            }
+            Copy => Some(Impl::External),
         }
     }
 
-    pub fn impl_type(&self, ty: OverType, algebra: &Algebra) -> Impl<()> {
-        self.define(ty, algebra).map(|_| ())
+    pub fn impl_type(&self, ty: OverType, algebra: &Algebra) -> Option<Impl<()>> {
+        self.define(ty, algebra).map(|opt| opt.map(|_| ()))
     }
 
     pub fn no_impl<T>(self, ty: T, algebra: &Algebra) -> bool
     where
         OverType: From<T>,
     {
-        matches!(self.impl_type(ty.into(), algebra), Impl::None)
+        self.impl_type(ty.into(), algebra).is_none()
     }
 
     pub fn define_tests(self, ty: Type, algebra: &Algebra) -> Option<TokenStream> {

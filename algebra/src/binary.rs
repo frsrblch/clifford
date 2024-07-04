@@ -109,7 +109,12 @@ impl BinaryTrait {
         (self.ty(), self.fn_ident())
     }
 
-    pub fn define(self, lhs: OverType, rhs: OverType, algebra: &Algebra) -> Impl<TokenStream> {
+    pub fn define(
+        self,
+        lhs: OverType,
+        rhs: OverType,
+        algebra: &Algebra,
+    ) -> Option<Impl<TokenStream>> {
         use BinaryTrait::*;
         use FloatParam::{T, U, V};
         use Mag::Any;
@@ -119,37 +124,32 @@ impl BinaryTrait {
             return if lhs == rhs {
                 match self {
                     Add | Sub | Mul | Div | AddAssign | SubAssign | MulAssign | DivAssign => {
-                        Impl::External
+                        Some(Impl::External)
                     }
-                    _ => Impl::None,
+                    _ => None,
                 }
             } else {
-                Impl::None
+                None
             };
         }
 
         if lhs.is_float() {
-            return Impl::None;
+            return None;
         }
 
         match self {
             Add | Sub => {
                 if lhs.is_float() && rhs.is_float() {
                     return if lhs == rhs {
-                        Impl::External
+                        Some(Impl::External)
                     } else {
-                        Impl::None
+                        None
                     };
                 }
-                let Some(output) = Type::from(lhs) + Type::from(rhs) else {
-                    return Impl::None;
-                };
+                let output = (Type::from(lhs) + Type::from(rhs))?;
                 let (trait_ty, trait_fn) = self.ty_fn();
                 let (from_ty, from_fn) = BinaryTrait::From.ty_fn();
-                let Some((mut bounds, [t, u, v], [a, b, c])) = TraitBounds::sum_types(lhs, rhs)
-                else {
-                    return Impl::None;
-                };
+                let (mut bounds, [t, u, v], [a, b, c]) = TraitBounds::sum_types(lhs, rhs)?;
                 let lhs_t = lhs.with_type_param(t, a);
                 let rhs_u = rhs.with_type_param(u, b);
                 let output_v = output.with_type_param(v, c);
@@ -200,7 +200,7 @@ impl BinaryTrait {
                     .collect::<Vec<_>>();
 
                 let (params, where_clause) = bounds.params_and_where_clause();
-                Impl::Actual(quote! {
+                Some(Impl::Actual(quote! {
                     impl #params #trait_ty<#rhs_u> for #lhs_t #where_clause {
                         type Output = #output_v;
                         #[inline]
@@ -211,11 +211,11 @@ impl BinaryTrait {
                             }
                         }
                     }
-                })
+                }))
             }
             AddAssign | SubAssign => {
                 if Some(Type::from(lhs)) != Type::from(lhs) + Type::from(rhs) {
-                    return Impl::None;
+                    return None;
                 }
 
                 let (trait_ty, trait_fn) = self.ty_fn();
@@ -259,14 +259,14 @@ impl BinaryTrait {
                 });
 
                 let (params, where_clause) = bounds.params_and_where_clause();
-                Impl::Actual(quote! {
+                Some(Impl::Actual(quote! {
                     impl #params #trait_ty<#rhs_t> for #lhs_t #where_clause {
                         #[inline]
                         fn #trait_fn(&mut self, rhs: #rhs_t) {
                             #(#fields)*
                         }
                     }
-                })
+                }))
             }
             Mul | Geo | Dot | Wedge | Antigeo | Antidot | Antiwedge | Commutator
             | LeftContraction | RightContraction | BitAnd | BitOr | BitXor => {
@@ -286,29 +286,25 @@ impl BinaryTrait {
                             | BitXor
                     )
                 {
-                    return Impl::None;
+                    return None;
                 }
 
                 // prevents downstream crates from infinte type recursion
                 if lhs.is_float() && self == Mul {
-                    return Impl::None;
+                    return None;
                 }
 
                 let (trait_ty, trait_fn) = self.ty_fn();
                 let (zero_ty, zero_fn) = UnaryTrait::Zero.ty_fn();
 
-                let Some(output) = self.product(lhs, rhs, algebra) else {
-                    return Impl::None;
-                };
+                let output = self.product(lhs, rhs, algebra)?;
 
                 let bounds_and_types = if matches!(self, Mul | Geo) {
                     TraitBounds::geo_types(lhs, rhs, algebra, self)
                 } else {
                     TraitBounds::product_types(lhs, rhs)
                 };
-                let Some((mut bounds, [t, u, v], [a, b, c])) = bounds_and_types else {
-                    return Impl::None;
-                };
+                let (mut bounds, [t, u, v], [a, b, c]) = bounds_and_types?;
                 let lhs_t = lhs.with_type_param(t, a);
                 let rhs_u = rhs.with_type_param(u, b);
                 let output_v = output.with_type_param(v, c);
@@ -383,7 +379,7 @@ impl BinaryTrait {
                     quote!()
                 };
 
-                Impl::Actual(quote! {
+                Some(Impl::Actual(quote! {
                     impl #params #trait_ty<#rhs_u> for #lhs_t #where_clause {
                         type Output = #output_v;
                         #[inline]
@@ -392,26 +388,21 @@ impl BinaryTrait {
                             #expr
                         }
                     }
-                })
+                }))
             }
             Div => {
                 if UnaryTrait::Inverse.no_impl(rhs, algebra) {
-                    return Impl::None;
+                    return None;
                 }
                 let (trait_ty, trait_fn) = self.ty_fn();
                 let (inv_ty, inv_fn) = UnaryTrait::Inverse.ty_fn();
                 let (zero_ty, zero_fn) = UnaryTrait::Zero.ty_fn();
-                let Some((mut bounds, [t, u, v], [a, b, c])) =
-                    TraitBounds::geo_types(lhs, rhs, algebra, self)
-                else {
-                    return Impl::None;
-                };
+                let (mut bounds, [t, u, v], [a, b, c]) =
+                    TraitBounds::geo_types(lhs, rhs, algebra, self)?;
 
                 let lhs_t = lhs.with_type_param(t, a);
                 let rhs_u = rhs.with_type_param(u, b);
-                let Some(output) = algebra.product(lhs, rhs, Algebra::geo) else {
-                    return Impl::None;
-                };
+                let output = algebra.product(lhs, rhs, Algebra::geo)?;
                 let output_v = output.with_type_param(v, c);
                 let self_var = &quote!(self);
 
@@ -456,7 +447,7 @@ impl BinaryTrait {
                         })
                         .collect::<Vec<_>>();
                     let (params, where_clause) = bounds.params_and_where_clause();
-                    Impl::Actual(quote! {
+                    Some(Impl::Actual(quote! {
                         impl #params #trait_ty<#rhs_u> for #lhs_t #where_clause {
                             type Output = #output_v;
                             #[inline]
@@ -468,7 +459,7 @@ impl BinaryTrait {
                                 }
                             }
                         }
-                    })
+                    }))
                 };
 
                 // TODO use division for single bladed types
@@ -519,7 +510,7 @@ impl BinaryTrait {
                             })
                             .collect::<Vec<_>>();
                         let (params, where_clause) = bounds.params_and_where_clause();
-                        Impl::Actual(quote! {
+                        Some(Impl::Actual(quote! {
                             impl #params #trait_ty<#rhs_u> for #lhs_t #where_clause {
                                 type Output = #output_v;
                                 #[inline]
@@ -532,16 +523,14 @@ impl BinaryTrait {
                                     }
                                 }
                             }
-                        })
+                        }))
                     }
                 }
             }
             MulAssign | DivAssign => {
-                let Some(output) = BinaryTrait::Mul.product(lhs, rhs, algebra) else {
-                    return Impl::None;
-                };
+                let output = BinaryTrait::Mul.product(lhs, rhs, algebra)?;
                 if lhs != output {
-                    return Impl::None;
+                    return None;
                 }
                 let (trait_ty, trait_fn) = self.ty_fn();
                 let inner = match self {
@@ -550,7 +539,7 @@ impl BinaryTrait {
                     _ => unreachable!(),
                 };
                 if inner.no_impl(lhs, rhs, algebra) {
-                    return Impl::None;
+                    return None;
                 }
                 let (inner_ty, inner_fn) = inner.ty_fn();
                 let mut bounds = TraitBounds::default();
@@ -582,7 +571,7 @@ impl BinaryTrait {
 
                 let (params, _) = bounds.params_and_where_clause();
 
-                Impl::Actual(quote! {
+                Some(Impl::Actual(quote! {
                     impl #params #trait_ty<#rhs_u> for #lhs_t
                     where
                         #lhs_t: #inner_ty<#rhs_u, Output = #lhs_t> + Copy
@@ -591,18 +580,18 @@ impl BinaryTrait {
                             *self = #inner_ty::#inner_fn(*self, rhs);
                         }
                     }
-                })
+                }))
             }
             From => {
                 if lhs.is_float() {
-                    if lhs == rhs {
-                        return Impl::External;
+                    return if lhs == rhs {
+                        Some(Impl::External)
                     } else {
-                        return Impl::None;
-                    }
+                        None
+                    };
                 }
                 if !lhs.contains(rhs) {
-                    return Impl::None;
+                    return None;
                 }
                 let (t, a) = if let OverType::Float(f) = lhs {
                     (FloatParam::Float(f), Any.into())
@@ -662,33 +651,29 @@ impl BinaryTrait {
                     }
                 };
                 let (params, where_clause) = bounds.params_and_where_clause();
-                Impl::Actual(quote! {
+                Some(Impl::Actual(quote! {
                     impl #params #from_ty<#rhs_t> for #lhs_t #where_clause {
                         fn #from_fn(#var: #rhs_t) -> Self {
                             #expr
                         }
                     }
-                })
+                }))
             }
             Sandwich | Antisandwich | Shr => {
                 // TODO rework with SubsetOf traits rather than GradeProduct
                 match Type::from(lhs) {
-                    Type::Mv | Type::Grade(0) => return Impl::None,
-                    Type::Grade(g) if g == algebra.dim() => return Impl::None,
+                    Type::Mv | Type::Grade(0) => return None,
+                    Type::Grade(g) if g == algebra.dim() => return None,
                     _ => {}
                 }
                 match Type::from(rhs) {
-                    Type::Grade(0) => return Impl::None,
-                    Type::Grade(g) if g == algebra.dim() => return Impl::None,
+                    Type::Grade(0) => return None,
+                    Type::Grade(g) if g == algebra.dim() => return None,
                     _ => {}
                 }
 
-                let Some(int) = algebra.product(lhs, rhs, Algebra::geo) else {
-                    return Impl::None;
-                };
-                let Some(raw_out) = algebra.product(int, lhs, Algebra::geo) else {
-                    return Impl::None;
-                };
+                let int = algebra.product(lhs, rhs, Algebra::geo)?;
+                let raw_out = algebra.product(int, lhs, Algebra::geo)?;
 
                 let out = match (Type::from(rhs), raw_out) {
                     (Type::Grade(r), _) | (_, Type::Grade(r)) => Type::Grade(r),
@@ -723,7 +708,7 @@ impl BinaryTrait {
                     }
                 };
 
-                Impl::Actual(quote! {
+                Some(Impl::Actual(quote! {
                     impl<T, A, B, C, D> #trait_ty<#rhs_t> for #lhs_t
                     where
                         #lhs_t: #rev_ty<Output = #lhs_t>
@@ -737,12 +722,12 @@ impl BinaryTrait {
                             #expr
                         }
                     }
-                })
+                }))
             }
             PartialEq => {
                 if lhs == rhs {
                     if lhs.is_float() {
-                        Impl::External
+                        Some(Impl::External)
                     } else {
                         let (trait_ty, trait_fn) = self.ty_fn();
                         let mut bounds = TraitBounds::default();
@@ -758,27 +743,27 @@ impl BinaryTrait {
                                 ts
                             });
                         let (params, where_clause) = bounds.params_and_where_clause();
-                        Impl::Actual(quote! {
+                        Some(Impl::Actual(quote! {
                             impl #params #trait_ty<#rhs_t> for #lhs_t #where_clause {
                                 fn #trait_fn(&self, rhs: &#rhs_t) -> bool {
                                     #cmp_fields
                                 }
                             }
-                        })
+                        }))
                     }
                 } else {
-                    Impl::None
+                    None
                 }
             }
             GradeFilter => {
                 if !rhs.contains(lhs) || lhs.is_float() || rhs.is_float() {
-                    return Impl::None;
+                    return None;
                 }
                 let OverType::Type(lhs) = lhs else {
-                    return Impl::None;
+                    return None;
                 };
                 let OverType::Type(rhs) = rhs else {
-                    return Impl::None;
+                    return None;
                 };
                 let (trait_ty, trait_fn) = self.ty_fn();
                 let lhs_t = lhs.with_type_param(T, A);
@@ -810,7 +795,7 @@ impl BinaryTrait {
                     }
                 };
                 let (params, where_clause) = bounds.params_and_where_clause();
-                Impl::Actual(quote! {
+                Some(Impl::Actual(quote! {
                     impl #params #trait_ty<#rhs_u> for #lhs_t #where_clause {
                         type Output = #out_t;
                         #[inline]
@@ -818,20 +803,20 @@ impl BinaryTrait {
                             #expr
                         }
                     }
-                })
+                }))
             }
         }
     }
 
-    pub fn impl_type(&self, lhs: OverType, rhs: OverType, algebra: &Algebra) -> Impl<()> {
-        self.define(lhs, rhs, algebra).map(|_| ())
+    pub fn impl_type(&self, lhs: OverType, rhs: OverType, algebra: &Algebra) -> Option<Impl<()>> {
+        self.define(lhs, rhs, algebra).map(|opt| opt.map(|_| ()))
     }
 
     pub fn no_impl<T, U>(self, lhs: T, rhs: U, algebra: &Algebra) -> bool
     where
         OverType: From<T> + From<U>,
     {
-        matches!(self.impl_type(lhs.into(), rhs.into(), algebra), Impl::None)
+        self.impl_type(lhs.into(), rhs.into(), algebra).is_none()
     }
 
     pub fn product(self, lhs: OverType, rhs: OverType, algebra: &Algebra) -> Option<OverType> {

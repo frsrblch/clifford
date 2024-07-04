@@ -4,9 +4,9 @@ pub mod blade;
 pub mod trait_bounds;
 
 mod binary;
+mod constructor;
 mod parse;
 mod unary;
-mod constructor;
 
 #[cfg(test)]
 mod tests;
@@ -150,12 +150,8 @@ mod algebra_new {
             if algebra.ordering.is_flipped(self) {
                 let z = output.pop();
                 let y = output.pop();
-                if let Some(z) = z {
-                    output.push(z);
-                }
-                if let Some(y) = y {
-                    output.push(y);
-                }
+                output.extend(z);
+                output.extend(y);
             }
 
             format_ident!("{output}")
@@ -1178,8 +1174,6 @@ impl ToTokens for Float {
 }
 
 pub enum Impl<T> {
-    /// Unimplemented
-    None,
     /// Implemented outside this crate
     External,
     /// Implemented elsewhere by this crate
@@ -1199,7 +1193,6 @@ impl<T: ToTokens> ToTokens for Impl<T> {
 impl<T> Impl<T> {
     pub fn map<F: Fn(T) -> U, U>(self, f: F) -> Impl<U> {
         match self {
-            Impl::None => Impl::None,
             Impl::External => Impl::External,
             Impl::Internal => Impl::Internal,
             Impl::Actual(t) => Impl::Actual(f(t)),
