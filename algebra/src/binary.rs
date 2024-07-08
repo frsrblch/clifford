@@ -462,9 +462,8 @@ impl BinaryTrait {
                     }))
                 };
 
-                // TODO use division for single bladed types
                 match rhs {
-                    OverType::Type(rhs_ty) if algebra.type_blades(rhs_ty).nth(1).is_some() => {
+                    OverType::Type(rhs_ty) if algebra.type_blades(rhs_ty).nth(1).is_none() => {
                         generate_with_div(bounds)
                     }
                     OverType::Float(_) => generate_with_div(bounds),
