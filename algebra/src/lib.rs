@@ -21,6 +21,7 @@ use strum::{EnumIter, IntoEnumIterator};
 
 use crate::binary::BinaryTrait;
 use crate::blade::Blade;
+use crate::constructor::{Constructor, ConstructorItem};
 use crate::trait_bounds::*;
 use crate::unary::UnaryTrait;
 
@@ -206,7 +207,7 @@ impl Algebra {
             product = -product;
         }
         for basis in self.iter_bases(overlap) {
-            product = product.product(basis.square.blade());
+            product = product.product(basis.square.product());
         }
         product
     }
@@ -317,10 +318,11 @@ impl Algebra {
     }
 
     pub(crate) fn type_blades(&self, ty: Type) -> TypeBlades {
-        TypeBlades {
-            blades: Blades::from(self),
-            ty,
-        }
+        TypeBlades::new(self, ty)
+    }
+
+    pub(crate) fn type_fields(&self, ty: Type) -> TypeFields {
+        TypeFields::new(self, ty)
     }
 
     pub(crate) fn types(&self) -> impl Iterator<Item = Type> + '_ {
@@ -395,7 +397,7 @@ impl Algebra {
     {
         let lhs = TypeBlades::new(self, lhs);
         let rhs = TypeBlades::new(self, rhs);
-        lhs.flat_map(move |lhs| rhs.clone().map(move |rhs| (lhs, rhs)))
+        itertools::iproduct!(lhs, rhs)
     }
 }
 
@@ -439,7 +441,7 @@ impl Square {
         Basis { char, square: self }
     }
 
-    pub fn blade(self) -> Blade {
+    pub fn product(self) -> Blade {
         match self {
             Self::Pos => Blade::scalar(),
             Self::Neg => -Blade::scalar(),
@@ -1252,11 +1254,10 @@ impl Value {
         output.ty = algebra.product(self.ty, rhs.ty, Algebra::geo)?;
         for (l, r) in algebra.blade_tuples(self.ty, rhs.ty) {
             let o = algebra.geo(l, r);
-            if o.is_zero() {
-                continue;
-            } else if o.is_positive() {
+
+            if o.is_positive() {
                 output.blades[o] += self.blades[l] * rhs.blades[r];
-            } else {
+            } else if o.is_negative() {
                 output.blades[o] -= self.blades[l] * rhs.blades[r];
             }
         }

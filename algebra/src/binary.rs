@@ -325,7 +325,7 @@ impl BinaryTrait {
                                 Commutator => algebra.commutator(l, r),
                                 LeftContraction => algebra.left_con(l, r),
                                 RightContraction => algebra.right_con(l, r),
-                                _ => unimplemented!(),
+                                _ => unimplemented!("product trait: {self:?}"),
                             };
                             let lv = lhs.access_field(self_var, l, algebra);
                             let rv = rhs.access_field(rhs_var, r, algebra);
@@ -370,7 +370,7 @@ impl BinaryTrait {
                             marker: std::marker::PhantomData,
                         }
                     },
-                    OverType::Float(_) => unimplemented!(),
+                    OverType::Float(_) => unimplemented!("float output"),
                 };
 
                 let suspicious_arithmetic_impl = if matches!(self, BitAnd | BitOr | BitXor) {
@@ -464,7 +464,7 @@ impl BinaryTrait {
 
                 // TODO use division for single bladed types
                 match rhs {
-                    OverType::Type(rhs_ty) if algebra.type_blades(rhs_ty).count() == 1 => {
+                    OverType::Type(rhs_ty) if algebra.type_blades(rhs_ty).nth(1).is_some() => {
                         generate_with_div(bounds)
                     }
                     OverType::Float(_) => generate_with_div(bounds),
@@ -544,7 +544,9 @@ impl BinaryTrait {
                 let (inner_ty, inner_fn) = inner.ty_fn();
                 let mut bounds = TraitBounds::default();
                 let [t, u, v] = match (lhs, rhs) {
-                    (OverType::Float(_), OverType::Float(_)) => unimplemented!(),
+                    (OverType::Float(_), OverType::Float(_)) => {
+                        unimplemented!("float mul/div assign")
+                    }
                     (OverType::Float(f), _) => [FloatParam::Float(f), T, T],
                     (_, OverType::Float(f)) => [T, FloatParam::Float(f), T],
                     _ => [T, T, T],
@@ -845,7 +847,7 @@ impl BinaryTrait {
             RightContraction => algebra
                 .product(lhs, rhs, Algebra::right_con)
                 .map(OverType::Type),
-            _ => unimplemented!(),
+            _ => unimplemented!("overtype product"),
         }
     }
 
@@ -906,14 +908,18 @@ impl BinaryTrait {
                         fn #fn_ident() {
                             let mut rng = rand::thread_rng();
                             for _ in 0..100 {
-                                let lhs = #unit_ty::#unit_fn(#lhs_inner::<f64, Any> {
+                                let lhs_inner = #lhs_inner::<f64, Any> {
                                     #(#lhs_fields)*
                                     marker: std::marker::PhantomData,
-                                });
-                                let rhs = #unit_ty::#unit_fn(#rhs_inner::<f64, Any> {
+                                };
+                                let lhs = #unit_ty::#unit_fn(lhs_inner);
+
+                                let rhs_inner = #rhs_inner::<f64, Any> {
                                     #(#rhs_fields)*
                                     marker: std::marker::PhantomData,
-                                });
+                                };
+                                let rhs = #unit_ty::#unit_fn(rhs_inner);
+
                                 let product = lhs * rhs;
                                 let norm2 = #norm2_ty::#norm2_fn(product).#s.abs();
                                 assert!((norm2 - 1f64).abs() < 1e-10, "{}", norm2);

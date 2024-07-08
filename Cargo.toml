@@ -14,8 +14,5 @@ macros = { path = "./macros" }
 geo_traits = { git = "https://github.com/frsrblch/geo_traits", version = "0.4" }
 bytemuck = "1"
 
-[[example]]
-name = "ga_2d"
-
 [dev-dependencies]
 rand = "0.8"

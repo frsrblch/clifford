@@ -18,6 +18,13 @@ where
     }
 }
 
+impl Insert<ParameterizedType> for TraitBounds {
+    fn insert(&mut self, item: ParameterizedType) {
+        self.insert(item.param);
+        self.insert(item.mag);
+    }
+}
+
 impl Insert<TypeParam> for TraitBounds {
     fn insert(&mut self, item: TypeParam) {
         self.bounds.entry(item).or_default();
@@ -496,10 +503,28 @@ impl FloatParam {
         .into()
     }
 
+    pub fn zero_const(self) -> TraitBound {
+        UnaryTraitBound {
+            ty: self.into(),
+            unary_trait: UnaryTrait::ZeroConst,
+            output: None,
+        }
+        .into()
+    }
+
     pub fn one(self) -> TraitBound {
         UnaryTraitBound {
             ty: self.into(),
             unary_trait: UnaryTrait::One,
+            output: None,
+        }
+        .into()
+    }
+
+    pub fn one_const(self) -> TraitBound {
+        UnaryTraitBound {
+            ty: self.into(),
+            unary_trait: UnaryTrait::OneConst,
             output: None,
         }
         .into()
@@ -619,6 +644,15 @@ impl ParameterizedType {
         UnaryTraitBound {
             ty: self.into(),
             unary_trait: UnaryTrait::Zero,
+            output: None,
+        }
+        .into()
+    }
+
+    pub fn one(self) -> TraitBound {
+        UnaryTraitBound {
+            ty: self.into(),
+            unary_trait: UnaryTrait::One,
             output: None,
         }
         .into()

@@ -2,58 +2,76 @@ use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
 use std::collections::{btree_map::Entry, BTreeMap};
 
-use crate::FloatParam::*;
+use crate::unary::UnaryTrait;
 use crate::{blade::Blade, Algebra, Insert, TraitBounds, Type};
+use crate::{FloatParam::*, TypeBlades};
 
 #[derive(Debug)]
 pub struct Constructor<'a> {
     algebra: &'a Algebra,
-    pub ty: Type,
-    blades: BTreeMap<Blade, TokenStream>,
+    bounds: &'a mut TraitBounds,
+    ty: Type,
+    pub blades: BTreeMap<Blade, TokenStream>,
 }
 
 impl<'a> Constructor<'a> {
-    pub fn new<I, F, B>(algebra: &'a Algebra, blades: I, f: F) -> Option<Self>
+    pub fn new<I, F, B>(
+        algebra: &'a Algebra,
+        bounds: &'a mut TraitBounds,
+        blades: I,
+        mut f: F,
+    ) -> Option<Self>
     where
         I: IntoIterator<Item = B>,
-        F: FnMut(B) -> Option<ConstructorItem>,
+        F: FnMut(B, &mut TraitBounds) -> Option<ConstructorItem>,
     {
         let blades = blades
             .into_iter()
-            .filter_map(f)
-            .fold(BTreeMap::new(), |mut map, item| {
-                let ConstructorItem { output, tokens, .. } = item;
-                match map.entry(output.unsigned()) {
-                    Entry::Vacant(entry) => {
-                        let value = if output.is_negative() {
-                            quote! { -#tokens }
-                        } else {
-                            quote! { #tokens }
-                        };
-                        entry.insert(value);
-                    }
-                    Entry::Occupied(mut entry) => {
-                        let append = &if output.is_negative() {
-                            quote! { - #tokens }
-                        } else {
-                            quote! { + #tokens }
-                        };
-                        append.to_tokens(entry.get_mut())
-                    }
+            .filter_map(|blade| f(blade, bounds))
+            .collect::<Vec<_>>();
+
+        let blades = blades.into_iter().fold(BTreeMap::new(), |mut map, item| {
+            let ConstructorItem { output, tokens, .. } = item;
+            match map.entry(output.unsigned()) {
+                Entry::Vacant(entry) => {
+                    let value = if output.is_negative() {
+                        bounds.insert(T.neg());
+                        quote! { -#tokens }
+                    } else {
+                        quote! { #tokens }
+                    };
+                    entry.insert(value);
                 }
-                map
-            });
-        let ty = blades.keys().copied().collect::<Option<Type>>()?;
-        Some(Self {
+                Entry::Occupied(mut entry) => {
+                    let append = &if output.is_negative() {
+                        bounds.insert(T.sub(T, T));
+                        quote! { - #tokens }
+                    } else {
+                        bounds.insert(T.add(T, T));
+                        quote! { + #tokens }
+                    };
+                    append.to_tokens(entry.get_mut())
+                }
+            }
+            map
+        });
+
+        let ty: Type = blades.keys().copied().collect::<Option<Type>>()?;
+
+        let mut constructor = Self {
             algebra,
+            bounds,
             ty,
             blades,
-        })
+        };
+        constructor.check_for_invalid_blades();
+        constructor.fill_missing_blades();
+        Some(constructor)
     }
 
     pub fn unary<I, F, B>(
         algebra: &'a Algebra,
-        bounds: &mut TraitBounds,
+        bounds: &'a mut TraitBounds,
         blades: I,
         f: F,
     ) -> Option<Self>
@@ -89,17 +107,23 @@ impl<'a> Constructor<'a> {
                 }
                 map
             });
+
         let ty: Type = blades.keys().copied().collect::<Option<Type>>()?;
-        Some(Self {
+
+        let mut constructor = Self {
             algebra,
+            bounds,
             ty,
             blades,
-        })
+        };
+        constructor.check_for_invalid_blades();
+        constructor.fill_missing_blades();
+        Some(constructor)
     }
 
     pub fn binary<I, F, B>(
         algebra: &'a Algebra,
-        bounds: &mut TraitBounds,
+        bounds: &'a mut TraitBounds,
         blades: I,
         f: F,
     ) -> Option<Self>
@@ -135,12 +159,63 @@ impl<'a> Constructor<'a> {
                 }
                 map
             });
+
         let ty: Type = blades.keys().copied().collect::<Option<Type>>()?;
-        Some(Self {
+
+        let mut constructor = Self {
             algebra,
+            bounds,
             ty,
             blades,
-        })
+        };
+        constructor.check_for_invalid_blades();
+        constructor.fill_missing_blades();
+        Some(constructor)
+    }
+
+    pub fn set_type(&mut self, ty: Type) {
+        self.ty = ty;
+        self.check_for_invalid_blades();
+        self.fill_missing_blades();
+    }
+
+    fn fill_missing_blades(&mut self) {
+        let Self {
+            algebra,
+            bounds,
+            ty,
+            blades,
+        } = self;
+
+        let (zero_ty, zero_fn) = UnaryTrait::Zero.ty_fn();
+
+        for blade in TypeBlades::new(algebra, *ty) {
+            if let Entry::Vacant(entry) = blades.entry(blade) {
+                bounds.insert(V.zero());
+                entry.insert(quote! { #zero_ty::#zero_fn() });
+            }
+        }
+    }
+
+    fn check_for_invalid_blades(&self) {
+        let expected_blades = self
+            .algebra
+            .type_blades(self.ty)
+            .collect::<std::collections::HashSet<_>>();
+        assert!(
+            self.blades
+                .keys()
+                .all(|blade| expected_blades.contains(blade)),
+            "invalid blades for given type"
+        );
+    }
+
+    pub fn ty(&self) -> Type {
+        self.ty
+    }
+
+    pub fn into_tokens(self) -> TokenStream {
+        self.to_token_stream()
     }
 }
 
@@ -184,26 +259,31 @@ impl ConstructorItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Basis, FloatParam, Insert, TraitBounds, TypeBlades, TypeFields};
+    use crate::{Basis, Insert, TraitBounds, TypeBlades, TypeFields};
     use itertools::iproduct;
+
+    fn ga_3d() -> Algebra {
+        Algebra::new([Basis::pos('x'), Basis::pos('y'), Basis::pos('z')])
+    }
 
     #[test]
     fn bivector_reverse() {
-        let algebra = Algebra::new([Basis::pos('x'), Basis::pos('y'), Basis::pos('z')]);
+        let algebra = ga_3d();
         let bivector = Type::Grade(2);
         let mut bounds = TraitBounds::default();
 
-        let constructor =
-            Constructor::new(&algebra, TypeBlades::new(&algebra, bivector), |input| {
+        let constructor = Constructor::unary(
+            &algebra,
+            &mut bounds,
+            TypeBlades::new(&algebra, bivector),
+            |input| {
                 let output = input.rev();
                 let field = &algebra.fields[input];
-                if output.is_negative() {
-                    bounds.insert(FloatParam::T.neg());
-                }
                 let tokens = quote! { self.#field };
-                Some(ConstructorItem { output, tokens })
-            })
-            .unwrap();
+                ConstructorItem::new(output, tokens)
+            },
+        )
+        .unwrap();
 
         assert_eq! {
             quote! {
@@ -220,7 +300,7 @@ mod tests {
 
     #[test]
     fn bivector_dual() {
-        let algebra = Algebra::new([Basis::pos('x'), Basis::pos('y'), Basis::pos('z')]);
+        let algebra = ga_3d();
         let bivector = Type::Grade(2);
         let mut bounds = TraitBounds::default();
         bounds.insert(T);
@@ -233,7 +313,7 @@ mod tests {
                 let output = algebra.left_comp(input);
                 let field = &algebra.fields[input];
                 let tokens = quote! { self.#field };
-                Some(ConstructorItem { output, tokens })
+                ConstructorItem::new(output, tokens)
             },
         )
         .unwrap();
@@ -264,7 +344,7 @@ mod tests {
 
     #[test]
     fn vector_sum() {
-        let algebra = Algebra::new([Basis::pos('x'), Basis::pos('y'), Basis::pos('z')]);
+        let algebra = ga_3d();
         let vector = Type::Grade(1);
 
         let mut bounds = TraitBounds::default();
@@ -274,12 +354,7 @@ mod tests {
             &algebra,
             &mut bounds,
             TypeFields::new(&algebra, vector),
-            |(blade, field)| {
-                Some(ConstructorItem {
-                    output: blade,
-                    tokens: quote! { self.#field + rhs.#field },
-                })
-            },
+            |(blade, field)| ConstructorItem::new(blade, quote! { self.#field + rhs.#field }),
         );
 
         assert_eq! {
@@ -308,7 +383,7 @@ mod tests {
 
     #[test]
     fn vector_product() {
-        let algebra = Algebra::new([Basis::pos('x'), Basis::pos('y'), Basis::pos('z')]);
+        let algebra = ga_3d();
         let vector = Type::Grade(1);
 
         let mut bounds = TraitBounds::default();
@@ -321,10 +396,7 @@ mod tests {
         let constructor =
             Constructor::binary(&algebra, &mut bounds, iter, |((lb, lf), (rb, rf))| {
                 let output = algebra.geo(lb, rb);
-                Some(ConstructorItem {
-                    output,
-                    tokens: quote! { self.#lf * rhs.#rf },
-                })
+                ConstructorItem::new(output, quote! { self.#lf * rhs.#rf })
             });
 
         assert_eq! {
@@ -353,5 +425,44 @@ mod tests {
             .to_string(),
             where_clause.to_string()
         );
+    }
+
+    #[test]
+    fn motor_one() {
+        let algebra = ga_3d();
+        let mut bounds = TraitBounds::default();
+        let (one_ty, one_fn) = UnaryTrait::One.ty_fn();
+        let (zero_ty, zero_fn) = UnaryTrait::Zero.ty_fn();
+        let constructor = Constructor::new(
+            &algebra,
+            &mut bounds,
+            TypeBlades::new(&algebra, Type::Motor),
+            |blade, bounds| {
+                ConstructorItem::new(
+                    blade,
+                    if blade.is_scalar() {
+                        bounds.insert(T.one());
+                        quote! { #one_ty::#one_fn() }
+                    } else {
+                        bounds.insert(T.zero());
+                        quote! { #zero_ty::#zero_fn() }
+                    },
+                )
+            },
+        )
+        .unwrap();
+
+        assert_eq! {
+            quote! {
+                Motor {
+                    s: #one_ty::#one_fn(),
+                    xy: #zero_ty::#zero_fn(),
+                    xz: #zero_ty::#zero_fn(),
+                    yz: #zero_ty::#zero_fn(),
+                    marker: std::marker::PhantomData,
+                }
+            }.to_string(),
+            constructor.to_token_stream().to_string()
+        }
     }
 }

@@ -92,15 +92,19 @@ impl Blade {
     }
 
     pub const fn is_positive(self) -> bool {
-        self.0 & Self::SIGN != Self::SIGN
+        self.0 & Self::SIGN != Self::SIGN && !self.is_zero()
     }
 
     pub const fn is_negative(self) -> bool {
-        !self.is_positive()
+        self.0 & Self::SIGN == Self::SIGN && !self.is_zero()
     }
 
     pub const fn is_zero(self) -> bool {
         self.0 & Self::ZERO == Self::ZERO
+    }
+
+    pub fn is_scalar(self) -> bool {
+        self == Blade(0)
     }
 
     fn get_higher(self, i: u32) -> Self {

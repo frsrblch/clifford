@@ -1,5 +1,3 @@
-use constructor::{Constructor, ConstructorItem};
-
 use super::*;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, EnumIter, Hash)]
@@ -25,10 +23,12 @@ pub enum UnaryTrait {
     Norm,
     Antinorm2,
     Antinorm,
+    Sqrt,
     FloatType,
     Zero,
     One,
-    Sqrt,
+    ZeroConst,
+    OneConst,
     /// Bytemuck,
     Pod,
     Zeroable,
@@ -61,6 +61,8 @@ impl UnaryTrait {
             CliffordConjugate => quote!(clifford::CliffordConjugate),
             Zero => quote!(clifford::Zero),
             One => quote!(clifford::One),
+            ZeroConst => quote!(clifford::ZeroConst),
+            OneConst => quote!(clifford::OneConst),
             Sqrt => quote!(clifford::Sqrt),
             Norm2 => quote!(clifford::Norm2),
             Norm => quote!(clifford::Norm),
@@ -76,7 +78,7 @@ impl UnaryTrait {
     pub fn fn_ident(&self) -> TokenStream {
         use UnaryTrait::*;
         match self {
-            Copy => unimplemented!(),
+            Copy => unimplemented!("Copy fn"),
             Neg => quote!(neg),
             Not => quote!(not),
             Sum => quote!(sum),
@@ -91,13 +93,15 @@ impl UnaryTrait {
             CliffordConjugate => quote!(conjugate),
             Zero => quote!(zero),
             One => quote!(one),
+            ZeroConst => unimplemented!("ZeroConst fn"),
+            OneConst => unimplemented!("OneConst fn"),
             Sqrt => quote!(sqrt),
             Norm2 => quote!(norm2),
             Norm => quote!(norm),
             Antinorm2 => quote!(antinorm2),
             Antinorm => quote!(antinorm),
             Zeroable => quote!(zeroed),
-            FloatType | Pod => unimplemented!(),
+            FloatType | Pod => unimplemented!("FloatType | Pod"),
             Rand => quote!(sample),
         }
     }
@@ -108,7 +112,7 @@ impl UnaryTrait {
 
     pub fn define(self, ty: OverType, algebra: &Algebra) -> Option<Impl<TokenStream>> {
         use FloatParam::T;
-        use MagParam::A;
+        use MagParam::{A, B};
         use UnaryTrait::*;
 
         match self {
@@ -129,7 +133,7 @@ impl UnaryTrait {
                         Reverse => Blade::rev,
                         GradeInvolution => Blade::grade_involution,
                         CliffordConjugate => Blade::clifford_conjugate,
-                        _ => unimplemented!(),
+                        _ => unimplemented!("Neg | Reverse | GradeInvolution | CliffordConjugate"),
                     };
                     let constructor = Constructor::unary(
                         algebra,
@@ -137,7 +141,8 @@ impl UnaryTrait {
                         TypeFields::new(algebra, ty),
                         |(blade, field)| ConstructorItem::new(f(blade), quote!(self.#field)),
                     )?;
-                    let ty_t = constructor.ty.with_type_param(T, A);
+                    let ty_t = constructor.ty().with_type_param(T, A);
+                    let constructor = constructor.into_tokens();
                     let (params, where_clause) = bounds.params_and_where_clause();
                     Some(Impl::Actual(quote! {
                         impl #params #trait_ty for #ty_t #where_clause {
@@ -187,7 +192,8 @@ impl UnaryTrait {
                         } else {
                             MagParam::Mag(Mag::Any)
                         };
-                        let output_ty = constructor.ty.with_type_param(T, mag);
+                        let output_ty = constructor.ty().with_type_param(T, mag);
+                        let constructor = constructor.into_tokens();
                         let (params, where_clause) = bounds.params_and_where_clause();
                         Some(Impl::Actual(quote! {
                             impl #params #trait_ty for #ty<T, A> #where_clause {
@@ -208,14 +214,14 @@ impl UnaryTrait {
                 }
 
                 let (trait_ty, trait_fn) = self.ty_fn();
-                let (zero_ty, zero_fn) = UnaryTrait::Zero.ty_fn();
+                let (zero_ty, zero_fn) = Zero.ty_fn();
                 let mut bounds = TraitBounds::default();
-                let ty_t = ty.with_type_param(T, A);
-                let ty_t_any = ty.with_type_param(T, Mag::Any);
-                bounds.insert(T);
-                bounds.insert(A);
-                bounds.insert(ty_t_any.zero());
-                bounds.insert(ty_t_any.add(ty_t, ty_t_any));
+                let ty_t: ParameterizedType = ty.with_type_param(T, A);
+                let ty_t_out = ty.with_type_param(T, B);
+                bounds.insert(ty_t_out.zero());
+                bounds.insert(ty_t_out.add(ty_t, ty_t_out));
+                let zero_expr = quote! { <#ty_t_out as #zero_ty>::#zero_fn() };
+
                 let (params, where_clause) = bounds.clone().params_and_where_clause();
 
                 bounds.insert(Lifetime::A);
@@ -223,16 +229,16 @@ impl UnaryTrait {
                 let (params1, where_clause1) = bounds.params_and_where_clause();
 
                 Some(Impl::Actual(quote! {
-                    impl #params #trait_ty<#ty_t> for #ty_t_any #where_clause {
+                    impl #params #trait_ty<#ty_t> for #ty_t_out #where_clause {
                         fn #trait_fn<I>(iter: I) -> Self where I: Iterator<Item = #ty_t> {
-                            iter.fold(<#ty_t_any as #zero_ty>::#zero_fn(), |sum, item| {
+                            iter.fold(#zero_expr, |sum, item| {
                                 sum + item
                             })
                         }
                     }
-                    impl #params1 #trait_ty<&'a #ty_t> for #ty_t_any #where_clause1 {
+                    impl #params1 #trait_ty<&'a #ty_t> for #ty_t_out #where_clause1 {
                         fn #trait_fn<I>(iter: I) -> Self where I: Iterator<Item = &'a #ty_t> {
-                            iter.fold(<#ty_t_any as #zero_ty>::#zero_fn(), |sum, item| {
+                            iter.fold(#zero_expr, |sum, item| {
                                 sum + *item
                             })
                         }
@@ -250,34 +256,13 @@ impl UnaryTrait {
                     return None;
                 }
 
-                let (trait_ty, trait_fn) = self.ty_fn();
-                let (one_ty, one_fn) = UnaryTrait::One.ty_fn();
-                let (zero_ty, zero_fn) = UnaryTrait::Zero.ty_fn();
+                let (product_ty, product_fn) = Product.ty_fn();
+                let (one_ty, one_fn) = One.ty_fn();
                 let mut bounds = TraitBounds::default();
                 let ty_t = ty.with_type_param(T, A);
-                bounds.insert(T);
 
-                let one_expr = {
-                    let fields = TypeFields::new(algebra, ty).map(|(b, f)| {
-                        if b == Blade(0) {
-                            bounds.insert(T.one());
-                            quote! {
-                                #f: <T as #one_ty>::#one_fn()
-                            }
-                        } else {
-                            bounds.insert(T.zero());
-                            quote! {
-                                #f: <T as #zero_ty>::#zero_fn()
-                            }
-                        }
-                    });
-                    quote! {
-                        #inner::<T, A> {
-                            #(#fields,)*
-                            marker: std::marker::PhantomData,
-                        }
-                    }
-                };
+                bounds.insert(ty_t.one());
+                let one_expr = quote!(<#ty_t as #one_ty>::#one_fn());
 
                 bounds.insert(A);
                 bounds.insert(ty_t.mul(ty_t, ty_t));
@@ -288,17 +273,17 @@ impl UnaryTrait {
                 let (params1, where_clause1) = bounds.params_and_where_clause();
 
                 Some(Impl::Actual(quote! {
-                    impl #params #trait_ty<#ty_t> for #ty_t #where_clause {
-                        fn #trait_fn<I>(iter: I) -> Self where I: Iterator<Item = #ty_t> {
-                            iter.fold(#one_expr, |sum, item| {
-                                sum * item
+                    impl #params #product_ty<#ty_t> for #ty_t #where_clause {
+                        fn #product_fn<I>(iter: I) -> Self where I: Iterator<Item = #ty_t> {
+                            iter.fold(#one_expr, |product, item| {
+                                product * item
                             })
                         }
                     }
-                    impl #params1 #trait_ty<&'a #ty_t> for #ty_t #where_clause1 {
-                        fn #trait_fn<I>(iter: I) -> Self where I: Iterator<Item = &'a #ty_t> {
-                            iter.fold(#one_expr, |sum, item| {
-                                sum * *item
+                    impl #params1 #product_ty<&'a #ty_t> for #ty_t #where_clause1 {
+                        fn #product_fn<I>(iter: I) -> Self where I: Iterator<Item = &'a #ty_t> {
+                            iter.fold(#one_expr, |product, item| {
+                                product * *item
                             })
                         }
                     }
@@ -311,41 +296,63 @@ impl UnaryTrait {
                         return None;
                     }
 
-                    let (trait_ty, trait_fn) = self.ty_fn();
-                    let fields = TypeFields::new(algebra, ty).map(|(_, field)| {
-                        quote! {
-                            #field: #trait_ty::#trait_fn(),
-                        }
-                    });
+                    let (zero_ty, zero_fn) = Zero.ty_fn();
 
-                    let geo_traits_zero_ty = quote!(clifford::ZeroConst);
-                    let const_fields =
-                        TypeFields::new(algebra, ty).map(|(_, field)| quote!(#field: T::ZERO,));
-                    let ty_t = ty.with_type_param(T, Mag::Any);
+                    let mut bounds = TraitBounds::default();
+                    let ty_t = ty.with_type_param(T, A);
+                    bounds.insert(ty_t.add(ty_t, ty_t));
+                    bounds.insert(T.partial_eq(T));
+                    bounds.insert(T.zero());
+
+                    let constructor = Constructor::unary(
+                        algebra,
+                        &mut bounds,
+                        algebra.type_blades(ty),
+                        |blade| ConstructorItem::new(blade, quote!(#zero_ty::#zero_fn())),
+                    )?
+                    .into_tokens();
+
+                    let (params, where_clause) = bounds.params_and_where_clause();
+
                     Some(Impl::Actual(quote! {
-                        impl<T> #geo_traits_zero_ty for #ty_t where T: #geo_traits_zero_ty {
-                            const ZERO: #ty_t = #ty {
-                                #(#const_fields)*
-                                marker: std::marker::PhantomData,
-                            };
-                        }
-
-                        impl<T> #trait_ty for #ty_t
-                        where
-                            T: #trait_ty + PartialEq,
-                            #ty_t: std::ops::Add<Output = #ty<T, Any>>,
-                        {
+                        impl #params #zero_ty for #ty_t #where_clause {
                             #[inline]
-                            fn #trait_fn() -> Self {
-                                #ty {
-                                    #(#fields)*
-                                    marker: std::marker::PhantomData,
-                                }
+                            fn #zero_fn() -> Self {
+                                #constructor
                             }
                             #[inline]
                             fn is_zero(&self) -> bool {
-                                <Self as #trait_ty>::#trait_fn().eq(self)
+                                <Self as #zero_ty>::#zero_fn().eq(self)
                             }
+                        }
+                    }))
+                }
+                OverType::Float(_) => Some(Impl::External),
+            },
+            ZeroConst => match ty {
+                OverType::Type(ty) => {
+                    // Zero requires Add<Self, Output = Self>
+                    if BinaryTrait::Add.no_impl(OverType::Type(ty), OverType::Type(ty), algebra) {
+                        return None;
+                    }
+                    let mut bounds = TraitBounds::default();
+                    bounds.insert(T.zero_const());
+                    let zero_const_ty = self.ty();
+
+                    let constructor = Constructor::new(
+                        algebra,
+                        &mut bounds,
+                        algebra.type_blades(ty),
+                        |blade, _| ConstructorItem::new(blade, quote!(T::ZERO)),
+                    )
+                    .map(Constructor::into_tokens)?;
+
+                    let ty_t = ty.with_type_param(T, Mag::Any);
+                    let (params, where_clause) = bounds.params_and_where_clause();
+
+                    Some(Impl::Actual(quote! {
+                        impl #params #zero_const_ty for #ty_t #where_clause {
+                            const ZERO: #ty_t = #constructor;
                         }
                     }))
                 }
@@ -354,70 +361,86 @@ impl UnaryTrait {
             One => match ty {
                 OverType::Type(ty) => {
                     // One requires Mul<Self, Output = Self>
-                    if BinaryTrait::Mul.no_impl(OverType::Type(ty), OverType::Type(ty), algebra) {
+                    if BinaryTrait::Mul.no_impl(OverType::Type(ty), OverType::Type(ty), algebra)
+                        || !ty.contains_grade(0)
+                    {
                         return None;
                     }
 
                     let (trait_ty, trait_fn) = self.ty_fn();
-                    let (zero_ty, zero_fn) = Self::Zero.ty_fn();
-                    let t = T;
                     let mut bounds = TraitBounds::default();
-                    bounds.insert(A);
-                    bounds.insert(t.one());
-                    bounds.insert(t.partial_eq(t));
-                    bounds.insert(t.copy());
-                    let ty_t = ty.with_type_param(t, A);
+                    let ty_t = ty.with_type_param(T, A);
                     bounds.insert(ty_t.mul(ty_t, ty_t));
-                    let fields = TypeFields::new(algebra, ty)
-                        .map(|(blade, field)| {
-                            if blade == Blade(0) {
-                                quote! {
-                                    #field: #trait_ty::#trait_fn(),
-                                }
+
+                    let (one_ty, one_fn) = One.ty_fn();
+                    let (zero_ty, zero_fn) = Zero.ty_fn();
+                    let constructor = Constructor::new(
+                        algebra,
+                        &mut bounds,
+                        algebra.type_blades(ty),
+                        |blade, bounds| {
+                            let tokens = if blade.is_scalar() {
+                                bounds.insert(T.one());
+                                quote!(#one_ty::#one_fn())
                             } else {
-                                bounds.insert(t.zero());
-                                quote! {
-                                    #field: #zero_ty::#zero_fn(),
-                                }
-                            }
-                        })
-                        .collect::<Vec<_>>();
+                                bounds.insert(T.zero());
+                                quote!(#zero_ty::#zero_fn())
+                            };
+                            ConstructorItem::new(blade, tokens)
+                        },
+                    )?;
+
+                    let constructor = constructor.into_token_stream();
 
                     let (params, where_clause) = bounds.params_and_where_clause();
+
+                    Some(Impl::Actual(quote! {
+                        impl #params #trait_ty for #ty_t #where_clause {
+                            #[inline]
+                            fn #trait_fn() -> Self {
+                                #constructor
+                            }
+                        }
+                    }))
+                }
+                OverType::Float(_) => Some(Impl::External),
+            },
+            OneConst => match ty {
+                OverType::Type(ty) => {
+                    // One requires Mul<Self, Output = Self>
+                    if BinaryTrait::Mul.no_impl(OverType::Type(ty), OverType::Type(ty), algebra) {
+                        return None;
+                    }
+
+                    let mut bounds = TraitBounds::default();
+                    bounds.insert(T);
+                    bounds.insert(A);
+
+                    let ty_t = ty.with_type_param(T, A);
 
                     let geo_traits_one_ty = quote!(clifford::OneConst);
                     let mut zero_bound = false;
                     let const_fields = TypeFields::new(algebra, ty)
                         .map(|(blade, field)| {
                             if blade == Blade::scalar() {
+                                bounds.insert(T.one_const());
                                 quote!(#field: T::ONE,)
                             } else {
                                 zero_bound = true;
+                                bounds.insert(T.zero_const());
                                 quote!(#field: T::ZERO,)
                             }
                         })
                         .collect::<Vec<_>>();
-                    let plus_geo_traits_zero_ty = if zero_bound {
-                        quote!(+ clifford::ZeroConst)
-                    } else {
-                        quote!()
-                    };
+
+                    let (params, where_clause) = bounds.params_and_where_clause();
 
                     Some(Impl::Actual(quote! {
-                        impl #params #geo_traits_one_ty for #ty_t where T: #geo_traits_one_ty #plus_geo_traits_zero_ty {
+                        impl #params #geo_traits_one_ty for #ty_t #where_clause {
                             const ONE: #ty_t = #ty {
                                 #(#const_fields)*
                                 marker: std::marker::PhantomData,
                             };
-                        }
-                        impl #params #trait_ty for #ty_t #where_clause {
-                            #[inline]
-                            fn #trait_fn() -> Self {
-                                #ty {
-                                    #(#fields)*
-                                    marker: std::marker::PhantomData,
-                                }
-                            }
                         }
                     }))
                 }
@@ -428,62 +451,32 @@ impl UnaryTrait {
                     let mut bounds = TraitBounds::default();
                     bounds.insert(MagParam::A);
                     bounds.insert(T.copy());
+
                     let (trait_ty, trait_fn) = self.ty_fn();
                     let ty_t = ty.with_type_param(T, MagParam::A);
-                    let output = TypeBlades::new(algebra, ty)
-                        .map(|b| {
-                            if self == Norm2 {
-                                algebra.dot(b, b.rev())
-                            } else {
-                                algebra.antidot(b, algebra.antirev(b))
-                            }
-                        })
-                        .collect::<Option<Type>>()?;
-                    let output_ty = output.with_type_param(T, MagParam::A);
-                    let fields = TypeFields::new(algebra, output)
-                        .map(|(blade, field)| {
-                            let mut sum =
-                                TypeFields::new(algebra, ty).fold(quote!(), |mut ts, (b, f)| {
-                                    let product = if self == Norm2 {
-                                        algebra.dot(b, b.rev())
-                                    } else {
-                                        algebra.antidot(b, algebra.antirev(b))
-                                    };
-                                    if product.unsigned() != blade.unsigned() {
-                                        return ts;
-                                    } else {
-                                        bounds.insert(T.mul(T, T));
-                                    }
-                                    if product.is_positive() {
-                                        if ts.is_empty() {
-                                            quote!(self.#f * self.#f)
-                                        } else {
-                                            bounds.insert(T.add(T, T));
-                                            quote!(+ self.#f * self.#f)
-                                        }
-                                        .to_tokens(&mut ts)
-                                    } else if product.is_negative() {
-                                        if ts.is_empty() {
-                                            bounds.insert(T.neg());
-                                            quote!(-(self.#f * self.#f))
-                                        } else {
-                                            bounds.insert(T.sub(T, T));
-                                            quote!(- self.#f * self.#f)
-                                        }
-                                        .to_tokens(&mut ts)
-                                    }
-                                    ts
-                                });
 
-                            if sum.is_empty() {
-                                bounds.insert(T.zero());
-                                let (zero_ty, zero_fn) = UnaryTrait::Zero.ty_fn();
-                                quote!(#zero_ty::#zero_fn()).to_tokens(&mut sum);
-                            }
+                    let f: Box<dyn Fn(Blade) -> Blade> = match self {
+                        Norm2 => Box::new(|blade| algebra.dot(blade, blade.rev())),
+                        Antinorm2 => {
+                            Box::new(|blade| algebra.antidot(blade, algebra.antirev(blade)))
+                        }
+                        _ => unreachable!(),
+                    };
 
-                            quote!(#field: #sum)
-                        })
-                        .collect::<Vec<_>>();
+                    bounds.insert(T.mul(T, T));
+
+                    let constructor = Constructor::unary(
+                        algebra,
+                        &mut bounds,
+                        TypeFields::new(algebra, ty),
+                        |(blade, field)| {
+                            ConstructorItem::new(f(blade), quote! { self.#field * self.#field })
+                        },
+                    )?;
+
+                    let output_ty = constructor.ty().with_type_param(T, MagParam::A);
+
+                    let constructor = constructor.into_tokens();
 
                     let (params, where_clause) = bounds.params_and_where_clause();
                     Some(Impl::Actual(quote! {
@@ -491,10 +484,7 @@ impl UnaryTrait {
                             type Output = #output_ty;
                             #[inline]
                             fn #trait_fn(self) -> Self::Output {
-                                #output {
-                                    #(#fields,)*
-                                    marker: std::marker::PhantomData,
-                                }
+                                #constructor
                             }
                         }
                     }))
@@ -502,237 +492,143 @@ impl UnaryTrait {
                 OverType::Float(_) => None,
             },
             Norm | Antinorm => match ty {
-                OverType::Type(_) => {
-                    let mut bounds = TraitBounds::default();
-                    bounds.insert(MagParam::A);
-                    bounds.insert(T.copy());
-
-                    let output = TypeBlades::new(algebra, ty)
-                        .map(|b| {
-                            if self == Norm {
-                                algebra.dot(b, b.rev())
-                            } else {
-                                algebra.antidot(b, algebra.antirev(b))
-                            }
-                        })
-                        .collect::<Option<Type>>()?;
-                    let output_t = output.with_type_param(T, A);
-
-                    let fields = TypeFields::new(algebra, output)
-                        .map(|(blade, field)| {
-                            let sum =
-                                TypeFields::new(algebra, ty).fold(quote!(), |mut ts, (b, f)| {
-                                    let product = if self == Norm {
-                                        algebra.dot(b, b.rev())
-                                    } else {
-                                        algebra.antidot(b, algebra.antirev(b))
-                                    };
-                                    if product.unsigned() != blade.unsigned() {
-                                        return ts;
-                                    } else {
-                                        bounds.insert(T.mul(T, T));
-                                    }
-                                    if product.is_positive() {
-                                        if ts.is_empty() {
-                                            quote!(self.#f * self.#f)
-                                        } else {
-                                            bounds.insert(T.add(T, T));
-                                            quote!(+ self.#f * self.#f)
-                                        }
-                                        .to_tokens(&mut ts)
-                                    } else if product.is_negative() {
-                                        if ts.is_empty() {
-                                            bounds.insert(T.neg());
-                                            quote!(-(self.#f * self.#f))
-                                        } else {
-                                            bounds.insert(T.sub(T, T));
-                                            quote!(- self.#f * self.#f)
-                                        }
-                                        .to_tokens(&mut ts)
-                                    }
-                                    ts
-                                });
-
-                            let sum = if sum.is_empty() {
-                                bounds.insert(T.zero());
-                                let (zero_ty, zero_fn) = UnaryTrait::Zero.ty_fn();
-                                quote!(#zero_ty::#zero_fn())
-                            } else {
-                                bounds.insert(T.sqrt());
-                                quote!(clifford::Sqrt::sqrt(#sum))
-                            };
-
-                            quote!(#field: #sum)
-                        })
-                        .collect::<Vec<_>>();
-
+                OverType::Type(ty) => {
                     let (trait_ty, trait_fn) = self.ty_fn();
                     let ty_t = ty.with_type_param(T, A);
+
+                    let mut bounds = TraitBounds::default();
+                    bounds.insert(ty_t);
+                    bounds.insert(T.copy());
+                    bounds.insert(T.sqrt());
+                    bounds.insert(T.mul(T, T));
+
+                    let mut constructor = Constructor::unary(
+                        algebra,
+                        &mut bounds,
+                        algebra.type_fields(ty),
+                        |(blade, field)| {
+                            let output = match self {
+                                Norm => algebra.dot(blade, blade.rev()),
+                                Antinorm => algebra.antidot(blade, algebra.antirev(blade)),
+                                _ => unreachable!(),
+                            };
+                            ConstructorItem::new(output, quote!(self.#field * self.#field))
+                        },
+                    )?;
+
+                    let (sqrt_ty, sqrt_fn) = Sqrt.ty_fn();
+                    constructor
+                        .blades
+                        .values_mut()
+                        .for_each(|ts| *ts = quote!(#sqrt_ty::#sqrt_fn(#ts)));
+
+                    let output_t = constructor.ty().with_type_param(T, A);
+
+                    let constructor = constructor.into_token_stream();
+
                     let (params, where_clause) = bounds.params_and_where_clause();
                     Some(Impl::Actual(quote! {
                         impl #params #trait_ty for #ty_t #where_clause {
                             type Output = #output_t;
                             #[inline]
                             fn #trait_fn(self) -> Self::Output {
-                                #output {
-                                    #(#fields,)*
-                                    marker: std::marker::PhantomData,
-                                }
+                                #constructor
                             }
                         }
                     }))
                 }
                 OverType::Float(_) => None,
             },
-            Unitize => match ty {
+            Inverse if matches!(ty, OverType::Float(Float::F32 | Float::F64)) => {
+                Some(Impl::External)
+            }
+            Unitize | Inverse => match ty {
                 OverType::Type(ty) => {
-                    if UnaryTrait::Norm.no_impl(ty, algebra)
-                        || BinaryTrait::Div.no_impl(ty, Type::Grade(0), algebra)
-                    {
+                    let mut bounds = TraitBounds::default();
+                    let ty_t = ty.with_type_param(T, A);
+
+                    bounds.insert(ty_t);
+                    bounds.insert(T.copy());
+
+                    let (trait_ty, trait_fn) = self.ty_fn();
+
+                    let norm_var = match self {
+                        Unitize => quote!(norm),
+                        Inverse => quote!(norm2),
+                        _ => unreachable!(),
+                    };
+
+                    let output_t = match self {
+                        Unitize => ty.with_type_param(T, Mag::Unit),
+                        Inverse => ty_t,
+                        _ => unreachable!(),
+                    };
+
+                    bounds.insert(T.mul(T, T));
+                    let sum = Constructor::unary(
+                        algebra,
+                        &mut bounds,
+                        algebra.type_fields(ty),
+                        |(blade, field)| {
+                            ConstructorItem::new(
+                                algebra.dot(blade, blade.rev()),
+                                quote!(self.#field * self.#field),
+                            )
+                        },
+                    )?
+                    .blades
+                    .remove(&Blade(0))?;
+
+                    if sum.is_empty() {
                         return None;
                     }
 
-                    for _ in 0..10 {
-                        let mut value = Value::gen(ty, algebra);
-                        value.unit(algebra);
-                        let norm = value.norm(algebra);
-                        if (norm - 1.).abs() > 1e-10 {
-                            return None;
+                    let norm_expr = match self {
+                        Unitize => {
+                            let (sqrt_ty, sqrt_fn) = Sqrt.ty_fn();
+                            bounds.insert(T.sqrt());
+                            quote!(#sqrt_ty::#sqrt_fn(#sum))
                         }
-                    }
+                        Inverse => sum,
+                        _ => unreachable!(),
+                    };
+                    bounds.insert(T.div(T, T));
 
-                    let (trait_ty, trait_fn) = self.ty_fn();
-                    let (norm_ty, norm_fn) = UnaryTrait::Norm.ty_fn();
-                    let (div_ty, div_fn) = BinaryTrait::Div.ty_fn();
-                    let ty_t = ty.with_type_param(T, Mag::Any);
-                    let scalar_t = Type::Grade(0).with_type_param(T, Mag::Any);
-                    let unit_ty = ty.with_type_param(T, Mag::Unit);
-                    Some(Impl::Actual(quote! {
-                        impl<T> #trait_ty for #ty_t
-                        where
-                            #ty_t: #norm_ty<Output = #scalar_t> + #div_ty<#scalar_t, Output = #ty_t> + Copy,
-                        {
-                            type Output = #unit_ty;
-                            #[inline]
-                            fn #trait_fn(self) -> Self::Output {
-                                let norm = #norm_ty::#norm_fn(self);
-                                #div_ty::#div_fn(self, norm).assert()
+                    let constructor = Constructor::unary(
+                        algebra,
+                        &mut bounds,
+                        algebra.type_fields(ty),
+                        |(blade, field)| match self {
+                            Unitize => ConstructorItem::new(blade, quote!(self.#field / #norm_var)),
+                            Inverse => {
+                                ConstructorItem::new(blade.rev(), quote!(self.#field / #norm_var))
                             }
-                        }
-                        impl<T> #trait_ty for #unit_ty {
-                            type Output = #unit_ty;
+                            _ => unreachable!(),
+                        },
+                    )
+                    .map(Constructor::into_token_stream)?;
+
+                    let (params, where_clause) = bounds.params_and_where_clause();
+
+                    Some(Impl::Actual(quote! {
+                        impl #params #trait_ty for #ty_t #where_clause {
+                            type Output = #output_t;
                             #[inline]
                             fn #trait_fn(self) -> Self::Output {
-                                self
+                                let #norm_var = #norm_expr;
+                                #constructor
                             }
                         }
                     }))
                 }
                 _ => None,
             },
-            Inverse => match ty {
-                OverType::Type(inner) => {
-                    if UnaryTrait::Norm2.no_impl(ty, algebra)
-                        || UnaryTrait::Reverse.no_impl(ty, algebra)
-                    {
-                        return None;
-                    }
-
-                    let blade_count = TypeBlades::new(algebra, ty).count();
-
-                    let (trait_ty, trait_fn) = self.ty_fn();
-                    let (rev_ty, rev_fn) = UnaryTrait::Reverse.ty_fn();
-
-                    let inv_ty = {
-                        let (one_ty, one_fn) = UnaryTrait::One.ty_fn();
-                        let (norm2_ty, norm2_fn) = UnaryTrait::Norm2.ty_fn();
-                        let ty_t = inner.with_type_param(T, Mag::Any);
-
-                        let s = &algebra.fields[Blade(0)];
-
-                        let mut bounds = TraitBounds::default();
-                        bounds.insert(ty_t.copy());
-
-                        bounds.insert(T.copy());
-
-                        bounds.insert(T.div(T, T));
-                        bounds.insert(ty_t.norm2());
-                        bounds.insert(ty_t.rev());
-
-                        let (fields, inv_norm2) = if blade_count >= 4 {
-                            bounds.insert(T.one());
-                            bounds.insert(T.mul(T, T));
-                            (
-                                TypeFields::new(algebra, inner)
-                                    .map(|(_, field)| {
-                                        quote! {
-                                            #field: rev.#field * inv_norm2
-                                        }
-                                    })
-                                    .collect::<Vec<_>>(),
-                                Some(quote!(let inv_norm2 = <T as #one_ty>::#one_fn() / norm2;)),
-                            )
-                        } else {
-                            (
-                                TypeFields::new(algebra, inner)
-                                    .map(|(_, field)| {
-                                        quote! {
-                                            #field: rev.#field / norm2
-                                        }
-                                    })
-                                    .collect::<Vec<_>>(),
-                                None,
-                            )
-                        };
-
-                        let (params, where_clause) = bounds.clone().params_and_where_clause();
-
-                        quote! {
-                            impl #params #trait_ty for #ty_t #where_clause {
-                                type Output = #ty_t;
-                                #[inline]
-                                fn #trait_fn(self) -> Self::Output {
-                                    let rev = #rev_ty::#rev_fn(self);
-                                    let norm2 = #norm2_ty::#norm2_fn(self).#s;
-                                    #inv_norm2
-                                    #inner {
-                                        #(#fields,)*
-                                        marker: std::marker::PhantomData,
-                                    }
-                                }
-                            }
-                        }
-                    };
-
-                    let inv_unit = {
-                        let unit_t = inner.with_type_param(T, Mag::Unit);
-                        let mut bounds = TraitBounds::default();
-                        bounds.insert(unit_t.rev());
-                        let (params, where_clause) = bounds.params_and_where_clause();
-                        quote! {
-                            impl #params #trait_ty for #unit_t #where_clause {
-                                type Output = #unit_t;
-                                #[inline]
-                                fn #trait_fn(self) -> Self::Output {
-                                    #rev_ty::#rev_fn(self)
-                                }
-                            }
-                        }
-                    };
-
-                    Some(Impl::Actual(quote! {
-                        #inv_ty
-                        #inv_unit
-                    }))
-                }
-                OverType::Float(_) => Some(Impl::External),
-            },
             Pod => {
                 if ty.is_float() {
                     return Some(Impl::External);
                 }
                 let trait_ty = self.ty();
-                let zeroable_ty = UnaryTrait::Zeroable.ty();
+                let zeroable_ty = Zeroable.ty();
                 let ty_t = ty.with_type_param(T, MagParam::A);
                 Some(Impl::Actual(quote! {
                     unsafe impl<T, A> #trait_ty for #ty_t
@@ -790,7 +686,7 @@ impl UnaryTrait {
                         OverType::Type(Type::Flector) => {
                             quote!(rand::Rng::gen::<#vec_t>(rng) * rand::Rng::gen::<#vec_t>(rng) * rand::Rng::gen::<#vec_t>(rng))
                         }
-                        _ => unimplemented!(),
+                        _ => unreachable!(),
                     };
                     let (params, where_clause) = bounds.params_and_where_clause();
 
@@ -811,9 +707,9 @@ impl UnaryTrait {
                     let t = T;
                     let ty_t = ty.with_type_param(T, Mag::Any);
                     let unit_t = ty.with_type_param(T, Mag::Unit);
-                    let (one_ty, one_fn) = UnaryTrait::One.ty_fn();
-                    let (zero_ty, zero_fn) = UnaryTrait::Zero.ty_fn();
-                    let (norm2_ty, norm2_fn) = UnaryTrait::Norm2.ty_fn();
+                    let (one_ty, one_fn) = One.ty_fn();
+                    let (zero_ty, zero_fn) = Zero.ty_fn();
+                    let (norm2_ty, norm2_fn) = Norm2.ty_fn();
                     let mut bounds = TraitBounds::default();
                     bounds.insert(t.one());
                     let mut has_non_zero = false;
@@ -903,15 +799,16 @@ impl UnaryTrait {
     }
 
     pub fn define_tests(self, ty: Type, algebra: &Algebra) -> Option<TokenStream> {
+        use UnaryTrait::*;
         if self.no_impl(ty, algebra) {
             return None;
         }
         match self {
-            UnaryTrait::Inverse => {
+            Inverse => {
                 let product = algebra.product(ty, ty, Algebra::geo)?;
                 if BinaryTrait::Sub.no_impl(product, product, algebra)
-                    || UnaryTrait::Norm2.no_impl(product, algebra)
-                    || UnaryTrait::Rand.no_impl(Type::Grade(1), algebra)
+                    || Norm2.no_impl(product, algebra)
+                    || Rand.no_impl(Type::Grade(1), algebra)
                     || algebra.has_negative_bases()
                 {
                     return None;
@@ -919,8 +816,8 @@ impl UnaryTrait {
                 let ty_ident = ty.fn_ident();
                 let fn_ident = format_ident!("inverse_{ty_ident}");
                 let ty_t = ty.with_type_param(Float::F64, Mag::Any);
-                let (inv_ty, inv_fn) = UnaryTrait::Inverse.ty_fn();
-                let (norm2_ty, norm2_fn) = UnaryTrait::Norm2.ty_fn();
+                let (inv_ty, inv_fn) = Inverse.ty_fn();
+                let (norm2_ty, norm2_fn) = Norm2.ty_fn();
                 let s = &algebra.fields[Blade(0)];
                 let vec_t = Type::Grade(1).with_type_param(Float::F64, Mag::Any);
                 let value_expr = match ty {
@@ -949,12 +846,12 @@ impl UnaryTrait {
                     }
                 })
             }
-            UnaryTrait::Unitize => {
+            Unitize => {
                 let product = algebra.product(ty, ty, Algebra::geo)?;
                 if BinaryTrait::Sub.no_impl(product, product, algebra)
-                    || UnaryTrait::Norm2.no_impl(product, algebra)
-                    || UnaryTrait::Rand.no_impl(Type::Grade(1), algebra)
-                    || UnaryTrait::Reverse.no_impl(ty, algebra)
+                    || Norm2.no_impl(product, algebra)
+                    || Rand.no_impl(Type::Grade(1), algebra)
+                    || Reverse.no_impl(ty, algebra)
                     || algebra.has_negative_bases()
                 {
                     return None;
@@ -962,8 +859,9 @@ impl UnaryTrait {
                 let ty_ident = ty.fn_ident();
                 let fn_ident = format_ident!("unitize_{ty_ident}");
                 let ty_t = ty.with_type_param(Float::F64, Mag::Unit);
-                let (norm2_ty, norm2_fn) = UnaryTrait::Norm2.ty_fn();
-                let (rev_ty, rev_fn) = UnaryTrait::Reverse.ty_fn();
+                let (norm2_ty, norm2_fn) = Norm2.ty_fn();
+                let (rev_ty, rev_fn) = Reverse.ty_fn();
+                let (zero_ty, zero_fn) = Zero.ty_fn();
                 let s = &algebra.fields[Blade(0)];
                 let vec_t_unit = Type::Grade(1).with_type_param(Float::F64, Mag::Unit);
                 let unit_value_expr = match ty {
@@ -976,14 +874,14 @@ impl UnaryTrait {
                 Some(quote! {
                     #[test]
                     fn #fn_ident() {
-                        use rand::Rng;
-                        let mut rng = rand::thread_rng();
+                        use rand::{Rng, thread_rng};
+                        let mut rng = thread_rng();
                         for _ in 0..100 {
                             let unit = #unit_value_expr;
                             let product = unit * #rev_ty::#rev_fn(unit);
                             let expected = #product {
                                 #s: 1f64,
-                                ..clifford::Zero::zero()
+                                ..#zero_ty::#zero_fn()
                             };
                             let diff = product - expected;
                             assert!(#norm2_ty::#norm2_fn(diff).#s.abs() < 1e-10);
