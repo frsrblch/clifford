@@ -698,7 +698,7 @@ impl Type {
     }
 
     pub fn define(self, algebra: &Algebra) -> TokenStream {
-        let derive = if TypeBlades::new(algebra, self).nth(1).is_some() {
+        let derive = if TypeBlades::new(algebra, self).nth(1).is_none() {
             quote!(#[derive(Debug, Eq, Hash)])
         } else {
             quote!(#[derive(Debug, Eq, Ord, PartialOrd, Hash)])
