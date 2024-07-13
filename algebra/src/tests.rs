@@ -244,22 +244,13 @@ fn pga_3d_blade_fields() {
 #[test]
 fn type_grades_iter() {
     let a = pga_3d();
-    assert_eq!(
-        vec![0],
-        TypeGrades::new(&a, Type::Grade(0)).collect::<Vec<_>>()
-    );
-    assert_eq!(
-        vec![1],
-        TypeGrades::new(&a, Type::Grade(1)).collect::<Vec<_>>()
-    );
+    assert_eq!(vec![0], a.type_grades(Type::Grade(0)).collect::<Vec<_>>());
+    assert_eq!(vec![1], a.type_grades(Type::Grade(1)).collect::<Vec<_>>());
     assert_eq!(
         vec![0, 2, 4],
-        TypeGrades::new(&a, Type::Motor).collect::<Vec<_>>()
+        a.type_grades(Type::Motor).collect::<Vec<_>>()
     );
-    assert_eq!(
-        vec![1, 3],
-        TypeGrades::new(&a, Type::Flector).collect::<Vec<_>>()
-    );
+    assert_eq!(vec![1, 3], a.type_grades(Type::Flector).collect::<Vec<_>>());
 }
 
 #[test]
@@ -275,7 +266,7 @@ fn type_blades_sorted_iter() {
     let xyzw = Blade(0b1111);
     assert_eq!(
         vec![s, xy, zx, yz, wx, wy, wz, xyzw],
-        SortedTypeBlades::new(&a, Type::Motor).collect::<Vec<_>>()
+        a.sorted_type_blades(Type::Motor).collect::<Vec<_>>()
     );
 }
 

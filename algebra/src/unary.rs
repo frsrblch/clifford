@@ -138,7 +138,7 @@ impl UnaryTrait {
                     let constructor = Constructor::unary(
                         algebra,
                         &mut bounds,
-                        TypeFields::new(algebra, ty),
+                        algebra.type_fields(ty),
                         |(blade, field)| ConstructorItem::new(f(blade), quote!(self.#field)),
                     )?;
                     let ty_t = constructor.ty().with_type_param(T, A);
@@ -185,7 +185,7 @@ impl UnaryTrait {
                             }
                         };
 
-                        let blades = TypeBlades::new(algebra, ty);
+                        let blades = algebra.type_blades(ty);
                         let constructor = Constructor::unary(algebra, &mut bounds, blades, f)?;
                         let mag = if algebra.all_bases_positive() {
                             A
@@ -420,7 +420,8 @@ impl UnaryTrait {
 
                     let geo_traits_one_ty = quote!(clifford::OneConst);
                     let mut zero_bound = false;
-                    let const_fields = TypeFields::new(algebra, ty)
+                    let const_fields = algebra
+                        .type_fields(ty)
                         .map(|(blade, field)| {
                             if blade == Blade::scalar() {
                                 bounds.insert(T.one_const());
@@ -468,7 +469,7 @@ impl UnaryTrait {
                     let constructor = Constructor::unary(
                         algebra,
                         &mut bounds,
-                        TypeFields::new(algebra, ty),
+                        algebra.type_fields(ty),
                         |(blade, field)| {
                             ConstructorItem::new(f(blade), quote! { self.#field * self.#field })
                         },
@@ -713,7 +714,8 @@ impl UnaryTrait {
                     let mut bounds = TraitBounds::default();
                     bounds.insert(t.one());
                     let mut has_non_zero = false;
-                    let fields = TypeFields::new(algebra, ty)
+                    let fields = algebra
+                        .type_fields(ty)
                         .map(|(blade, field)| {
                             if algebra.dot(blade, blade).is_zero() {
                                 bounds.insert(t.zero());

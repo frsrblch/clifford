@@ -14,7 +14,7 @@ where
     Self: Insert<T>,
 {
     fn insert(&mut self, items: [T; N]) {
-        IntoIterator::into_iter(items).for_each(|item| self.insert(item));
+        items.into_iter().for_each(|item| self.insert(item));
     }
 }
 

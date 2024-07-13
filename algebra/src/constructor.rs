@@ -3,8 +3,8 @@ use quote::{quote, ToTokens};
 use std::collections::{btree_map::Entry, BTreeMap};
 
 use crate::unary::UnaryTrait;
+use crate::FloatParam::*;
 use crate::{blade::Blade, Algebra, Insert, TraitBounds, Type};
-use crate::{FloatParam::*, TypeBlades};
 
 #[derive(Debug)]
 pub struct Constructor<'a> {
@@ -189,7 +189,7 @@ impl<'a> Constructor<'a> {
 
         let (zero_ty, zero_fn) = UnaryTrait::Zero.ty_fn();
 
-        for blade in TypeBlades::new(algebra, *ty) {
+        for blade in algebra.type_blades(*ty) {
             if let Entry::Vacant(entry) = blades.entry(blade) {
                 bounds.insert(V.zero());
                 entry.insert(quote! { #zero_ty::#zero_fn() });
@@ -259,7 +259,7 @@ impl ConstructorItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Basis, Insert, TraitBounds, TypeBlades, TypeFields};
+    use crate::{Basis, Insert, TraitBounds};
     use itertools::iproduct;
 
     fn ga_3d() -> Algebra {
@@ -275,7 +275,7 @@ mod tests {
         let constructor = Constructor::unary(
             &algebra,
             &mut bounds,
-            TypeBlades::new(&algebra, bivector),
+            algebra.type_blades(bivector),
             |input| {
                 let output = input.rev();
                 let field = &algebra.fields[input];
@@ -308,7 +308,7 @@ mod tests {
         let constructor = Constructor::unary(
             &algebra,
             &mut bounds,
-            TypeBlades::new(&algebra, bivector),
+            algebra.type_blades(bivector),
             |input| {
                 let output = algebra.left_comp(input);
                 let field = &algebra.fields[input];
@@ -353,7 +353,7 @@ mod tests {
         let constructor = Constructor::binary(
             &algebra,
             &mut bounds,
-            TypeFields::new(&algebra, vector),
+            algebra.type_fields(vector),
             |(blade, field)| ConstructorItem::new(blade, quote! { self.#field + rhs.#field }),
         );
 
@@ -391,7 +391,7 @@ mod tests {
         bounds.insert(U.copy());
         bounds.insert(T.mul(U, V));
 
-        let blades = TypeFields::new(&algebra, vector);
+        let blades = algebra.type_fields(vector);
         let iter = iproduct!(blades.clone(), blades);
         let constructor =
             Constructor::binary(&algebra, &mut bounds, iter, |((lb, lf), (rb, rf))| {
@@ -436,7 +436,7 @@ mod tests {
         let constructor = Constructor::new(
             &algebra,
             &mut bounds,
-            TypeBlades::new(&algebra, Type::Motor),
+            algebra.type_blades(Type::Motor),
             |blade, bounds| {
                 ConstructorItem::new(
                     blade,

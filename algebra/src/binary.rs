@@ -157,7 +157,8 @@ impl BinaryTrait {
                 let op = if self == Add { quote!(+) } else { quote!(-) };
                 let sign = if self == Add { quote!() } else { quote!(-) };
                 let zero = quote!(clifford::Zero::zero());
-                let fields = TypeFields::new(algebra, output)
+                let fields = algebra
+                    .type_fields(output)
                     .map(|(blade, field)| {
                         match (lhs.contains_blade(blade), rhs.contains_blade(blade)) {
                             (true, true) => {
@@ -240,7 +241,7 @@ impl BinaryTrait {
                 let lhs_t = lhs.with_type_param(t, a);
                 let rhs_t = rhs.with_type_param(u, b);
 
-                let fields = TypeBlades::new(algebra, lhs).filter_map(|blade| {
+                let fields = algebra.type_blades(lhs).filter_map(|blade| {
                     if rhs.contains_blade(blade) {
                         let lhs_access = lhs.access_field(&quote!(self), blade, algebra);
                         let rhs_access = rhs.access_field(&quote!(rhs), blade, algebra);
@@ -311,7 +312,8 @@ impl BinaryTrait {
 
                 let self_var = &quote!(self);
                 let rhs_var = &quote!(rhs);
-                let fields = TypeFields::new(algebra, output)
+                let fields = algebra
+                    .type_fields(output)
                     .map(|(blade, field)| {
                         let mut sum = quote!();
                         for (l, r) in algebra.blade_tuples(lhs, rhs) {
@@ -408,7 +410,8 @@ impl BinaryTrait {
 
                 let generate_with_div = |mut bounds: TraitBounds| {
                     let rhs_var = &quote!(rhs);
-                    let fields = TypeFields::new(algebra, output)
+                    let fields = algebra
+                        .type_fields(output)
                         .map(|(blade, field)| {
                             let mut sum = quote!();
                             for (l, r) in algebra.blade_tuples(lhs, rhs) {
@@ -470,7 +473,8 @@ impl BinaryTrait {
                     _ => {
                         let inv_var = &quote!(inv);
                         bounds.insert(rhs_u.inv());
-                        let fields = TypeFields::new(algebra, output)
+                        let fields = algebra
+                            .type_fields(output)
                             .map(|(blade, field)| {
                                 let mut sum = quote!();
                                 for (l, r) in algebra.blade_tuples(lhs, rhs) {
@@ -620,7 +624,7 @@ impl BinaryTrait {
                 let var = quote!(value);
                 let s = &algebra.fields[Blade(0)];
                 let expr = {
-                    let fields = TypeFields::new(algebra, lhs).map(|(b, f)| {
+                    let fields = algebra.type_fields(lhs).map(|(b, f)| {
                         if rhs_ty.contains(b) {
                             let rhs_field = rhs.access_field(&var, b, algebra);
                             quote! {
@@ -737,7 +741,7 @@ impl BinaryTrait {
                         let lhs_t = lhs.with_type_param(T, A);
                         let rhs_t = rhs.with_type_param(T, B);
                         let cmp_fields =
-                            TypeFields::new(algebra, lhs).fold(quote!(), |mut ts, (_, f)| {
+                            algebra.type_fields(lhs).fold(quote!(), |mut ts, (_, f)| {
                                 let expr = quote!(self.#f.eq(&rhs.#f));
                                 if ts.is_empty() { expr } else { quote!(& #expr) }
                                     .to_tokens(&mut ts);
@@ -765,7 +769,7 @@ impl BinaryTrait {
                 };
                 let (trait_ty, trait_fn) = self.ty_fn();
                 let lhs_t = lhs.with_type_param(T, A);
-                let out_t = if TypeGrades::new(algebra, lhs).all(|g| rhs.contains_grade(g)) {
+                let out_t = if algebra.type_grades(lhs).all(|g| rhs.contains_grade(g)) {
                     rhs.with_type_param(T, A)
                 } else {
                     rhs.with_type_param(T, Mag::Any)
@@ -774,7 +778,7 @@ impl BinaryTrait {
                 let mut bounds = TraitBounds::default();
                 bounds.insert([T, U]);
                 bounds.insert([A, B]);
-                let fields = TypeFields::new(algebra, rhs).map(|(b, f)| {
+                let fields = algebra.type_fields(rhs).map(|(b, f)| {
                     if lhs.contains_grade(b.grade()) {
                         quote!(#f: self.#f)
                     } else {
@@ -885,13 +889,13 @@ impl BinaryTrait {
 
                     let fn_ident = format_ident!("unit_{lhs_lower}_mul_{rhs_lower}");
 
-                    let lhs_fields = TypeFields::new(algebra, lhs_inner).map(|(_, field)| {
+                    let lhs_fields = algebra.type_fields(lhs_inner).map(|(_, field)| {
                         quote! {
                             #field: rand::Rng::gen_range(&mut rng, -1.0..1.0),
                         }
                     });
 
-                    let rhs_fields = TypeFields::new(algebra, rhs_inner).map(|(_, field)| {
+                    let rhs_fields = algebra.type_fields(rhs_inner).map(|(_, field)| {
                         quote! {
                             #field: rand::Rng::gen_range(&mut rng, -1.0..1.0),
                         }

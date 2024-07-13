@@ -14,7 +14,7 @@ mod tests;
 use std::collections::HashMap;
 use std::fmt::Display;
 
-use itertools::Itertools;
+use itertools::{iproduct, Itertools};
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote, ToTokens};
 use strum::{EnumIter, IntoEnumIterator};
@@ -192,8 +192,10 @@ impl Algebra {
         U: Copy,
     {
         let f = &f;
-        TypeBlades::new(self, lhs)
-            .flat_map(|lhs| TypeBlades::new(self, rhs).map(move |rhs| f(self, lhs, rhs)))
+        let lhs = self.type_blades(lhs);
+        let rhs = self.type_blades(rhs);
+        iproduct!(lhs, rhs)
+            .map(|(lhs, rhs)| f(self, lhs, rhs))
             .collect()
     }
 
@@ -317,18 +319,26 @@ impl Algebra {
         0..=self.dim()
     }
 
-    pub(crate) fn type_blades(&self, ty: Type) -> TypeBlades {
-        TypeBlades::new(self, ty)
+    pub(crate) fn type_grades(&self, ty: impl Into<Type>) -> TypeGrades {
+        TypeGrades::new(self, ty.into())
     }
 
-    pub(crate) fn type_fields(&self, ty: Type) -> TypeFields {
-        TypeFields::new(self, ty)
+    pub(crate) fn type_blades(&self, ty: impl Into<Type>) -> TypeBlades {
+        TypeBlades::new(self, ty.into())
+    }
+
+    pub(crate) fn type_fields(&self, ty: impl Into<Type>) -> TypeFields {
+        TypeFields::new(self, ty.into())
+    }
+
+    pub(crate) fn sorted_type_blades(&self, ty: impl Into<Type>) -> SortedTypeBlades {
+        SortedTypeBlades::new(self, ty.into())
     }
 
     pub(crate) fn types(&self) -> impl Iterator<Item = Type> + '_ {
         let contains_multiple_grades = move |ty: &Type| {
             let mut single_grade = None;
-            for blade in TypeBlades::new(self, *ty) {
+            for blade in self.type_blades(*ty) {
                 if let Some(g) = single_grade {
                     if blade.grade() != g {
                         return true;
@@ -339,8 +349,9 @@ impl Algebra {
             }
             false
         };
-        let multiple_grade_types =
-            IntoIterator::into_iter([Type::Motor, Type::Flector]).filter(contains_multiple_grades);
+        let multiple_grade_types = [Type::Motor, Type::Flector]
+            .into_iter()
+            .filter(contains_multiple_grades);
         self.grades().chain(multiple_grade_types)
     }
 
@@ -395,9 +406,9 @@ impl Algebra {
     where
         Type: From<T>,
     {
-        let lhs = TypeBlades::new(self, lhs);
-        let rhs = TypeBlades::new(self, rhs);
-        itertools::iproduct!(lhs, rhs)
+        let lhs = self.type_blades(lhs);
+        let rhs = self.type_blades(rhs);
+        iproduct!(lhs, rhs)
     }
 }
 
@@ -513,12 +524,9 @@ pub struct TypeFields<'a> {
 }
 
 impl<'a> TypeFields<'a> {
-    pub fn new<T>(algebra: &'a Algebra, ty: T) -> Self
-    where
-        Type: From<T>,
-    {
+    pub fn new(algebra: &'a Algebra, ty: Type) -> Self {
         TypeFields {
-            blades: TypeBlades::new(algebra, ty),
+            blades: algebra.type_blades(ty),
             fields: &algebra.fields,
         }
     }
@@ -575,12 +583,11 @@ pub struct SortedTypeBlades {
 
 impl SortedTypeBlades {
     pub fn new(algebra: &Algebra, ty: Type) -> Self {
-        let blades = TypeBlades::new(algebra, ty);
         Self {
             current_grade: None,
-            current_blades: blades.clone(),
-            blades,
-            grades: TypeGrades::new(algebra, ty),
+            current_blades: algebra.type_blades(ty),
+            blades: algebra.type_blades(ty),
+            grades: algebra.type_grades(ty),
         }
     }
 }
@@ -698,30 +705,32 @@ impl Type {
     }
 
     pub fn define(self, algebra: &Algebra) -> TokenStream {
-        let derive = if TypeBlades::new(algebra, self).nth(1).is_some() {
+        let derive = if algebra.type_blades(self).nth(1).is_some() {
             quote!(#[derive(Debug, Eq, Hash)])
         } else {
             quote!(#[derive(Debug, Eq, Ord, PartialOrd, Hash)])
         };
         let ident = self.ident();
-        let fields = SortedTypeBlades::new(algebra, self).map(|blade| {
+        let fields = algebra.sorted_type_blades(self).map(|blade| {
             let field = &algebra.fields[blade];
             quote! {
                 pub #field: T,
             }
         });
-        let new_params = SortedTypeBlades::new(algebra, self)
+        let new_params = algebra
+            .sorted_type_blades(self)
             .map(|blade| &algebra.fields[blade])
             .map(|field| quote!(#field: T));
-        let new_fields = TypeFields::new(algebra, self).map(|(_, field)| field);
-        let grade_fns = TypeGrades::new(algebra, self).filter_map(|grade| {
+        let new_fields = algebra.type_fields(self).map(|(_, field)| field);
+        let grade_fns = algebra.type_grades(self).filter_map(|grade| {
             let grade = Type::Grade(grade);
             if self == grade {
                 return None;
             }
             let ident = grade.fn_ident();
-            let fields =
-                TypeFields::new(algebra, grade).map(|(_, field)| quote!(#field: self.#field));
+            let fields = algebra
+                .type_fields(grade)
+                .map(|(_, field)| quote!(#field: self.#field));
 
             let grade_t = grade.with_type_param(FloatParam::T, MagParam::Mag(Mag::Any));
             Some(quote! {
@@ -737,7 +746,7 @@ impl Type {
 
         let impl_default_any = {
             let ty_t = quote!(#ident<T, Any>);
-            let fields = TypeFields::new(algebra, self).map(|(_, field)| {
+            let fields = algebra.type_fields(self).map(|(_, field)| {
                 quote! { #field: Default::default() }
             });
             quote! {
@@ -753,7 +762,7 @@ impl Type {
         };
         let impl_default_unit = if self == Type::Motor {
             let ty_t = quote!(#ident<T, Unit>);
-            let fields = TypeFields::new(algebra, self).map(|(blade, field)| {
+            let fields = algebra.type_fields(self).map(|(blade, field)| {
                 if blade == Blade::scalar() {
                     quote! { #field: one() }
                 } else {
@@ -776,7 +785,7 @@ impl Type {
 
         let impl_copy_clone = {
             let ty_t = quote!(#ident<T, A>);
-            let fields = TypeFields::new(algebra, self).map(|(_, field)| {
+            let fields = algebra.type_fields(self).map(|(_, field)| {
                 quote! { #field: self.#field.clone() }
             });
             quote! {
@@ -792,8 +801,9 @@ impl Type {
             }
         };
 
-        let map_fields =
-            TypeFields::new(algebra, self).map(|(_, field)| quote!(#field: f(self.#field)));
+        let map_fields = algebra
+            .type_fields(self)
+            .map(|(_, field)| quote!(#field: f(self.#field)));
 
         let numeric_traits = if self == Type::Grade(0) {
             let numeric_traits = impl_numeric_traits_for_scalar();
@@ -807,14 +817,14 @@ impl Type {
         };
 
         let const_basis = {
-            let consts = TypeFields::new(algebra, self).map(|(bf, f)| {
+            let consts = algebra.type_fields(self).map(|(bf, f)| {
                 let m = if algebra.dot(bf, bf).is_zero() {
                     Mag::Any
                 } else {
                     Mag::Unit
                 };
                 let const_ident = Ident::new(&f.to_string().to_uppercase(), f.span());
-                let fields = TypeFields::new(algebra, self).map(|(bg, g)| {
+                let fields = algebra.type_fields(self).map(|(bg, g)| {
                     if bf == bg {
                         quote!(#g: <T as clifford::OneConst>::ONE)
                     } else {
@@ -835,13 +845,15 @@ impl Type {
             }
         };
 
-        let allow_clippy_too_many_arguments = TypeBlades::new(algebra, self)
+        let allow_clippy_too_many_arguments = algebra
+            .type_blades(self)
             .nth(7)
             .is_some()
             .then(|| quote!(#[allow(clippy::too_many_arguments)]));
 
-        let assert_fields =
-            TypeFields::new(algebra, self).map(|(_, field)| quote!(#field: self.#field));
+        let assert_fields = algebra
+            .type_fields(self)
+            .map(|(_, field)| quote!(#field: self.#field));
 
         let d = format!(
             "Represents a {} in a {}-dimensional space",
@@ -849,8 +861,10 @@ impl Type {
             algebra.dim()
         );
 
-        let n = proc_macro2::Literal::usize_unsuffixed(TypeBlades::new(algebra, self).count());
-        let array_fields = &SortedTypeBlades::new(algebra, self)
+        let n = proc_macro2::Literal::usize_unsuffixed(algebra.type_blades(self).count());
+
+        let array_fields = algebra
+            .sorted_type_blades(self)
             .map(|b| &algebra.fields[b])
             .collect::<Vec<_>>();
 
@@ -1209,7 +1223,7 @@ impl Value {
     pub fn gen(ty: Type, algebra: &Algebra) -> Self {
         let mut rng = rand::thread_rng();
         let mut blades = vec![0f64; 2usize.pow(algebra.dim())];
-        for blade in TypeBlades::new(algebra, ty) {
+        for blade in algebra.type_blades(ty) {
             blades[blade] = rand::Rng::gen_range(&mut rng, -1.0..1.0);
         }
         Value { ty, blades }
