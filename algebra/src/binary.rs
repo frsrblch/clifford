@@ -757,13 +757,10 @@ impl BinaryTrait {
                 }
             }
             GradeFilter => {
-                if !rhs.contains(lhs) || lhs.is_float() || rhs.is_float() {
+                if !rhs.contains(lhs) {
                     return None;
                 }
-                let OverType::Type(lhs) = lhs else {
-                    return None;
-                };
-                let OverType::Type(rhs) = rhs else {
+                let (OverType::Type(lhs), OverType::Type(rhs)) = (lhs, rhs) else {
                     return None;
                 };
                 let (trait_ty, trait_fn) = self.ty_fn();
