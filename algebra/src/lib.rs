@@ -850,8 +850,8 @@ impl Type {
         );
 
         let n = proc_macro2::Literal::usize_unsuffixed(TypeBlades::new(algebra, self).count());
-        let array_fields = &TypeFields::new(algebra, self)
-            .map(|(_, f)| f)
+        let array_fields = &SortedTypeBlades::new(algebra, self)
+            .map(|b| &algebra.fields[b])
             .collect::<Vec<_>>();
 
         quote! {
