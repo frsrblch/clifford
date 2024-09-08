@@ -107,4 +107,4 @@
 
 pub use bytemuck::{Pod, Zeroable};
 pub use geo_traits::*;
-pub use macros::algebra;
+pub use macros::{algebra, lean_algebra};

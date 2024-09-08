@@ -40,6 +40,7 @@ pub struct Algebra {
     pub bases: Vec<Basis>,
     pub ordering: BladeOrdering,
     pub fields: Vec<Ident>,
+    pub lean: bool,
 }
 
 impl<B> FromIterator<B> for Algebra
@@ -76,6 +77,7 @@ mod algebra_new {
                 bases: bases.clone(),
                 fields: vec![],
                 ordering: BladeOrdering::new(dim),
+                lean: false,
             };
 
             let mut ordering = BladeOrdering::new(dim);
@@ -122,6 +124,7 @@ mod algebra_new {
                 bases,
                 fields,
                 ordering,
+                lean: false,
             }
         }
     }
@@ -385,6 +388,55 @@ impl Algebra {
         let binary_tests = OverType::iter_tuples(self)
             .cartesian_product(BinaryTrait::iter())
             .filter_map(|((lhs, rhs), op)| op.define_tests(lhs, rhs, self));
+
+        let mut tests = unary_tests.chain(binary_tests).peekable();
+
+        if tests.peek().is_some() {
+            let test_mod = quote! {
+                #[cfg(test)]
+                mod build_tests {
+                    use super::*;
+                    #(#tests)*
+                }
+            };
+            test_mod.to_tokens(&mut tokens);
+        }
+
+        tokens
+    }
+
+    pub fn define_lean(mut self) -> TokenStream {
+        self.lean = true;
+        let algebra = &self;
+        let mut tokens = quote! {
+            pub use clifford::*;
+            pub use std::ops::{Add, Sub, Mul, Div, AddAssign, SubAssign, MulAssign, DivAssign, Neg};
+        };
+
+        for ty in OverType::iter(algebra) {
+            ty.define(algebra).to_tokens(&mut tokens);
+        }
+
+        for i in UnaryTrait::iter()
+            .flat_map(|op| OverType::iter(algebra).map(move |ty| op.define(ty, algebra)))
+        {
+            i.to_tokens(&mut tokens);
+        }
+
+        for i in BinaryTrait::iter().flat_map(|op| {
+            OverType::iter_tuples(algebra).map(move |(lhs, rhs)| op.define(lhs, rhs, algebra))
+        }) {
+            i.to_tokens(&mut tokens);
+        }
+
+        let unary_tests = algebra
+            .types()
+            .cartesian_product(UnaryTrait::iter())
+            .filter_map(|(ty, op)| op.define_tests(ty, algebra));
+
+        let binary_tests = OverType::iter_tuples(algebra)
+            .cartesian_product(BinaryTrait::iter())
+            .filter_map(|((lhs, rhs), op)| op.define_tests(lhs, rhs, algebra));
 
         let mut tests = unary_tests.chain(binary_tests).peekable();
 
@@ -706,9 +758,9 @@ impl Type {
 
     pub fn define(self, algebra: &Algebra) -> TokenStream {
         let derive = if algebra.type_blades(self).nth(1).is_some() {
-            quote!(#[derive(Debug, Eq, Hash)])
+            quote!(#[derive(Eq, Hash)])
         } else {
-            quote!(#[derive(Debug, Eq, Ord, PartialOrd, Hash)])
+            quote!(#[derive(Eq, Ord, PartialOrd, Hash)])
         };
         let ident = self.ident();
         let fields = algebra.sorted_type_blades(self).map(|blade| {
@@ -743,6 +795,22 @@ impl Type {
                 }
             })
         });
+
+        let impl_debug = {
+            let fields = algebra.type_fields(self).map(|(_, field)| {
+                let field_ident_str = field.to_string();
+                quote! { .field(#field_ident_str, &self.#field)}
+            });
+            quote! {
+                impl<T: std::fmt::Debug, M> std::fmt::Debug for #ident<T, M> {
+                    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                        f.debug_struct(std::any::type_name::<Self>())
+                            #( #fields )*
+                            .finish()
+                    }
+                }
+            }
+        };
 
         let impl_default_any = {
             let ty_t = quote!(#ident<T, Any>);
@@ -816,7 +884,9 @@ impl Type {
             quote!()
         };
 
-        let const_basis = {
+        let const_basis = if algebra.lean {
+            quote!()
+        } else {
             let consts = algebra.type_fields(self).map(|(bf, f)| {
                 let m = if algebra.dot(bf, bf).is_zero() {
                     Mag::Any
@@ -877,6 +947,7 @@ impl Type {
                 pub marker: std::marker::PhantomData<M>,
             }
 
+            #impl_debug
             #impl_default_any
             #impl_default_unit
             #impl_copy_clone
@@ -1160,6 +1231,19 @@ impl OverType {
 
     pub fn is_float(self) -> bool {
         matches!(self, OverType::Float(_))
+    }
+
+    pub fn is_versor(self) -> bool {
+        matches!(self, OverType::Type(Type::Motor | Type::Flector))
+    }
+
+    /// Returns true if self is float, scalar, or pseudoscalar
+    pub fn is_scalarlike(self, algebra: &Algebra) -> bool {
+        match self {
+            OverType::Type(Type::Grade(grade)) => grade == 0 || grade == algebra.dim(),
+            OverType::Float(_) => true,
+            _ => false,
+        }
     }
 }
 

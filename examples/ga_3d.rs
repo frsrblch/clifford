@@ -22,7 +22,6 @@ fn vector_unit() {
     assert_eq!(u, v.unit());
 }
 
-
 #[test]
 fn vector_inv() {
     let v = Vector::new(3., 4., 0.);

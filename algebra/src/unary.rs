@@ -115,6 +115,12 @@ impl UnaryTrait {
         use MagParam::{A, B};
         use UnaryTrait::*;
 
+        if algebra.lean {
+            if matches!(self, Not | Sum | Product | Rand) {
+                return None;
+            }
+        }
+
         match self {
             Sqrt => match ty {
                 OverType::Type(Type::Grade(0 | 2))

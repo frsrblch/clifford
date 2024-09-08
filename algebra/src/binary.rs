@@ -31,7 +31,7 @@ pub enum BinaryTrait {
     From,
     PartialEq,
     // SubsetOf
-    GradeFilter,
+    GradeFilter, // TODO consider removing (look for actual useage)
 }
 
 impl ToTokens for BinaryTrait {
@@ -135,6 +135,34 @@ impl BinaryTrait {
 
         if lhs.is_float() {
             return None;
+        }
+
+        if algebra.lean {
+            match self {
+                Add | Sub | AddAssign | SubAssign if lhs != rhs => return None,
+                Mul | Div
+                    if lhs != rhs
+                        && !lhs.is_versor()
+                        && !rhs.is_versor()
+                        && !rhs.is_scalarlike(algebra) =>
+                {
+                    return None;
+                }
+                Dot | Wedge | Antidot | Antiwedge if lhs.is_versor() || rhs.is_versor() => {
+                    return None;
+                }
+                // Same as Mul
+                Geo => {
+                    return None;
+                }
+                // Remove antiproducts
+                Antigeo | Antisandwich => return None,
+                // Remove unused ops
+                Commutator | LeftContraction | RightContraction | GradeFilter => return None,
+                // Remove convenience ops
+                BitAnd | BitOr | BitXor | Shr | From => return None,
+                _ => {}
+            }
         }
 
         match self {
@@ -665,7 +693,6 @@ impl BinaryTrait {
                 }))
             }
             Sandwich | Antisandwich | Shr => {
-                // TODO rework with SubsetOf traits rather than GradeProduct
                 match Type::from(lhs) {
                     Type::Grade(0) => return None,
                     Type::Grade(g) if g == algebra.dim() => return None,
@@ -687,7 +714,7 @@ impl BinaryTrait {
 
                 let (trait_ty, trait_fn) = self.ty_fn();
                 let (rev_ty, rev_fn) = UnaryTrait::Reverse.ty_fn();
-                let (geo_ty, geo_fn) = BinaryTrait::Geo.ty_fn();
+                let (mul_ty, mul_fn) = BinaryTrait::Mul.ty_fn();
                 let t = FloatParam::T;
                 let [a, b, c, d] = [MagParam::A, MagParam::B, MagParam::C, MagParam::D];
 
@@ -698,17 +725,17 @@ impl BinaryTrait {
                 let out_t = out.with_type_param(t, b);
 
                 let rev = quote!(#rev_ty::#rev_fn(self));
-                let intermediate = quote!(#geo_ty::#geo_fn(self, rhs));
+                let intermediate = quote!(#mul_ty::#mul_fn(self, rhs));
                 let (bound, expr) = match (raw_out, out) {
                     (raw_out, out) if raw_out == out => (
-                        quote!(#int_t: #geo_ty<#lhs_t, Output = #raw_out_t>),
-                        quote!(#geo_ty::#geo_fn(#intermediate, #rev).assert()),
+                        quote!(#int_t: #mul_ty<#lhs_t, Output = #raw_out_t>),
+                        quote!(#mul_ty::#mul_fn(#intermediate, #rev).assert()),
                     ),
                     (_, out) => {
                         let fn_ident = out.fn_ident();
                         (
-                            quote!(#int_t: #geo_ty<#lhs_t, Output = #raw_out_t>),
-                            quote!(#geo_ty::#geo_fn(#intermediate, #rev).#fn_ident().assert()),
+                            quote!(#int_t: #mul_ty<#lhs_t, Output = #raw_out_t>),
+                            quote!(#mul_ty::#mul_fn(#intermediate, #rev).#fn_ident().assert()),
                         )
                     }
                 };
@@ -717,7 +744,7 @@ impl BinaryTrait {
                     impl<T, A, B, C, D> #trait_ty<#rhs_t> for #lhs_t
                     where
                         #lhs_t: #rev_ty<Output = #lhs_t>
-                            + #geo_ty<#rhs_t, Output = #int_t>
+                            + #mul_ty<#rhs_t, Output = #int_t>
                             + Copy,
                         #bound
                     {

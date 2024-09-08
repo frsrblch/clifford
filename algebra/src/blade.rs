@@ -1,3 +1,5 @@
+use crate::IsEven;
+
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Blade(pub u32);
 
@@ -150,10 +152,10 @@ impl Blade {
         }
 
         let output = self ^ rhs;
-        if count & 1 == 1 {
-            -output
-        } else {
+        if count.is_even() {
             output
+        } else {
+            -output
         }
     }
 
