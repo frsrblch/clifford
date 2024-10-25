@@ -220,7 +220,9 @@ impl Algebra {
     pub(crate) fn dot(&self, lhs: Blade, rhs: Blade) -> Blade {
         let output_grade = lhs.grade().abs_diff(rhs.grade());
         let product = self.geo(lhs, rhs);
-        product.filter(|p| p.grade() == output_grade)
+        product
+            .filter(|p| p.grade() == output_grade)
+            .filter(|_| !(lhs.is_scalar() ^ rhs.is_scalar()))
     }
 
     pub(crate) fn wedge(&self, lhs: Blade, rhs: Blade) -> Blade {

@@ -28,3 +28,10 @@ fn vector_inv() {
     let u = Vector::new(0.12, 0.16, 0.0);
     assert_eq!(u, v.inv());
 }
+
+#[test]
+fn motor_dot_product() {
+    let a = Motor::new(1.0, 2.0, 3.0, 4.0);
+    let b = Motor::new(3.0, 5.0, 7.0, 11.0);
+    assert_eq!(a.dot(b), -44.0 - 21.0 - 10.0 + 3.0);
+}

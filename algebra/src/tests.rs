@@ -74,8 +74,8 @@ fn algebra_dot() {
     let e12 = Blade(0b11);
     let z = Blade::zero();
 
-    assert_eq!(e1, algebra.dot(s, e1));
-    assert_eq!(e1, algebra.dot(e1, s));
+    assert_eq!(z, algebra.dot(s, e1));
+    assert_eq!(z, algebra.dot(e1, s));
     assert_eq!(s, algebra.dot(e1, e1));
     assert_eq!(z, algebra.dot(z, e1));
     assert_eq!(z, algebra.dot(e1, z));
@@ -356,4 +356,18 @@ fn right_contraction() {
     assert_eq!(Blade::zero(), a.right_con(x, xy));
     assert_eq!(-Blade(0b10), a.right_con(xy, x));
     assert_eq!(Blade(0), a.right_con(x, x));
+}
+
+#[test]
+fn blade_dot_products() {
+    let a = ga_3d();
+    let s = Blade(0);
+    let xy = Blade(0b11);
+    let yz = Blade(0b110);
+
+    assert_eq!(s, a.dot(s, s));
+    assert_eq!(-s, a.dot(xy, xy));
+    assert_eq!(Blade::zero(), a.dot(s, xy));
+    assert_eq!(Blade::zero(), a.dot(xy, s));
+    assert_eq!(Blade::zero(), a.dot(xy, yz));
 }

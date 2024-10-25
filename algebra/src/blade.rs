@@ -5,8 +5,12 @@ pub struct Blade(pub u32);
 
 impl std::fmt::Debug for Blade {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let sign = if self.is_positive() { '+' } else { '-' };
-        write!(f, "Blade({sign}{:06b})", self.unsigned().0)
+        if self.is_zero() {
+            write!(f, "Blade(zero)")
+        } else {
+            let sign = if self.is_positive() { '+' } else { '-' };
+            write!(f, "Blade({sign}{:06b})", self.unsigned().0)
+        }
     }
 }
 
