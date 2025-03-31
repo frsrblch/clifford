@@ -1307,10 +1307,10 @@ impl Value {
     }
 
     pub fn gen(ty: Type, algebra: &Algebra) -> Self {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut blades = vec![0f64; 2usize.pow(algebra.dim())];
         for blade in algebra.type_blades(ty) {
-            blades[blade] = rand::Rng::gen_range(&mut rng, -1.0..1.0);
+            blades[blade] = rand::Rng::random_range(&mut rng, -1.0..1.0);
         }
         Value { ty, blades }
     }

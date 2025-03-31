@@ -1,6 +1,6 @@
 [package]
 name = "clifford"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Fraser Balch <fraser.balch@gmail.com>"]
 keywords = ["clifford", "algebra", "geometric"]
@@ -15,4 +15,4 @@ geo_traits = { git = "https://github.com/frsrblch/geo_traits", version = "0.4" }
 bytemuck = "1"
 
 [dev-dependencies]
-rand = "0.8"
+rand = "0.9"

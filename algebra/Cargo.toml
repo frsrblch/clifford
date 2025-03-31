@@ -13,5 +13,5 @@ proc-macro2 = "1"
 quote = "1"
 syn = "2"
 itertools = "0.10"
-rand = "0.8"
+rand = "0.9"
 strum = { version = "0.24", features = ["derive"] }

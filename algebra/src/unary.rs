@@ -688,19 +688,19 @@ impl UnaryTrait {
                     }
                     let expr = match ty {
                         OverType::Type(Type::Motor) => {
-                            quote!(rand::Rng::gen::<#vec_t>(rng) * rand::Rng::gen::<#vec_t>(rng))
+                            quote!(rand::Rng::random::<#vec_t>(rng) * rand::Rng::random::<#vec_t>(rng))
                         }
                         OverType::Type(Type::Flector) => {
-                            quote!(rand::Rng::gen::<#vec_t>(rng) * rand::Rng::gen::<#vec_t>(rng) * rand::Rng::gen::<#vec_t>(rng))
+                            quote!(rand::Rng::random::<#vec_t>(rng) * rand::Rng::random::<#vec_t>(rng) * rand::Rng::random::<#vec_t>(rng))
                         }
                         _ => unreachable!(),
                     };
                     let (params, where_clause) = bounds.params_and_where_clause();
 
                     Some(Impl::Actual(quote! {
-                        impl #params rand::distributions::Distribution<#ty_t> for rand::distributions::Standard
+                        impl #params rand::distr::Distribution<#ty_t> for rand::distr::StandardUniform
                             #where_clause
-                                rand::distributions::Standard: rand::distributions::Distribution<#t> + rand::distributions::Distribution<#vec_t>,
+                                rand::distr::StandardUniform: rand::distr::Distribution<#t> + rand::distr::Distribution<#vec_t>,
                         {
                             #[inline]
                             fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) ->  #ty_t {
@@ -730,7 +730,7 @@ impl UnaryTrait {
                                 has_non_zero = true;
                                 bounds.insert(t.mul(t, t));
                                 bounds.insert(t.sub(t, t));
-                                quote!(#field: rand::Rng::gen_range(rng, -one..=one))
+                                quote!(#field: rand::Rng::random_range(rng, -one..=one))
                             }
                         })
                         .collect::<Vec<_>>();
@@ -746,10 +746,10 @@ impl UnaryTrait {
                     let (params, where_clause) = bounds.params_and_where_clause();
 
                     Some(Impl::Actual(quote! {
-                        impl #params rand::distributions::Distribution<#ty_t> for rand::distributions::Standard
+                        impl #params rand::distr::Distribution<#ty_t> for rand::distr::StandardUniform
                         #where_clause
-                            #t: clifford::Number + rand::distributions::uniform::SampleUniform,
-                            std::ops::RangeInclusive<#t>: rand::distributions::uniform::SampleRange<#t>,
+                            #t: clifford::Number + rand::distr::uniform::SampleUniform,
+                            std::ops::RangeInclusive<#t>: rand::distr::uniform::SampleRange<#t>,
                         {
                             #[inline]
                             fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) ->  #ty_t {
@@ -767,10 +767,10 @@ impl UnaryTrait {
                                 panic!("unable to find unit value for {}", std::any::type_name::<Self>());
                             }
                         }
-                        impl #params rand::distributions::Distribution<#unit_t> for rand::distributions::Standard
+                        impl #params rand::distr::Distribution<#unit_t> for rand::distr::StandardUniform
                         #where_clause
-                            #t: clifford::Number + rand::distributions::uniform::SampleUniform,
-                            std::ops::RangeInclusive<#t>: rand::distributions::uniform::SampleRange<#t>,
+                            #t: clifford::Number + rand::distr::uniform::SampleUniform,
+                            std::ops::RangeInclusive<#t>: rand::distr::uniform::SampleRange<#t>,
                         {
                             #[inline]
                             fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) ->  #unit_t {
@@ -829,10 +829,10 @@ impl UnaryTrait {
                 let s = &algebra.fields[Blade(0)];
                 let vec_t = Type::Grade(1).with_type_param(Float::F64, Mag::Any);
                 let value_expr = match ty {
-                    Type::Grade(_) => quote!(rng.gen::<#ty_t>()),
-                    Type::Motor => quote!(rng.gen::<#vec_t>() * rng.gen::<#vec_t>()),
+                    Type::Grade(_) => quote!(rng.random::<#ty_t>()),
+                    Type::Motor => quote!(rng.random::<#vec_t>() * rng.random::<#vec_t>()),
                     Type::Flector => {
-                        quote!(rng.gen::<#vec_t>() * rng.gen::<#vec_t>() * rng.gen::<#vec_t>())
+                        quote!(rng.random::<#vec_t>() * rng.random::<#vec_t>() * rng.random::<#vec_t>())
                     }
                 };
                 Some(quote! {
@@ -873,10 +873,12 @@ impl UnaryTrait {
                 let s = &algebra.fields[Blade(0)];
                 let vec_t_unit = Type::Grade(1).with_type_param(Float::F64, Mag::Unit);
                 let unit_value_expr = match ty {
-                    Type::Grade(_) => quote!(rng.gen::<#ty_t>()),
-                    Type::Motor => quote!(rng.gen::<#vec_t_unit>() * rng.gen::<#vec_t_unit>()),
+                    Type::Grade(_) => quote!(rng.random::<#ty_t>()),
+                    Type::Motor => {
+                        quote!(rng.random::<#vec_t_unit>() * rng.random::<#vec_t_unit>())
+                    }
                     Type::Flector => {
-                        quote!(rng.gen::<#vec_t_unit>() * rng.gen::<#vec_t_unit>() * rng.gen::<#vec_t_unit>())
+                        quote!(rng.random::<#vec_t_unit>() * rng.random::<#vec_t_unit>() * rng.random::<#vec_t_unit>())
                     }
                 };
                 Some(quote! {

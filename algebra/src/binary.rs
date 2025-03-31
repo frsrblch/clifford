@@ -918,13 +918,13 @@ impl BinaryTrait {
 
                     let lhs_fields = algebra.type_fields(lhs_inner).map(|(_, field)| {
                         quote! {
-                            #field: rand::Rng::gen_range(&mut rng, -1.0..1.0),
+                            #field: rand::Rng::random_range(&mut rng, -1.0..1.0),
                         }
                     });
 
                     let rhs_fields = algebra.type_fields(rhs_inner).map(|(_, field)| {
                         quote! {
-                            #field: rand::Rng::gen_range(&mut rng, -1.0..1.0),
+                            #field: rand::Rng::random_range(&mut rng, -1.0..1.0),
                         }
                     });
 
