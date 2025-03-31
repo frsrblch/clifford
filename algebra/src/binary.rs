@@ -933,7 +933,7 @@ impl BinaryTrait {
                     Some(quote! {
                         #[test]
                         fn #fn_ident() {
-                            let mut rng = rand::thread_rng();
+                            let mut rng = rand::rng();
                             for _ in 0..100 {
                                 let lhs_inner = #lhs_inner::<f64, Any> {
                                     #(#lhs_fields)*

@@ -115,10 +115,8 @@ impl UnaryTrait {
         use MagParam::{A, B};
         use UnaryTrait::*;
 
-        if algebra.lean {
-            if matches!(self, Not | Sum | Product | Rand) {
-                return None;
-            }
+        if algebra.lean && matches!(self, Not | Sum | Product | Rand) {
+            return None;
         }
 
         match self {
@@ -839,7 +837,7 @@ impl UnaryTrait {
                     #[test]
                     fn #fn_ident() {
                         use rand::Rng;
-                        let mut rng = rand::thread_rng();
+                        let mut rng = rand::rng();
                         for _ in 0..100 {
                             let value = #value_expr;
                             let inv = #inv_ty::#inv_fn(value);
@@ -884,8 +882,8 @@ impl UnaryTrait {
                 Some(quote! {
                     #[test]
                     fn #fn_ident() {
-                        use rand::{Rng, thread_rng};
-                        let mut rng = thread_rng();
+                        use rand::{Rng, rng};
+                        let mut rng = rng();
                         for _ in 0..100 {
                             let unit = #unit_value_expr;
                             let product = unit * #rev_ty::#rev_fn(unit);

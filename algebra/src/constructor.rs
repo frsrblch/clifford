@@ -219,7 +219,7 @@ impl<'a> Constructor<'a> {
     }
 }
 
-impl<'a> ToTokens for Constructor<'a> {
+impl ToTokens for Constructor<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let ty = self.ty;
 
