@@ -1,6 +1,6 @@
 [package]
 name = "clifford"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["Fraser Balch <fraser.balch@gmail.com>"]
 keywords = ["clifford", "algebra", "geometric"]
