@@ -11,7 +11,7 @@ members = ["macros", "algebra"]
 
 [dependencies]
 macros = { path = "./macros" }
-geo_traits = { git = "https://github.com/frsrblch/geo_traits", version = "0.5" }
+geo_traits = { git = "https://github.com/frsrblch/geo_traits", version = "0.6" }
 bytemuck = "1"
 
 [dev-dependencies]
