@@ -332,7 +332,7 @@ impl Algebra {
         TypeBlades::new(self, ty.into())
     }
 
-    pub(crate) fn type_fields(&self, ty: impl Into<Type>) -> TypeFields {
+    pub(crate) fn type_fields(&self, ty: impl Into<Type>) -> TypeFields<'_> {
         TypeFields::new(self, ty.into())
     }
 
