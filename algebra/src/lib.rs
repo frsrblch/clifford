@@ -361,10 +361,7 @@ impl Algebra {
     }
 
     pub fn define(&self) -> TokenStream {
-        let mut tokens = quote! {
-            pub use clifford::*;
-            pub use std::ops::{Add, Sub, Mul, Div, AddAssign, SubAssign, MulAssign, DivAssign, Neg};
-        };
+        let mut tokens = quote! {};
 
         for ty in OverType::iter(self) {
             ty.define(self).to_tokens(&mut tokens);
@@ -410,10 +407,7 @@ impl Algebra {
     pub fn define_lean(mut self) -> TokenStream {
         self.lean = true;
         let algebra = &self;
-        let mut tokens = quote! {
-            pub use clifford::*;
-            pub use std::ops::{Add, Sub, Mul, Div, AddAssign, SubAssign, MulAssign, DivAssign, Neg};
-        };
+        let mut tokens = quote! {};
 
         for ty in OverType::iter(algebra) {
             ty.define(algebra).to_tokens(&mut tokens);
@@ -815,7 +809,7 @@ impl Type {
         };
 
         let impl_default_any = {
-            let ty_t = quote!(#ident<T, Any>);
+            let ty_t = quote!(#ident<T, clifford::Any>);
             let fields = algebra.type_fields(self).map(|(_, field)| {
                 quote! { #field: Default::default() }
             });
@@ -831,7 +825,7 @@ impl Type {
             }
         };
         let impl_default_unit = if self == Type::Motor {
-            let ty_t = quote!(#ident<T, Unit>);
+            let ty_t = quote!(#ident<T, clifford::Unit>);
             let fields = algebra.type_fields(self).map(|(blade, field)| {
                 if blade == Blade::scalar() {
                     quote! { #field: <T as clifford::One>::one() }
@@ -944,7 +938,7 @@ impl Type {
             #[doc = #d]
             #[repr(C)]
             #derive
-            pub struct #ident<T = f64, M = Any> {
+            pub struct #ident<T = f64, M = clifford::Any> {
                 #(#fields)*
                 pub marker: std::marker::PhantomData<M>,
             }
@@ -954,10 +948,10 @@ impl Type {
             #impl_default_unit
             #impl_copy_clone
 
-            impl<T> #ident<T, Any> {
+            impl<T> #ident<T, clifford::Any> {
                 #[inline]
                 #allow_clippy_too_many_arguments
-                pub const fn new(#(#new_params),*) -> #ident<T, Any> {
+                pub const fn new(#(#new_params),*) -> #ident<T, clifford::Any> {
                     #ident {
                         #(#new_fields,)*
                         marker: std::marker::PhantomData,
@@ -1463,31 +1457,31 @@ fn impl_number_for_scalar(algebra: &Algebra) -> TokenStream {
     }
 
     quote! {
-        impl<T: Sqrt> Sqrt for Scalar<T> {
+        impl<T: clifford::Sqrt> clifford::Sqrt for Scalar<T> {
             type Output = Scalar<T::Output>;
             #[inline]
             fn sqrt(self) -> Self::Output {
-                self.map(Sqrt::sqrt)
+                self.map(clifford::Sqrt::sqrt)
             }
         }
 
-        impl<T: Ln> Ln for Scalar<T> {
+        impl<T: clifford::Ln> clifford::Ln for Scalar<T> {
             type Output = Scalar<T::Output>;
             #[inline]
             fn ln(self) -> Self::Output {
-                self.map(Ln::ln)
+                self.map(clifford::Ln::ln)
             }
         }
 
-        impl<T: Exp> Exp for Scalar<T> {
+        impl<T: clifford::Exp> clifford::Exp for Scalar<T> {
             type Output = Scalar<T::Output>;
             #[inline]
             fn exp(self) -> Self::Output {
-                self.map(Exp::exp)
+                self.map(clifford::Exp::exp)
             }
         }
 
-        impl<T: Trig> Trig for Scalar<T> {
+        impl<T: clifford::Trig> clifford::Trig for Scalar<T> {
             type Output = Scalar<T::Output>;
             #[inline]
             fn tau() -> Self {
@@ -1498,11 +1492,11 @@ fn impl_number_for_scalar(algebra: &Algebra) -> TokenStream {
             }
             #[inline]
             fn sin(self) -> Self::Output {
-                self.map(Trig::sin)
+                self.map(clifford::Trig::sin)
             }
             #[inline]
             fn cos(self) -> Self::Output {
-                self.map(Trig::cos)
+                self.map(clifford::Trig::cos)
             }
             #[inline]
             fn sin_cos(self) -> (Self::Output, Self::Output) {
@@ -1511,36 +1505,36 @@ fn impl_number_for_scalar(algebra: &Algebra) -> TokenStream {
             }
             #[inline]
             fn tan(self) -> Self::Output {
-                self.map(Trig::tan)
+                self.map(clifford::Trig::tan)
             }
             #[inline]
             fn sinh(self) -> Self::Output {
-                self.map(Trig::sinh)
+                self.map(clifford::Trig::sinh)
             }
             #[inline]
             fn cosh(self) -> Self::Output {
-                self.map(Trig::cosh)
+                self.map(clifford::Trig::cosh)
             }
             #[inline]
             fn tanh(self) -> Self::Output {
-                self.map(Trig::tanh)
+                self.map(clifford::Trig::tanh)
             }
         }
 
-        impl<T: InvTrig> InvTrig for Scalar<T> {
+        impl<T: clifford::InvTrig> clifford::InvTrig for Scalar<T> {
             type Output = Scalar<T::Output>;
 
             #[inline]
             fn asin(self) -> Self::Output {
-                self.map(InvTrig::asin)
+                self.map(clifford::InvTrig::asin)
             }
             #[inline]
             fn acos(self) -> Self::Output {
-                self.map(InvTrig::acos)
+                self.map(clifford::InvTrig::acos)
             }
             #[inline]
             fn atan(self) -> Self::Output {
-                self.map(InvTrig::atan)
+                self.map(clifford::InvTrig::atan)
             }
             #[inline]
             fn atan2(self, y: Self) -> Self::Output {
@@ -1548,19 +1542,19 @@ fn impl_number_for_scalar(algebra: &Algebra) -> TokenStream {
             }
             #[inline]
             fn asinh(self) -> Self::Output {
-                self.map(InvTrig::asinh)
+                self.map(clifford::InvTrig::asinh)
             }
             #[inline]
             fn acosh(self) -> Self::Output {
-                self.map(InvTrig::acosh)
+                self.map(clifford::InvTrig::acosh)
             }
             #[inline]
             fn atanh(self) -> Self::Output {
-                self.map(InvTrig::atanh)
+                self.map(clifford::InvTrig::atanh)
             }
         }
 
-        impl<T: FromF64> FromF64 for Scalar<T> {
+        impl<T: clifford::FromF64> clifford::FromF64 for Scalar<T> {
             #[inline]
             fn from_f64(value: f64) -> Self {
                 Scalar::new(T::from_f64(value))

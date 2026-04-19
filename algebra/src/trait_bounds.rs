@@ -349,8 +349,8 @@ pub enum Mag {
 impl ToTokens for Mag {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match self {
-            Mag::Any => quote!(Any),
-            Mag::Unit => quote!(Unit),
+            Mag::Any => quote!(clifford::Any),
+            Mag::Unit => quote!(clifford::Unit),
         }
         .to_tokens(tokens);
     }

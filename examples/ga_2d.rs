@@ -9,6 +9,7 @@ clifford::algebra! {
 
 #[test]
 fn motor_dot_product() {
+    use clifford::Dot;
     let a = Motor::new(1.0, 2.0);
     let b = Motor::new(3.0, 5.0);
     assert_eq!(a.dot(b), -7.0);

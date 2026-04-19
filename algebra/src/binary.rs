@@ -935,13 +935,13 @@ impl BinaryTrait {
                         fn #fn_ident() {
                             let mut rng = rand::rng();
                             for _ in 0..100 {
-                                let lhs_inner = #lhs_inner::<f64, Any> {
+                                let lhs_inner = #lhs_inner::<f64, clifford::Any> {
                                     #(#lhs_fields)*
                                     marker: std::marker::PhantomData,
                                 };
                                 let lhs = #unit_ty::#unit_fn(lhs_inner);
 
-                                let rhs_inner = #rhs_inner::<f64, Any> {
+                                let rhs_inner = #rhs_inner::<f64, clifford::Any> {
                                     #(#rhs_fields)*
                                     marker: std::marker::PhantomData,
                                 };

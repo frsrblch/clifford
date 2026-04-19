@@ -11,6 +11,7 @@ clifford::algebra! {
 
 #[test]
 fn unit_vector_dual() {
+    use clifford::{Unitize, LeftComplement};
     let u = Vector::new(1., 2., 3., 4.).unit();
     assert_eq!(
         Trivector::new(4f64, -3., 2., -1.) / f64::sqrt(14.0),

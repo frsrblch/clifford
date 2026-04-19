@@ -111,8 +111,9 @@ pub use geo_traits::{
     unit, wedge, Antidot, Antigeo, Antinorm, Antinorm2, Antireverse, Antisandwich, Antiwedge, Any,
     Cbrt, CliffordConjugate, Commutator, Dot, Dual, Exp, Exp10, FloatType, FromF64, Geo,
     GradeFilter, GradeInvolution, InvTrig, LeftComplement, LeftContraction, Ln, Log10,
-    MagnitudeAssert, MagnitudeType, Map, Norm, Norm2, Number, Numbers, Pow, Qrt, Reverse,
+    MagnitudeAssert, MagnitudeType, Map, Norm, Norm2, Number, Numbers, OneConst, Pow, Qrt, Reverse,
     RightComplement, RightContraction, Sandwich, Signed, Sqrt, Trig, Unit, Unitize, Wedge,
+    ZeroConst,
 };
 pub use macros::{algebra, lean_algebra};
-pub use num_traits::{One, Zero};
+pub use num_traits::{Inv, One, Zero};
