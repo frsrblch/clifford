@@ -1553,5 +1553,12 @@ fn impl_number_for_scalar(algebra: &Algebra) -> TokenStream {
                 self.map(clifford::InvTrig::atanh)
             }
         }
+
+        impl<T: clifford::FromF64> clifford::FromF64 for Scalar<T> {
+            #[inline]
+            fn from_f64(value: f64) -> Self {
+                Scalar::new(T::from_f64(value))
+            }
+        }
     }
 }
