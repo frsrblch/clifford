@@ -59,8 +59,8 @@ impl UnaryTrait {
             Reverse => quote!(geo_traits::Reverse),
             GradeInvolution => quote!(geo_traits::GradeInvolution),
             CliffordConjugate => quote!(geo_traits::CliffordConjugate),
-            Zero => quote!(num_traits::Zero),
-            One => quote!(num_traits::One),
+            Zero => quote!(clifford::Zero),
+            One => quote!(clifford::One),
             ZeroConst => quote!(geo_traits::ZeroConst),
             OneConst => quote!(geo_traits::OneConst),
             Sqrt => quote!(geo_traits::Sqrt),
@@ -844,7 +844,7 @@ impl UnaryTrait {
                             let product = value * inv;
                             let expected = #product {
                                 #s: 1f64,
-                                ..num_traits::Zero::zero()
+                                ..clifford::Zero::zero()
                             };
                             let diff = product - expected;
                             assert!(#norm2_ty::#norm2_fn(diff).#s.abs() < 1e-10);

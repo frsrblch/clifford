@@ -834,13 +834,13 @@ impl Type {
             let ty_t = quote!(#ident<T, Unit>);
             let fields = algebra.type_fields(self).map(|(blade, field)| {
                 if blade == Blade::scalar() {
-                    quote! { #field: <T as num_traits::One>::one() }
+                    quote! { #field: <T as clifford::One>::one() }
                 } else {
                     quote! { #field: T::default() }
                 }
             });
             quote! {
-                impl<T: Default + num_traits::One> Default for #ty_t {
+                impl<T: Default + clifford::One> Default for #ty_t {
                     fn default() -> Self {
                         #ident {
                             #(#fields,)*
