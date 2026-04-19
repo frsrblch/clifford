@@ -422,7 +422,7 @@ impl UnaryTrait {
 
                     let ty_t = ty.with_type_param(T, A);
 
-                    let geo_traits_one_ty = quote!(geo_traits::OneConst);
+                    let geo_traits_one_ty = quote!(clifford::OneConst);
                     let mut zero_bound = false;
                     let const_fields = algebra
                         .type_fields(ty)

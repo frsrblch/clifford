@@ -892,9 +892,9 @@ impl Type {
                 let const_ident = Ident::new(&f.to_string().to_uppercase(), f.span());
                 let fields = algebra.type_fields(self).map(|(bg, g)| {
                     if bf == bg {
-                        quote!(#g: <T as geo_traits::OneConst>::ONE)
+                        quote!(#g: <T as clifford::OneConst>::ONE)
                     } else {
-                        quote!(#g: <T as geo_traits::ZeroConst>::ZERO)
+                        quote!(#g: <T as clifford::ZeroConst>::ZERO)
                     }
                 });
                 quote! {
@@ -905,7 +905,7 @@ impl Type {
                 }
             });
             quote! {
-                impl<T> #ident<T> where T: geo_traits::OneConst + geo_traits::ZeroConst {
+                impl<T> #ident<T> where T: clifford::OneConst + clifford::ZeroConst {
                     #(#consts)*
                 }
             }
@@ -1369,7 +1369,7 @@ fn impl_numeric_traits_for_scalar() -> TokenStream {
 
         macro_rules! impl_float_const_for_scalar {
             ($($fn_:ident,)*) => {
-                impl<T> num_traits::FloatConst for Scalar<T> where T: num_traits::FloatConst {
+                impl<T> clifford::FloatConst for Scalar<T> where T: clifford::FloatConst {
                     $(
                         #[allow(non_snake_case)]
                         fn $fn_() -> Self {
