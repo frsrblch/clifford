@@ -11,8 +11,9 @@ members = ["macros", "algebra"]
 
 [dependencies]
 macros = { path = "./macros" }
-geo_traits = { git = "https://github.com/frsrblch/geo_traits", version = "0.6" }
 bytemuck = "1"
+geo_traits = { git = "https://github.com/frsrblch/geo_traits", version = "0.6" }
+num-traits = "0.2"
 
 [dev-dependencies]
 rand = "0.9"

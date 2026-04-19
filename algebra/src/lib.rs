@@ -834,13 +834,13 @@ impl Type {
             let ty_t = quote!(#ident<T, Unit>);
             let fields = algebra.type_fields(self).map(|(blade, field)| {
                 if blade == Blade::scalar() {
-                    quote! { #field: one() }
+                    quote! { #field: <T as num_traits::One>::one() }
                 } else {
-                    quote! { #field: Default::default() }
+                    quote! { #field: T::default() }
                 }
             });
             quote! {
-                impl<T: Default + One> Default for #ty_t {
+                impl<T: Default + num_traits::One> Default for #ty_t {
                     fn default() -> Self {
                         #ident {
                             #(#fields,)*
@@ -898,9 +898,9 @@ impl Type {
                 let const_ident = Ident::new(&f.to_string().to_uppercase(), f.span());
                 let fields = algebra.type_fields(self).map(|(bg, g)| {
                     if bf == bg {
-                        quote!(#g: <T as clifford::OneConst>::ONE)
+                        quote!(#g: <T as geo_traits::OneConst>::ONE)
                     } else {
-                        quote!(#g: <T as clifford::ZeroConst>::ZERO)
+                        quote!(#g: <T as geo_traits::ZeroConst>::ZERO)
                     }
                 });
                 quote! {
@@ -911,7 +911,7 @@ impl Type {
                 }
             });
             quote! {
-                impl<T> #ident<T> where T: clifford::OneConst + clifford::ZeroConst {
+                impl<T> #ident<T> where T: geo_traits::OneConst + geo_traits::ZeroConst {
                     #(#consts)*
                 }
             }
@@ -1375,7 +1375,7 @@ fn impl_numeric_traits_for_scalar() -> TokenStream {
 
         macro_rules! impl_float_const_for_scalar {
             ($($fn_:ident,)*) => {
-                impl<T> FloatConst for Scalar<T> where T: FloatConst {
+                impl<T> num_traits::FloatConst for Scalar<T> where T: num_traits::FloatConst {
                     $(
                         #[allow(non_snake_case)]
                         fn $fn_() -> Self {

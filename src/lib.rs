@@ -106,5 +106,13 @@
 //! [`Feature set`]: https://ga-developers.github.io/ga-benchmark-runs/2020.02.05/table_of_features
 
 pub use bytemuck::{Pod, Zeroable};
-pub use geo_traits::*;
+pub use geo_traits::{
+    add, antiwedge, div, dot, dual, geo, grade_filter, inv, mul, norm, norm2, rev, sandwich, sub,
+    unit, wedge, Antidot, Antigeo, Antinorm, Antinorm2, Antireverse, Antisandwich, Antiwedge, Any,
+    Cbrt, CliffordConjugate, Commutator, Dot, Dual, Exp, Exp10, FloatType, FromF64, Geo,
+    GradeFilter, GradeInvolution, InvTrig, LeftComplement, LeftContraction, Ln, Log10,
+    MagnitudeAssert, MagnitudeType, Map, Norm, Norm2, Number, Numbers, Pow, Qrt, Reverse,
+    RightComplement, RightContraction, Sandwich, Signed, Sqrt, Trig, Unit, Unitize, Wedge,
+};
 pub use macros::{algebra, lean_algebra};
+pub use num_traits::{One, Zero};

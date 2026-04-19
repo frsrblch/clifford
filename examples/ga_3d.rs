@@ -24,6 +24,7 @@ fn vector_unit() {
 
 #[test]
 fn vector_inv() {
+    use num_traits::Inv;
     let v = Vector::new(3., 4., 0.);
     let u = Vector::new(0.12, 0.16, 0.0);
     assert_eq!(u, v.inv());

@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, EnumIter, Hash)]
 pub enum BinaryTrait {
-    /// Ops
+    /// std::ops
     Add,
     Sub,
     Mul,
@@ -184,7 +184,7 @@ impl BinaryTrait {
 
                 let op = if self == Add { quote!(+) } else { quote!(-) };
                 let sign = if self == Add { quote!() } else { quote!(-) };
-                let zero = quote!(clifford::Zero::zero());
+                let zero = quote!(num_traits::Zero::zero());
                 let fields = algebra
                     .type_fields(output)
                     .map(|(blade, field)| {

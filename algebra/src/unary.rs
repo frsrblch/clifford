@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, EnumIter, Hash)]
 pub enum UnaryTrait {
-    /// Marker
+    /// std::marker
     Copy,
     /// std::ops
     Neg,
@@ -29,10 +29,10 @@ pub enum UnaryTrait {
     One,
     ZeroConst,
     OneConst,
-    /// Bytemuck,
+    /// bytemuck,
     Pod,
     Zeroable,
-    /// Rand
+    /// rand
     Rand,
 }
 
@@ -51,26 +51,26 @@ impl UnaryTrait {
             Not => quote!(std::ops::Not),
             Sum => quote!(std::iter::Sum),
             Product => quote!(std::iter::Product),
-            Dual => quote!(clifford::Dual),
-            LeftComp => quote!(clifford::LeftComplement),
-            RightComp => quote!(clifford::RightComplement),
-            Unitize => quote!(clifford::Unitize),
-            Inverse => quote!(clifford::Inv),
-            Reverse => quote!(clifford::Reverse),
-            GradeInvolution => quote!(clifford::GradeInvolution),
-            CliffordConjugate => quote!(clifford::CliffordConjugate),
-            Zero => quote!(clifford::Zero),
-            One => quote!(clifford::One),
-            ZeroConst => quote!(clifford::ZeroConst),
-            OneConst => quote!(clifford::OneConst),
-            Sqrt => quote!(clifford::Sqrt),
-            Norm2 => quote!(clifford::Norm2),
-            Norm => quote!(clifford::Norm),
-            Antinorm2 => quote!(clifford::Antinorm2),
-            Antinorm => quote!(clifford::Antinorm),
-            Pod => quote!(clifford::Pod),
-            Zeroable => quote!(clifford::Zeroable),
-            FloatType => quote!(clifford::FloatType),
+            Dual => quote!(geo_traits::Dual),
+            LeftComp => quote!(geo_traits::LeftComplement),
+            RightComp => quote!(geo_traits::RightComplement),
+            Unitize => quote!(geo_traits::Unitize),
+            Inverse => quote!(num_traits::Inv),
+            Reverse => quote!(geo_traits::Reverse),
+            GradeInvolution => quote!(geo_traits::GradeInvolution),
+            CliffordConjugate => quote!(geo_traits::CliffordConjugate),
+            Zero => quote!(num_traits::Zero),
+            One => quote!(num_traits::One),
+            ZeroConst => quote!(geo_traits::ZeroConst),
+            OneConst => quote!(geo_traits::OneConst),
+            Sqrt => quote!(geo_traits::Sqrt),
+            Norm2 => quote!(geo_traits::Norm2),
+            Norm => quote!(geo_traits::Norm),
+            Antinorm2 => quote!(geo_traits::Antinorm2),
+            Antinorm => quote!(geo_traits::Antinorm),
+            Pod => quote!(bytemuck::Pod),
+            Zeroable => quote!(bytemuck::Zeroable),
+            FloatType => quote!(geo_traits::FloatType),
             Rand => quote!(rand::distribution::Distribution),
         }
     }
@@ -422,7 +422,7 @@ impl UnaryTrait {
 
                     let ty_t = ty.with_type_param(T, A);
 
-                    let geo_traits_one_ty = quote!(clifford::OneConst);
+                    let geo_traits_one_ty = quote!(geo_traits::OneConst);
                     let mut zero_bound = false;
                     let const_fields = algebra
                         .type_fields(ty)
@@ -844,7 +844,7 @@ impl UnaryTrait {
                             let product = value * inv;
                             let expected = #product {
                                 #s: 1f64,
-                                ..clifford::Zero::zero()
+                                ..num_traits::Zero::zero()
                             };
                             let diff = product - expected;
                             assert!(#norm2_ty::#norm2_fn(diff).#s.abs() < 1e-10);
