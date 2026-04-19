@@ -116,4 +116,4 @@ pub use geo_traits::{
     ZeroConst,
 };
 pub use macros::{algebra, lean_algebra};
-pub use num_traits::{FloatConst, Inv, One, Zero};
+pub use num_traits::{one, zero, FloatConst, Inv, One, Zero};
